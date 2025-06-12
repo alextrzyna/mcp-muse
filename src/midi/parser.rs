@@ -8,6 +8,14 @@ pub struct MidiNote {
     pub channel: u8,
     pub start_time: Duration,
     pub duration: Duration,
+    pub instrument: Option<u8>,
+    pub reverb: Option<u8>,
+    pub chorus: Option<u8>,
+    pub volume: Option<u8>,
+    pub pan: Option<u8>,
+    pub balance: Option<u8>,
+    pub expression: Option<u8>,
+    pub sustain: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -74,6 +82,14 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
                                         channel: channel.as_int(),
                                         start_time: start_duration,
                                         duration,
+                                        instrument: None,
+                                        reverb: None,
+                                        chorus: None,
+                                        volume: None,
+                                        pan: None,
+                                        balance: None,
+                                        expression: None,
+                                        sustain: None,
                                     });
                                 }
                             }
@@ -91,6 +107,14 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
                                     channel: channel.as_int(),
                                     start_time: start_duration,
                                     duration,
+                                    instrument: None,
+                                    reverb: None,
+                                    chorus: None,
+                                    volume: None,
+                                    pan: None,
+                                    balance: None,
+                                    expression: None,
+                                    sustain: None,
                                 });
                             }
                         }

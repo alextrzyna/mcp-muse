@@ -11,7 +11,6 @@ serde_json = "1"
 midly = "0.5"
 rodio = "0.17"
 oxisynth = "0.1"
-# fluidlite = { version = "0.2", features = ["bindgen", "builtin"] }
 dirs = "5.0"
 anyhow = "1.0"
 base64 = "0.22"

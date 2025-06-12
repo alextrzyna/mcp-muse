@@ -1,7 +1,6 @@
 
-
-
 <div align="center">
+  
   <img src="assets/images/muse-logo.png" alt="MCP Muse Logo" width="400"/>
   
   <br/>
@@ -10,25 +9,48 @@
   [![Create Issue](https://img.shields.io/badge/Create-GitHub%20Issue-red?style=for-the-badge&logo=github)](https://github.com/alextrzyna/mcp-muse/issues/new)
   
   <br/>
-  <br/>
   
-  <h1>🎵 mcp-muse 🎵</h1>
+  <h2>🎮 Give your AI agent authentic 16-bit SNES gaming sound! 🎮</h2>
   
-  <p><strong>Give your AI agent a musical voice with MIDI playback capabilities.</strong></p>
+  <p><strong>Nostalgic retro voice for AI agents - transport users back to the golden age of video games</strong></p>
 </div>
 
-## Overview
+## 🎮 The Ultimate Retro Gaming Voice for AI Agents
 
-`mcp-muse` is a Rust-based MCP (Model Context Protocol) server that enables AI agents to play MIDI music. It provides a `play_midi` tool that accepts base64-encoded MIDI data and synthesizes audio in real-time using a built-in virtual synthesizer.
+**MCP-MUSE brings authentic 16-bit SNES sound to your AI conversations!**
+
+### 🏰 **Classic Gaming Vibes**
+- **Authentic SNES Sound** - FluidR3_GM captures that beloved 16-bit console tone
+- **Nostalgic Game Themes** - Zelda discoveries, Mario power-ups, Final Fantasy victories
+- **Interactive Feedback** - Question marks, celebrations, "aha!" moments, and alerts
+
+### 🎵 **Real-Time Musical Reactions**
+- **Victory Fanfares** - Celebrate user accomplishments with epic boss-defeat themes
+- **8-Bit Sound Effects** - Classic gaming feedback for every interaction
+- **Atmospheric Music** - Dungeon ambience, overworld melodies, menu music
+- **Instant Responses** - Musical reactions that enhance every conversation
+
+### ✨ **Magical Gaming Moments**
+- **Treasure Discovery** - That perfect Zelda-style "you found something!" chime
+- **Power-Up Effects** - Ascending arpeggios that sound like gaining abilities
+- **Coin Collect** - Satisfying metallic pings for small achievements
+- **Dramatic Stings** - Musical punctuation for important revelations
+
+### 🎮 **Easy Integration**
+- **Copy-Paste Examples** - Ready-to-use SNES-style compositions
+- **Simple JSON** - No complex music theory required
+- **Instant Nostalgia** - Every sound transports users to their childhood gaming memories
 
 ## Features
 
-- 🎼 **MIDI Playback**: Full MIDI file parsing and audio synthesis
-- 🔌 **MCP Integration**: Standards-compliant MCP server for AI agent integration
-- 🎹 **Virtual Synthesizer**: Built-in sine wave synthesis with ADSR envelope
-- ⚙️ **Easy Setup**: Automatic configuration for popular MCP hosts (Cursor, Claude)
-- 📊 **Real-time Audio**: Low-latency audio playback using Rodio
-- 🧪 **Well-Tested**: Comprehensive unit and integration test coverage
+- 🎮 **16-Bit SNES Sound**: Authentic retro gaming audio using FluidR3_GM SoundFont
+- 🏰 **Classic Game Themes**: Zelda, Mario, Final Fantasy, Metroid-style compositions  
+- ⚡ **Instant Feedback**: Musical reactions for celebrations, questions, discoveries
+- 🎵 **128 Gaming Instruments**: Square waves, chiptune leads, retro synths, classic drums
+- 🔌 **MCP Integration**: Easy AI agent integration with copy-paste examples
+- ⚙️ **Zero Setup**: Automatic retro SoundFont download and configuration
+- 🎧 **Nostalgic Audio**: Transport users back to the golden age of gaming
+- 🧪 **Ready to Play**: Pre-built SNES-style sound effects and musical phrases
 
 ## Installation
 
@@ -36,6 +58,7 @@
 
 - Rust 1.70+ (install via [rustup](https://rustup.rs/))
 - Audio output device (speakers/headphones)
+- ~150MB disk space for SoundFont
 
 ### From Source
 
@@ -44,8 +67,6 @@ git clone https://github.com/alextrzyna/mcp-muse.git
 cd mcp-muse
 cargo build --release
 ```
-
-The binary will be available at `target/release/mcp-muse`.
 
 ## Quick Start
 
@@ -56,93 +77,132 @@ For **Cursor**:
 ./target/release/mcp-muse --setup
 ```
 
-This automatically configures `~/.cursor/mcp.json` with the correct binary path.
+This automatically:
+- Downloads FluidR3_GM SoundFont (142MB) for authentic SNES sound
+- Configures `~/.cursor/mcp.json`
+- Sets up retro gaming audio synthesis
 
 ### 2. Restart Cursor
 
 Close and reopen Cursor for the MCP server to be available.
 
-### 3. Use in AI Chat
+### 3. Add Retro Gaming Magic
 
-Ask your AI agent to play music:
+Ask your AI agent to enhance conversations with nostalgic sound:
 
 ```
-"Can you play a simple melody for me?"
+"Play a celebration sound when I solve this problem"
+"Add a Zelda-style discovery sound for important moments"
+"Create some atmospheric dungeon music while I work"
+"Play a Mario power-up sound when I get the right answer"
 ```
 
-The agent will use the `play_midi` tool to generate and play MIDI music.
+## 🎮 Classic SNES Gaming Examples
 
-## Usage Examples
-
-### Basic MIDI Playback
-
-The agent can play MIDI from base64 data:
-
+### 🗡️ Zelda-Style Discovery (Treasure Found!)
 ```json
 {
-  "tool": "play_midi",
-  "arguments": {
-    "midi_data": "TVRoZAAAAAYAAAABAF9NVHJrAAAAGgAAAAD/UQMBhqAA/1kCAQD/WwIAAAAA/y8A"
-  }
+  "notes": [
+    {"note": 67, "velocity": 90, "start_time": 0, "duration": 0.3, "channel": 0, "instrument": 73},
+    {"note": 72, "velocity": 100, "start_time": 0.3, "duration": 0.3, "channel": 0, "instrument": 73},
+    {"note": 76, "velocity": 110, "start_time": 0.6, "duration": 0.3, "channel": 0, "instrument": 73},
+    {"note": 79, "velocity": 120, "start_time": 0.9, "duration": 0.6, "channel": 0, "instrument": 73, "reverb": 40}
+  ]
 }
 ```
 
-### Creative Scenarios
+**Perfect for**: Important discoveries, successful completions, "aha!" moments
 
-Ask your agent to:
-- "Compose a happy birthday melody"
-- "Play a chord progression in C major"
-- "Create a simple drum pattern"
-- "Play the opening of Für Elise"
-
-## Configuration
-
-### Manual MCP Configuration
-
-If you need to manually configure other MCP hosts, add this to your MCP configuration:
-
+### 🍄 Mario-Style Power-Up
 ```json
 {
-  "mcpServers": {
-    "mcp-muse": {
-      "command": "/path/to/mcp-muse",
-      "args": []
-    }
-  }
+  "notes": [
+    {"note": 64, "velocity": 100, "start_time": 0, "duration": 0.1, "channel": 0, "instrument": 80},
+    {"note": 67, "velocity": 100, "start_time": 0.1, "duration": 0.1, "channel": 0, "instrument": 80},
+    {"note": 72, "velocity": 100, "start_time": 0.2, "duration": 0.1, "channel": 0, "instrument": 80},
+    {"note": 76, "velocity": 100, "start_time": 0.3, "duration": 0.1, "channel": 0, "instrument": 80},
+    {"note": 79, "velocity": 110, "start_time": 0.4, "duration": 0.3, "channel": 0, "instrument": 80}
+  ]
 }
 ```
 
-### Logging
+**Perfect for**: Leveling up, gaining new abilities, getting correct answers
 
-Logs are written to:
-- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
-- **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
-- **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log`
+### 🌟 Final Fantasy Victory Fanfare
+```json
+{
+  "notes": [
+    {"note": 60, "velocity": 100, "start_time": 0, "duration": 0.5, "channel": 0, "instrument": 56},
+    {"note": 64, "velocity": 100, "start_time": 0.5, "duration": 0.5, "channel": 0, "instrument": 56},
+    {"note": 67, "velocity": 110, "start_time": 1, "duration": 0.5, "channel": 0, "instrument": 56},
+    {"note": 72, "velocity": 120, "start_time": 1.5, "duration": 1, "channel": 0, "instrument": 56},
+    {"note": 36, "velocity": 90, "start_time": 0, "duration": 0.25, "channel": 9},
+    {"note": 36, "velocity": 90, "start_time": 1, "duration": 0.25, "channel": 9}
+  ]
+}
+```
 
-## Technical Details
+**Perfect for**: Major accomplishments, completing difficult tasks, celebrating victories
 
-### Architecture
+## 🎮 Gaming Sound Parameters
 
-- **MCP Server**: JSON-RPC 2.0 over stdio transport
-- **MIDI Parser**: Uses `midly` crate for robust MIDI parsing
-- **Audio Engine**: `rodio` for cross-platform audio playback
-- **Synthesizer**: Custom sine wave synthesis with ADSR envelope
+### **Basic Sound Properties**
+- **`note`**: 60=C4 (middle C), 72=C5 (high), 48=C3 (low)
+- **`velocity`**: 80=normal, 100=strong, 127=maximum impact
+- **`start_time`**: 0=immediate, 0.5=half second delay
+- **`duration`**: 0.1=quick blip, 0.5=short, 1.0=sustained
 
-### Tool Schema
+### **Gaming Instruments**
+- **`channel`**: 0-8=melody instruments, 9=drums, 10-15=effects
+- **`instrument`**: 80=Square Lead (classic 8-bit), 73=Flute (Zelda), 56=Trumpet (fanfares)
+
+### **Retro Effects**
+- **`volume`**: 90-127=prominent effects, 60-80=background ambience  
+- **`reverb`**: 40=dungeon echo, 80=magical sparkle, 127=cathedral
+- **`chorus`**: 0=clean retro, 60=lush SNES sound, 100=dreamy
+
+## 🎮 Classic Gaming Instruments
+
+| Range | SNES Style | Gaming Use Cases |
+|-------|------------|------------------|
+| 0-7 | **Classic Piano** | 0=Soft melodies, menu music |
+| 56-63 | **Epic Brass** | 56=Victory fanfares, boss themes |
+| 68-79 | **Magical Winds** | 73=Zelda discoveries, fairy sounds |
+| 80-87 | **8-Bit Leads** | 80=Mario melodies, chiptune leads |
+| 88-95 | **Atmospheric** | 89=Dungeon ambience, mysterious pads |
+| 9 | **Sound Effects** | 9=Glockenspiel coins, magical chimes |
+| Channel 9 | **Retro Drums** | 36=Kick, 38=Snare, 42=Hi-hat |
+
+## Technical Architecture
+
+### **Retro Gaming Audio Engine**
+- **OxiSynth Synthesizer**: Pure Rust SoundFont synthesis for authentic SNES sound
+- **FluidR3_GM SoundFont**: 142MB retro gaming instrument collection
+- **16-Bit Gaming Audio**: Authentic console-quality synthesis and playback
+- **Real-Time Feedback**: Instant musical reactions for AI conversations
+
+### **Gaming-Focused Tools**
+- **`play_notes`**: Gaming-optimized JSON interface with copy-paste examples
+- **`play_midi`**: Classic MIDI support for authentic retro compositions
+
+### **Tool Schema**
 
 ```json
 {
-  "name": "play_midi",
-  "description": "Play MIDI music from base64-encoded MIDI data",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "midi_data": {
-        "type": "string",
-        "description": "Base64-encoded MIDI file data"
-      }
-    },
-    "required": ["midi_data"]
+  "name": "play_notes",
+  "description": "🎮 16-bit SNES gaming sound for AI conversation enhancement...",
+  "parameters": {
+    "notes": [{
+      "note": "🎵 Sound pitch (60=middle, 72=high, 48=low)",
+      "velocity": "🔊 Impact strength (80=normal, 127=maximum)",
+      "start_time": "⏰ When to play (0=immediate)",
+      "duration": "⏳ How long (0.1=blip, 0.5=short, 1.0=sustained)",
+      "channel": "🎮 Sound type (0-8=melody, 9=drums)",
+      "instrument": "🎹 Gaming instrument (80=8-bit, 73=magical, 56=fanfare)",
+      "volume": "🔊 How loud (90-127=effects, 60-80=background)",
+      "reverb": "🏰 Echo effect (40=dungeon, 80=magical)",
+      "chorus": "✨ SNES shimmer (60=classic, 100=dreamy)"
+    }]
   }
 }
 ```
@@ -150,21 +210,18 @@ Logs are written to:
 ## Development
 
 ### Running Tests
-
 ```bash
 cargo test
 ```
 
 ### Building
-
 ```bash
 cargo build --release
 ```
 
 ### Development Mode
-
 ```bash
-cargo run -- --setup  # Run setup
+cargo run -- --setup  # Setup with SoundFont download
 cargo run             # Run MCP server
 ```
 
@@ -173,58 +230,48 @@ cargo run             # Run MCP server
 ### Audio Issues
 
 **No sound output:**
-1. Check your system audio settings
-2. Ensure audio device is not muted
-3. Verify other applications can play audio
+1. Check system audio settings and volume
+2. Verify audio device is not muted
+3. Test other applications for audio
 4. Check logs for audio device errors
 
-**Distorted audio:**
-- Reduce MIDI velocity values
-- Check for audio buffer underruns in logs
+**Poor audio quality:**
+- Ensure FluidR3_GM.sf2 is properly downloaded (142MB)
+- Verify SoundFont integrity
+- Check available disk space
 
 ### MCP Connection Issues
 
 **Agent can't find tools:**
-1. Restart your MCP host (Cursor/Claude)
-2. Check MCP configuration file syntax
-3. Verify binary path in configuration
-4. Check logs for connection errors
+1. Restart your MCP host (Cursor)
+2. Verify MCP configuration file syntax
+3. Check binary path in configuration
+4. Examine logs for connection errors
 
-**Permission denied:**
+**Setup issues:**
 ```bash
-chmod +x target/release/mcp-muse
-```
+# Re-run setup to re-download SoundFont
+./target/release/mcp-muse --setup
 
-### Common Error Messages
-
-- `"Invalid MIDI data"`: Ensure MIDI data is properly base64-encoded
-- `"Audio device unavailable"`: Check system audio configuration
-- `"Failed to parse MIDI"`: MIDI file may be corrupted or unsupported
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-### Development Setup
-
-```bash
-git clone https://github.com/alextrzyna/mcp-muse.git
-cd mcp-muse
-cargo build
-cargo test
+# Check SoundFont exists and size
+ls -la assets/FluidR3_GM.sf2  # Should be ~142MB
 ```
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - See LICENSE file for details.
 
-## Acknowledgments
+## Contributing
 
-- Built with [Rust](https://www.rust-lang.org/)
-- MIDI parsing by [midly](https://github.com/kovaxis/midly)
-- Audio playback by [rodio](https://github.com/RustAudio/rodio)
-- MCP specification by [Anthropic](https://github.com/modelcontextprotocol)
+1. Fork the repository
+2. Create your feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+---
+
+<div align="center">
+  <h3>🎮 Give your AI the voice of classic SNES games! 🎮</h3>
+  <p>Transform conversations with nostalgic 16-bit sounds that instantly transport users back to the golden age of gaming.</p>
+</div>

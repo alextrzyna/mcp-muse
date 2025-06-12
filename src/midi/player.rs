@@ -41,6 +41,14 @@ impl MidiPlayer {
                 channel: simple_note.channel,
                 start_time: Duration::from_secs_f64(simple_note.start_time),
                 duration: Duration::from_secs_f64(simple_note.duration),
+                instrument: simple_note.instrument,
+                reverb: simple_note.reverb,
+                chorus: simple_note.chorus,
+                volume: simple_note.volume,
+                pan: simple_note.pan,
+                balance: simple_note.balance,
+                expression: simple_note.expression,
+                sustain: simple_note.sustain,
             }
         }).collect();
 
@@ -175,6 +183,14 @@ struct OxiSynthSource {
     buffer_pos: usize,
     playing_notes: std::collections::HashMap<(u32, u8), Duration>, // (start_sample, note) -> duration
     samples_generated: usize,
+    channel_instruments: std::collections::HashMap<u8, u8>, // channel -> current instrument
+    channel_reverb: std::collections::HashMap<u8, u8>, // channel -> current reverb depth
+    channel_chorus: std::collections::HashMap<u8, u8>, // channel -> current chorus depth
+    channel_volume: std::collections::HashMap<u8, u8>, // channel -> current volume
+    channel_pan: std::collections::HashMap<u8, u8>, // channel -> current pan position
+    channel_balance: std::collections::HashMap<u8, u8>, // channel -> current balance
+    channel_expression: std::collections::HashMap<u8, u8>, // channel -> current expression
+    channel_sustain: std::collections::HashMap<u8, u8>, // channel -> current sustain
 }
 
 impl OxiSynthSource {
@@ -218,6 +234,14 @@ impl OxiSynthSource {
             buffer_pos: buffer_size, // Start with empty buffer to trigger initial fill
             playing_notes: std::collections::HashMap::new(),
             samples_generated: 0,
+            channel_instruments: std::collections::HashMap::new(),
+            channel_reverb: std::collections::HashMap::new(),
+            channel_chorus: std::collections::HashMap::new(),
+            channel_volume: std::collections::HashMap::new(),
+            channel_pan: std::collections::HashMap::new(),
+            channel_balance: std::collections::HashMap::new(),
+            channel_expression: std::collections::HashMap::new(),
+            channel_sustain: std::collections::HashMap::new(),
         })
     }
 
@@ -234,14 +258,157 @@ impl OxiSynthSource {
             if note_start_sample >= current_sample_u32 && note_start_sample < chunk_end {
                 let key = (note_start_sample, note.note);
                 if !self.playing_notes.contains_key(&key) {
+                    // Handle drums (channel 9) specially
+                    if note.channel == 9 {
+                        // For drums, force bank select 128 (percussion) if not already set
+                        let current_bank = self.channel_instruments.get(&note.channel).copied();
+                        if current_bank != Some(128) {
+                            // Bank Select MSB (Controller 0) = 128 for drums
+                            let bank_select_msb = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 0, // Bank Select MSB
+                                value: 128, // Percussion Bank
+                            };
+                            let _ = self.synth.send_event(bank_select_msb);
+                            
+                            // Program Change to Standard Kit (program 0 in percussion bank)
+                            let program_change = MidiEvent::ProgramChange {
+                                channel: note.channel,
+                                program_id: 0, // Standard Kit in percussion bank
+                            };
+                            let _ = self.synth.send_event(program_change);
+                            self.channel_instruments.insert(note.channel, 128);
+                            tracing::debug!("Drum Setup: channel 9 -> percussion bank 128, standard kit");
+                        }
+                    } else {
+                        // Check if we need to send a program change for this channel
+                        if let Some(instrument) = note.instrument {
+                            let current_instrument = self.channel_instruments.get(&note.channel).copied();
+                            if current_instrument != Some(instrument) {
+                                let program_change = MidiEvent::ProgramChange {
+                                    channel: note.channel,
+                                    program_id: instrument,
+                                };
+                                let _ = self.synth.send_event(program_change);
+                                self.channel_instruments.insert(note.channel, instrument);
+                                tracing::debug!("Program Change: channel {} -> instrument {}", note.channel, instrument);
+                            }
+                        }
+                    }
+                    
+                    // Check if we need to send reverb control change for this channel
+                    if let Some(reverb) = note.reverb {
+                        let current_reverb = self.channel_reverb.get(&note.channel).copied();
+                        if current_reverb != Some(reverb) {
+                            let reverb_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 91, // Effects1Depth (Reverb)
+                                value: reverb,
+                            };
+                            let _ = self.synth.send_event(reverb_cc);
+                            self.channel_reverb.insert(note.channel, reverb);
+                            tracing::debug!("Reverb CC: channel {} -> depth {}", note.channel, reverb);
+                        }
+                    }
+                    
+                    // Check if we need to send chorus control change for this channel
+                    if let Some(chorus) = note.chorus {
+                        let current_chorus = self.channel_chorus.get(&note.channel).copied();
+                        if current_chorus != Some(chorus) {
+                            let chorus_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 93, // Effects3Depth (Chorus)
+                                value: chorus,
+                            };
+                            let _ = self.synth.send_event(chorus_cc);
+                            self.channel_chorus.insert(note.channel, chorus);
+                            tracing::debug!("Chorus CC: channel {} -> depth {}", note.channel, chorus);
+                        }
+                    }
+                    
+                    // Check if we need to send volume control change for this channel
+                    if let Some(volume) = note.volume {
+                        let current_volume = self.channel_volume.get(&note.channel).copied();
+                        if current_volume != Some(volume) {
+                            let volume_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 7, // Channel Volume
+                                value: volume,
+                            };
+                            let _ = self.synth.send_event(volume_cc);
+                            self.channel_volume.insert(note.channel, volume);
+                            tracing::debug!("Volume CC: channel {} -> volume {}", note.channel, volume);
+                        }
+                    }
+                    
+                    // Check if we need to send pan control change for this channel
+                    if let Some(pan) = note.pan {
+                        let current_pan = self.channel_pan.get(&note.channel).copied();
+                        if current_pan != Some(pan) {
+                            let pan_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 10, // Pan
+                                value: pan,
+                            };
+                            let _ = self.synth.send_event(pan_cc);
+                            self.channel_pan.insert(note.channel, pan);
+                            tracing::debug!("Pan CC: channel {} -> pan {}", note.channel, pan);
+                        }
+                    }
+                    
+                    // Check if we need to send balance control change for this channel
+                    if let Some(balance) = note.balance {
+                        let current_balance = self.channel_balance.get(&note.channel).copied();
+                        if current_balance != Some(balance) {
+                            let balance_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 8, // Balance
+                                value: balance,
+                            };
+                            let _ = self.synth.send_event(balance_cc);
+                            self.channel_balance.insert(note.channel, balance);
+                            tracing::debug!("Balance CC: channel {} -> balance {}", note.channel, balance);
+                        }
+                    }
+                    
+                    // Check if we need to send expression control change for this channel
+                    if let Some(expression) = note.expression {
+                        let current_expression = self.channel_expression.get(&note.channel).copied();
+                        if current_expression != Some(expression) {
+                            let expression_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 11, // Expression Controller
+                                value: expression,
+                            };
+                            let _ = self.synth.send_event(expression_cc);
+                            self.channel_expression.insert(note.channel, expression);
+                            tracing::debug!("Expression CC: channel {} -> expression {}", note.channel, expression);
+                        }
+                    }
+                    
+                    // Check if we need to send sustain control change for this channel
+                    if let Some(sustain) = note.sustain {
+                        let current_sustain = self.channel_sustain.get(&note.channel).copied();
+                        if current_sustain != Some(sustain) {
+                            let sustain_cc = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 64, // Damper Pedal (Sustain)
+                                value: sustain,
+                            };
+                            let _ = self.synth.send_event(sustain_cc);
+                            self.channel_sustain.insert(note.channel, sustain);
+                            tracing::debug!("Sustain CC: channel {} -> sustain {}", note.channel, sustain);
+                        }
+                    }
+                    
                     let midi_event = MidiEvent::NoteOn {
-                        channel: 0,
+                        channel: note.channel,
                         key: note.note,
                         vel: note.velocity,
                     };
                     let _ = self.synth.send_event(midi_event);
                     self.playing_notes.insert(key, note.duration);
-                    tracing::debug!("Note ON: {} at sample {}", note.note, note_start_sample);
+                    tracing::debug!("Note ON: {} channel {} at sample {}", note.note, note.channel, note_start_sample);
                 }
             }
             
@@ -250,11 +417,11 @@ impl OxiSynthSource {
                 let key = (note_start_sample, note.note);
                 if self.playing_notes.remove(&key).is_some() {
                     let midi_event = MidiEvent::NoteOff {
-                        channel: 0,
+                        channel: note.channel,
                         key: note.note,
                     };
                     let _ = self.synth.send_event(midi_event);
-                    tracing::debug!("Note OFF: {} at sample {}", note.note, note_end_sample);
+                    tracing::debug!("Note OFF: {} channel {} at sample {}", note.note, note.channel, note_end_sample);
                 }
             }
         }

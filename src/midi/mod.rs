@@ -20,6 +20,31 @@ pub struct SimpleNote {
     /// MIDI channel (0-15)
     #[serde(default)]
     pub channel: u8,
+    /// MIDI instrument (0-127, General MIDI program number, optional)
+    #[serde(default)]
+    pub instrument: Option<u8>,
+    /// Reverb depth (0-127, optional, where 127 = maximum reverb)
+    #[serde(default)]
+    pub reverb: Option<u8>,
+    /// Chorus depth (0-127, optional, where 127 = maximum chorus)
+    #[serde(default)]
+    pub chorus: Option<u8>,
+    /// Channel volume (0-127, optional, where 127 = maximum volume)
+    #[serde(default)]
+    pub volume: Option<u8>,
+    /// Pan position (0-127, optional, where 0 = left, 64 = center, 127 = right)
+    #[serde(default)]
+    pub pan: Option<u8>,
+    /// Balance control (0-127, optional, where 0 = left, 64 = center, 127 = right)
+    /// Note: Balance works better than pan for stereo samples
+    #[serde(default)]
+    pub balance: Option<u8>,
+    /// Expression control (0-127, optional, for dynamic expression)
+    #[serde(default)]
+    pub expression: Option<u8>,
+    /// Sustain pedal (0-127, optional, where 0 = off, 127 = full sustain)
+    #[serde(default)]
+    pub sustain: Option<u8>,
 }
 
 /// Simple sequence of notes
@@ -51,6 +76,14 @@ impl SimpleSequence {
             start_time,
             duration,
             channel: 0,
+            instrument: None,
+            reverb: None,
+            chorus: None,
+            volume: None,
+            pan: None,
+            balance: None,
+            expression: None,
+            sustain: None,
         });
         self
     }
@@ -63,6 +96,34 @@ impl SimpleSequence {
             start_time,
             duration,
             channel,
+            instrument: None,
+            reverb: None,
+            chorus: None,
+            volume: None,
+            pan: None,
+            balance: None,
+            expression: None,
+            sustain: None,
+        });
+        self
+    }
+
+    /// Add a note with channel and instrument
+    pub fn add_note_with_instrument(&mut self, note: u8, velocity: u8, start_time: f64, duration: f64, channel: u8, instrument: u8) -> &mut Self {
+        self.notes.push(SimpleNote {
+            note,
+            velocity,
+            start_time,
+            duration,
+            channel,
+            instrument: Some(instrument),
+            reverb: None,
+            chorus: None,
+            volume: None,
+            pan: None,
+            balance: None,
+            expression: None,
+            sustain: None,
         });
         self
     }

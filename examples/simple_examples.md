@@ -53,6 +53,19 @@ The `play_notes` tool provides a much simpler way to create music than dealing w
 }
 ```
 
+### Chord with Different Instruments (C Major)
+```json
+{
+  "notes": [
+    {"note": 60, "velocity": 80, "start_time": 0.0, "duration": 2.0, "channel": 0, "instrument": 0},
+    {"note": 64, "velocity": 80, "start_time": 0.0, "duration": 2.0, "channel": 1, "instrument": 40},
+    {"note": 67, "velocity": 80, "start_time": 0.0, "duration": 2.0, "channel": 2, "instrument": 73}
+  ]
+}
+```
+
+This plays a C major chord with Piano (0), Violin (40), and Flute (73).
+
 ## MIDI Note Numbers
 
 Common notes and their MIDI numbers:
@@ -77,7 +90,7 @@ Common notes and their MIDI numbers:
 - **start_time**: When to start the note (in seconds)
 - **duration**: How long to play the note (in seconds)
 - **channel**: MIDI channel (0-15, optional, defaults to 0)
-- **tempo**: Overall tempo in BPM (optional, defaults to 120)
+- **instrument**: MIDI instrument (0-127, General MIDI program number, optional)
 
 ## Comparison with Raw MIDI
 
