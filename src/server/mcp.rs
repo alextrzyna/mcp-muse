@@ -110,7 +110,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                         "items": {
                             "type": "object",
                             "properties": {
-                                                                "note": {
+                                "note": {
                                     "type": "integer",
                                     "description": "🎵 MIDI note number: 60=C4(middle C), 64=E4, 67=G4. Range: C0(12) to G9(127). Use chromatic scales: C=0,2,4,5,7,9,11 pattern",
                                     "minimum": 0,
@@ -185,7 +185,8 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                     "maximum": 127
                                 }
                             },
-                            "required": ["note", "velocity", "start_time", "duration"]
+                            "required": ["note", "velocity", "start_time", "duration"],
+                            "additionalProperties": false
                         }
                     },
                     "tempo": {
@@ -366,8 +367,7 @@ fn handle_play_midi_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse
                             "type": "text",
                             "text": "🎵 MIDI playback started successfully using OxiSynth synthesizer! The music is now playing."
                         }
-                    ],
-                    "isError": false
+                    ]
                 })),
                 error: None,
             }
@@ -447,8 +447,7 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
                             "type": "text",
                             "text": "🎵 Note sequence playback started successfully using OxiSynth synthesizer! The music is now playing."
                         }
-                    ],
-                    "isError": false
+                    ]
                 })),
                 error: None,
             }

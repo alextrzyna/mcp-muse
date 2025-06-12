@@ -4,7 +4,17 @@ pub mod player;
 pub use parser::*;
 pub use player::*;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Custom deserializer that converts null to None for optional fields
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let opt = Option::<T>::deserialize(deserializer)?;
+    Ok(opt)
+}
 
 /// Simple note representation that's easy to work with
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,29 +31,29 @@ pub struct SimpleNote {
     #[serde(default)]
     pub channel: u8,
     /// MIDI instrument (0-127, General MIDI program number, optional)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub instrument: Option<u8>,
     /// Reverb depth (0-127, optional, where 127 = maximum reverb)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub reverb: Option<u8>,
     /// Chorus depth (0-127, optional, where 127 = maximum chorus)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub chorus: Option<u8>,
     /// Channel volume (0-127, optional, where 127 = maximum volume)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub volume: Option<u8>,
     /// Pan position (0-127, optional, where 0 = left, 64 = center, 127 = right)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub pan: Option<u8>,
     /// Balance control (0-127, optional, where 0 = left, 64 = center, 127 = right)
     /// Note: Balance works better than pan for stereo samples
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub balance: Option<u8>,
     /// Expression control (0-127, optional, for dynamic expression)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub expression: Option<u8>,
     /// Sustain pedal (0-127, optional, where 0 = off, 127 = full sustain)
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_null_default")]
     pub sustain: Option<u8>,
 }
 
