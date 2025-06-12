@@ -1,7 +1,9 @@
 
 <div align="center">
   
-  <img src="assets/images/muse-logo.png" alt="MCP Muse Logo" width="400"/>
+  [![Watch MCP Muse Demo Video](https://img.youtube.com/vi/0ZWhG9d-SQA/maxresdefault.jpg)](https://youtu.be/0ZWhG9d-SQA)
+  
+  **🎬 Click the image above to watch the demo video! 🎬**
   
   <br/>
   <br/>
