@@ -18,8 +18,13 @@ pub struct ParsedMidi {
 }
 
 pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
+    tracing::info!("Parsing MIDI data ({} bytes)", midi_bytes.len());
+    
     let smf = Smf::parse(midi_bytes)
         .map_err(|e| format!("Failed to parse MIDI: {}", e))?;
+    
+    tracing::info!("MIDI header parsed: format={:?}, tracks={}, timing={:?}", 
+                   smf.header.format, smf.tracks.len(), smf.header.timing);
     
     let ticks_per_quarter = match smf.header.timing {
         midly::Timing::Metrical(tpq) => tpq.as_int(),
@@ -34,7 +39,8 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
     let mut note_on_events = std::collections::HashMap::new();
 
     // Process all tracks
-    for track in smf.tracks {
+    for (track_idx, track) in smf.tracks.iter().enumerate() {
+        tracing::info!("Processing track {} with {} events", track_idx, track.len());
         current_time = 0;
         for event in track {
             current_time += event.delta.as_int();
@@ -48,6 +54,8 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
                 TrackEventKind::Midi { channel, message } => {
                     match message {
                         MidiMessage::NoteOn { key, vel } => {
+                            tracing::debug!("Note On: channel={}, key={}, velocity={}, time={}", 
+                                          channel.as_int(), key.as_int(), vel.as_int(), current_time);
                             if vel.as_int() > 0 {
                                 // Store note on event
                                 note_on_events.insert(
@@ -71,6 +79,8 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
                             }
                         }
                         MidiMessage::NoteOff { key, vel: _ } => {
+                            tracing::debug!("Note Off: channel={}, key={}, time={}", 
+                                          channel.as_int(), key.as_int(), current_time);
                             if let Some((start_time, velocity)) = note_on_events.remove(&(channel.as_int(), key.as_int())) {
                                 let duration = ticks_to_duration(current_time - start_time, ticks_per_quarter, tempo);
                                 let start_duration = ticks_to_duration(start_time, ticks_per_quarter, tempo);
@@ -94,6 +104,12 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
 
     // Sort notes by start time
     notes.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+
+    tracing::info!("MIDI parsing complete: {} notes found", notes.len());
+    for (i, note) in notes.iter().take(5).enumerate() {
+        tracing::debug!("Note {}: key={}, vel={}, start={:?}, duration={:?}", 
+                       i, note.note, note.velocity, note.start_time, note.duration);
+    }
 
     Ok(ParsedMidi {
         notes,

@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use crate::midi::{parse_midi_data, MidiPlayer};
+use crate::midi::{parse_midi_data, MidiPlayer, SimpleSequence};
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -47,7 +47,7 @@ struct ToolCallParams {
     arguments: Value,
 }
 
-fn handle_initialize(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse {
+fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling initialize request");
     
     let server_capabilities = json!({
@@ -96,6 +96,58 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                     }
                 },
                 "required": ["midi_data"]
+            }
+        },
+        {
+            "name": "play_notes",
+            "description": "Play a simple sequence of musical notes (much easier than MIDI!)",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "array",
+                        "description": "Array of notes to play",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "note": {
+                                    "type": "integer",
+                                    "description": "MIDI note number (0-127, where 60 = middle C)",
+                                    "minimum": 0,
+                                    "maximum": 127
+                                },
+                                "velocity": {
+                                    "type": "integer", 
+                                    "description": "Note velocity/volume (0-127, where 127 = loudest)",
+                                    "minimum": 0,
+                                    "maximum": 127
+                                },
+                                "start_time": {
+                                    "type": "number",
+                                    "description": "Start time in seconds"
+                                },
+                                "duration": {
+                                    "type": "number", 
+                                    "description": "Duration in seconds"
+                                },
+                                "channel": {
+                                    "type": "integer",
+                                    "description": "MIDI channel (0-15, optional, defaults to 0)",
+                                    "minimum": 0,
+                                    "maximum": 15
+                                }
+                            },
+                            "required": ["note", "velocity", "start_time", "duration"]
+                        }
+                    },
+                    "tempo": {
+                        "type": "integer",
+                        "description": "Tempo in BPM (optional, defaults to 120)",
+                        "minimum": 60,
+                        "maximum": 200
+                    }
+                },
+                "required": ["notes"]
             }
         }
     ]);
@@ -173,6 +225,7 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
 
     match tool_params.name.as_str() {
         "play_midi" => handle_play_midi_tool(tool_params.arguments, id),
+        "play_notes" => handle_play_notes_tool(tool_params.arguments, id),
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -236,7 +289,7 @@ fn handle_play_midi_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse
         }
     };
 
-    // Create player and start playback
+    // Create MIDI player and start playback
     let player = match MidiPlayer::new() {
         Ok(p) => p,
         Err(e) => {
@@ -263,7 +316,7 @@ fn handle_play_midi_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse
                     "content": [
                         {
                             "type": "text",
-                            "text": "🎵 MIDI playback started successfully! The music is now playing."
+                            "text": "🎵 MIDI playback started successfully using OxiSynth synthesizer! The music is now playing."
                         }
                     ],
                     "isError": false
@@ -279,6 +332,87 @@ fn handle_play_midi_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse
                 error: Some(JsonRpcError {
                     code: -32603,
                     message: format!("Failed to play MIDI: {}", e),
+                    data: None,
+                }),
+            }
+        }
+    }
+}
+
+fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+    // Parse the simple sequence from JSON
+    let sequence: SimpleSequence = match serde_json::from_value(arguments) {
+        Ok(seq) => seq,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Failed to parse note sequence: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    if sequence.notes.is_empty() {
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: "Note sequence cannot be empty".to_string(),
+                data: None,
+            }),
+        };
+    }
+
+    // Create MIDI player and start playback
+    let player = match MidiPlayer::new() {
+        Ok(p) => p,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Failed to create MIDI player: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    match player.play_simple(sequence) {
+        Ok(()) => {
+            tracing::info!("Successfully started simple note sequence playback");
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: Some(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "🎵 Note sequence playback started successfully using OxiSynth synthesizer! The music is now playing."
+                        }
+                    ],
+                    "isError": false
+                })),
+                error: None,
+            }
+        }
+        Err(e) => {
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Failed to play note sequence: {}", e),
                     data: None,
                 }),
             }

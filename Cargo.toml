@@ -10,9 +10,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 midly = "0.5"
 rodio = "0.17"
+oxisynth = "0.1"
+# fluidlite = { version = "0.2", features = ["bindgen", "builtin"] }
 dirs = "5.0"
 anyhow = "1.0"
 base64 = "0.22"
+reqwest = { version = "0.11", features = ["blocking"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = "0.3"
+zip = "0.6"

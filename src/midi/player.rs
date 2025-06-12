@@ -1,7 +1,12 @@
 use crate::midi::parser::{ParsedMidi, MidiNote};
+use crate::midi::{SimpleSequence, SimpleNote};
 use rodio::{OutputStream, Sink, Source};
+use oxisynth::{SoundFont, Synth, MidiEvent};
 use std::time::Duration;
-use std::f32::consts::PI;
+
+use std::path::PathBuf;
+use std::env;
+use std::fs;
 
 pub struct MidiPlayer {
     _stream: OutputStream,
@@ -19,14 +24,99 @@ impl MidiPlayer {
         Ok(MidiPlayer { _stream, sink })
     }
 
-    pub fn play_midi(&self, parsed_midi: ParsedMidi) -> Result<(), String> {
-        tracing::info!("Playing MIDI with {} notes", parsed_midi.notes.len());
-
-        // Create a composite source by mixing all notes
-        let mixed_source = MidiSource::new(parsed_midi.notes);
+    /// Play a simple sequence of notes (much easier to use!)
+    pub fn play_simple(&self, sequence: SimpleSequence) -> Result<(), String> {
+        tracing::info!("Playing simple sequence with {} notes", sequence.notes.len());
         
-        self.sink.append(mixed_source);
+        if sequence.notes.is_empty() {
+            tracing::warn!("No notes to play - sequence is empty");
+            return Ok(());
+        }
+
+        // Convert SimpleNote to MidiNote
+        let notes: Vec<MidiNote> = sequence.notes.into_iter().map(|simple_note| {
+            MidiNote {
+                note: simple_note.note,
+                velocity: simple_note.velocity,
+                channel: simple_note.channel,
+                start_time: Duration::from_secs_f64(simple_note.start_time),
+                duration: Duration::from_secs_f64(simple_note.duration),
+            }
+        }).collect();
+
+        // Calculate total playback time
+        let total_time = notes.iter()
+            .map(|note| note.start_time + note.duration)
+            .max()
+            .unwrap_or(Duration::from_secs(1));
+
+        // Log first few notes for debugging
+        for (i, note) in notes.iter().take(3).enumerate() {
+            tracing::info!("Note {}: MIDI note {}, velocity {}, start={:.2}s, duration={:.2}s", 
+                          i, note.note, note.velocity, note.start_time.as_secs_f64(), note.duration.as_secs_f64());
+        }
+
+        tracing::info!("Total playback time: {:.2}s", total_time.as_secs_f64());
+
+        // Create OxiSynth-based source
+        let synth_source = OxiSynthSource::new(notes)
+            .map_err(|e| format!("Failed to create synthesizer source: {}", e))?;
+        
+        tracing::info!("Created OxiSynth audio source, starting playback");
+        self.sink.append(synth_source);
         self.sink.play();
+        
+        // Wait for the audio to finish playing
+        // Add a small buffer to ensure we don't cut off early
+        let wait_time = total_time + Duration::from_millis(500);
+        tracing::info!("Waiting {:.2}s for playback to complete...", wait_time.as_secs_f64());
+        
+        std::thread::sleep(wait_time);
+        
+        tracing::info!("OxiSynth playback completed");
+
+        Ok(())
+    }
+
+    /// Play parsed MIDI data (legacy method)
+    pub fn play_midi(&self, parsed_midi: ParsedMidi) -> Result<(), String> {
+        tracing::info!("Playing MIDI with {} notes using OxiSynth", parsed_midi.notes.len());
+        
+        if parsed_midi.notes.is_empty() {
+            tracing::warn!("No notes to play - MIDI file contains no note events");
+            return Ok(());
+        }
+
+        // Calculate total playback time
+        let total_time = parsed_midi.notes.iter()
+            .map(|note| note.start_time + note.duration)
+            .max()
+            .unwrap_or(Duration::from_secs(1));
+
+        // Log first few notes for debugging
+        for (i, note) in parsed_midi.notes.iter().take(3).enumerate() {
+            tracing::info!("Note {}: MIDI note {}, velocity {}, start={:?}, duration={:?}", 
+                          i, note.note, note.velocity, note.start_time, note.duration);
+        }
+
+        tracing::info!("Total playback time: {:.2}s", total_time.as_secs_f64());
+
+        // Create OxiSynth-based source
+        let synth_source = OxiSynthSource::new(parsed_midi.notes)
+            .map_err(|e| format!("Failed to create synthesizer source: {}", e))?;
+        
+        tracing::info!("Created OxiSynth audio source, starting playback");
+        self.sink.append(synth_source);
+        self.sink.play();
+        
+        // Wait for the audio to finish playing
+        // Add a small buffer to ensure we don't cut off early
+        let wait_time = total_time + Duration::from_millis(500);
+        tracing::info!("Waiting {:.2}s for playback to complete...", wait_time.as_secs_f64());
+        
+        std::thread::sleep(wait_time);
+        
+        tracing::info!("OxiSynth playback completed");
 
         Ok(())
     }
@@ -40,111 +130,196 @@ impl MidiPlayer {
     }
 }
 
-// Custom source that generates audio for MIDI notes
-struct MidiSource {
+fn find_soundfont() -> Result<PathBuf, String> {
+    // Try to find the SoundFont in various locations
+    let exe_path = env::current_exe().map_err(|e| format!("Cannot find executable: {}", e))?;
+    let exe_dir = exe_path.parent().ok_or("Cannot find executable directory")?;
+    
+    let possible_paths = vec![
+        exe_dir.join("../assets/FluidR3_GM.sf2"),      // Development
+        exe_dir.join("assets/FluidR3_GM.sf2"),         // Installed
+        PathBuf::from("assets/FluidR3_GM.sf2"),        // Current directory
+        PathBuf::from("FluidR3_GM.sf2"),               // Current directory
+        // Also check target/debug/assets for development
+        PathBuf::from("target/debug/assets/FluidR3_GM.sf2"),
+        PathBuf::from("target/release/assets/FluidR3_GM.sf2"),
+        // Fallback to old soundfont if it exists
+        exe_dir.join("../assets/TimGM6mb.sf2"),      // Development (old)
+        exe_dir.join("assets/TimGM6mb.sf2"),         // Installed (old)
+        PathBuf::from("assets/TimGM6mb.sf2"),        // Current directory (old)
+        PathBuf::from("TimGM6mb.sf2"),               // Current directory (old)
+        PathBuf::from("target/debug/assets/TimGM6mb.sf2"),   // Development (old)
+        PathBuf::from("target/release/assets/TimGM6mb.sf2"), // Release (old)
+    ];
+    
+    for path in possible_paths {
+        if path.exists() {
+            tracing::info!("Found SoundFont at: {:?}", path);
+            return Ok(path);
+        }
+    }
+    
+    Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
+}
+
+// OxiSynth-based audio source
+struct OxiSynthSource {
+    synth: Synth,
     notes: Vec<MidiNote>,
     sample_rate: u32,
     current_sample: usize,
     total_duration: Duration,
+    left_buffer: Vec<f32>,
+    right_buffer: Vec<f32>,
+    buffer_size: usize,
+    buffer_pos: usize,
+    playing_notes: std::collections::HashMap<(u32, u8), Duration>, // (start_sample, note) -> duration
+    samples_generated: usize,
 }
 
-impl MidiSource {
-    fn new(notes: Vec<MidiNote>) -> Self {
+impl OxiSynthSource {
+    fn new(notes: Vec<MidiNote>) -> Result<Self, String> {
         let sample_rate = 44100;
         
-        // Calculate total duration needed
+        // Find and load the SoundFont
+        let soundfont_path = find_soundfont()?;
+        let mut soundfont_file = fs::File::open(&soundfont_path)
+            .map_err(|e| format!("Failed to open SoundFont file: {}", e))?;
+        
+        let soundfont = SoundFont::load(&mut soundfont_file)
+            .map_err(|e| format!("Failed to parse SoundFont: {}", e))?;
+        
+        // Create synthesizer
+        let mut synth = Synth::default();
+        synth.add_font(soundfont, true);
+        
+        tracing::info!("Loaded SoundFont from: {:?}", soundfont_path);
+        
+        // Calculate total duration
         let total_duration = notes.iter()
             .map(|note| note.start_time + note.duration)
             .max()
-            .unwrap_or(Duration::from_secs(1));
+            .unwrap_or(Duration::from_secs(1))
+            .max(Duration::from_secs(5)); // Minimum 5 seconds to hear the audio
 
-        Self {
+        let buffer_size = 1024; // Process audio in chunks
+        
+        tracing::info!("OxiSynth source created: {} notes, total duration: {:?}", notes.len(), total_duration);
+
+        Ok(Self {
+            synth,
             notes,
             sample_rate,
             current_sample: 0,
             total_duration,
-        }
+            left_buffer: vec![0.0; buffer_size],
+            right_buffer: vec![0.0; buffer_size],
+            buffer_size,
+            buffer_pos: buffer_size, // Start with empty buffer to trigger initial fill
+            playing_notes: std::collections::HashMap::new(),
+            samples_generated: 0,
+        })
     }
 
-    fn note_to_frequency(note: u8) -> f32 {
-        // MIDI note 69 (A4) = 440 Hz
-        // Each semitone is a factor of 2^(1/12)
-        440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
-    }
-
-    fn generate_sample(&self, time: Duration) -> f32 {
-        let mut sample = 0.0;
-        let mut active_notes = 0;
-
+    fn process_audio_chunk(&mut self) {
+        // Handle note on/off events for this chunk
         for note in &self.notes {
-            // Check if this note should be playing at this time
-            if time >= note.start_time && time < note.start_time + note.duration {
-                let note_time = time - note.start_time;
-                let frequency = Self::note_to_frequency(note.note);
-                let velocity_factor = (note.velocity as f32) / 127.0;
-                
-                // Generate a simple sine wave with envelope
-                let phase = 2.0 * PI * frequency * note_time.as_secs_f32();
-                let envelope = Self::adsr_envelope(note_time, note.duration);
-                
-                sample += (phase.sin() * velocity_factor * envelope * 0.3).max(-1.0).min(1.0);
-                active_notes += 1;
+            let note_start_sample = (note.start_time.as_secs_f32() * self.sample_rate as f32) as u32;
+            let note_end_sample = ((note.start_time + note.duration).as_secs_f32() * self.sample_rate as f32) as u32;
+            
+            let current_sample_u32 = self.current_sample as u32;
+            let chunk_end = current_sample_u32 + self.buffer_size as u32;
+            
+            // Check if we should start this note in this chunk
+            if note_start_sample >= current_sample_u32 && note_start_sample < chunk_end {
+                let key = (note_start_sample, note.note);
+                if !self.playing_notes.contains_key(&key) {
+                    let midi_event = MidiEvent::NoteOn {
+                        channel: 0,
+                        key: note.note,
+                        vel: note.velocity,
+                    };
+                    let _ = self.synth.send_event(midi_event);
+                    self.playing_notes.insert(key, note.duration);
+                    tracing::debug!("Note ON: {} at sample {}", note.note, note_start_sample);
+                }
+            }
+            
+            // Check if we should end this note in this chunk
+            if note_end_sample >= current_sample_u32 && note_end_sample < chunk_end {
+                let key = (note_start_sample, note.note);
+                if self.playing_notes.remove(&key).is_some() {
+                    let midi_event = MidiEvent::NoteOff {
+                        channel: 0,
+                        key: note.note,
+                    };
+                    let _ = self.synth.send_event(midi_event);
+                    tracing::debug!("Note OFF: {} at sample {}", note.note, note_end_sample);
+                }
             }
         }
-
-        // Normalize by number of active notes to prevent clipping
-        if active_notes > 0 {
-            sample / (active_notes as f32).sqrt()
-        } else {
-            0.0
-        }
-    }
-
-    fn adsr_envelope(note_time: Duration, total_duration: Duration) -> f32 {
-        let t = note_time.as_secs_f32();
-        let total = total_duration.as_secs_f32();
         
-        // Simple envelope: quick attack, sustain, quick release
-        let attack_time = 0.01; // 10ms attack
-        let release_time = 0.05; // 50ms release
+        // Clear buffers
+        self.left_buffer.fill(0.0);
+        self.right_buffer.fill(0.0);
         
-        if t < attack_time {
-            // Attack phase
-            t / attack_time
-        } else if t < total - release_time {
-            // Sustain phase
-            1.0
-        } else {
-            // Release phase
-            (total - t) / release_time
+        // Render audio - OxiSynth expects stereo output
+        self.synth.write((&mut self.left_buffer[..], &mut self.right_buffer[..]));
+        
+        // Log some debug info about the audio levels
+        let max_left = self.left_buffer.iter().map(|x| x.abs()).fold(0.0, f32::max);
+        let max_right = self.right_buffer.iter().map(|x| x.abs()).fold(0.0, f32::max);
+        
+        if max_left > 0.001 || max_right > 0.001 {
+            tracing::debug!("Audio chunk: max_left={:.4}, max_right={:.4}, samples={}", 
+                           max_left, max_right, self.buffer_size);
         }
+        
+        // Reset buffer position
+        self.buffer_pos = 0;
+        self.samples_generated += self.buffer_size;
     }
 }
 
-impl Iterator for MidiSource {
+impl Iterator for OxiSynthSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let time = Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+        let current_time = Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
         
-        if time > self.total_duration {
+        if current_time > self.total_duration {
+            tracing::info!("Audio playback finished after {} samples ({:.2}s)", 
+                          self.samples_generated, current_time.as_secs_f32());
             return None;
         }
 
-        let sample = self.generate_sample(time);
+        // If we've consumed the current buffer, process the next chunk
+        if self.buffer_pos >= self.buffer_size {
+            self.process_audio_chunk();
+        }
+
+        // Get the next sample (mix left and right channels for mono output)
+        let sample = if self.buffer_pos < self.left_buffer.len() {
+            // Amplify the audio by 20x to make it much louder
+            (self.left_buffer[self.buffer_pos] + self.right_buffer[self.buffer_pos]) * 10.0
+        } else {
+            0.0
+        };
+
+        self.buffer_pos += 1;
         self.current_sample += 1;
         
         Some(sample)
     }
 }
 
-impl Source for MidiSource {
+impl Source for OxiSynthSource {
     fn current_frame_len(&self) -> Option<usize> {
         None
     }
 
     fn channels(&self) -> u16 {
-        1 // Mono
+        1 // Mono output (we're mixing L+R)
     }
 
     fn sample_rate(&self) -> u32 {
@@ -161,113 +336,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_note_to_frequency() {
-        // Test some known MIDI note frequencies
-        assert!((MidiSource::note_to_frequency(69) - 440.0).abs() < 0.01); // A4 = 440 Hz
-        assert!((MidiSource::note_to_frequency(60) - 261.63).abs() < 0.01); // C4 ≈ 261.63 Hz
-        assert!((MidiSource::note_to_frequency(81) - 880.0).abs() < 0.01); // A5 = 880 Hz
+    fn test_midi_player_creation() {
+        // This test might fail in CI environments without audio
+        if let Ok(_player) = MidiPlayer::new() {
+            // Success
+        }
     }
-
-    #[test]
-    fn test_adsr_envelope() {
-        let duration = Duration::from_secs(1);
-        
-        // Test attack phase (first 10ms)
-        let attack_val = MidiSource::adsr_envelope(Duration::from_millis(5), duration);
-        assert!(attack_val > 0.0 && attack_val < 1.0, "Should be in attack phase");
-        
-        // Test sustain phase (middle)
-        let sustain_val = MidiSource::adsr_envelope(Duration::from_millis(500), duration);
-        assert!((sustain_val - 1.0).abs() < 0.01, "Should be at full volume in sustain");
-        
-        // Test release phase (last 50ms)
-        let release_val = MidiSource::adsr_envelope(Duration::from_millis(970), duration);
-        assert!(release_val > 0.0 && release_val < 1.0, "Should be in release phase");
-    }
-
-    #[test]
-    fn test_midi_source_creation() {
-        let notes = vec![
-            MidiNote {
-                note: 60,
-                velocity: 100,
-                channel: 0,
-                start_time: Duration::from_secs(0),
-                duration: Duration::from_secs(1),
-            }
-        ];
-        
-        let source = MidiSource::new(notes);
-        assert_eq!(source.sample_rate, 44100);
-        assert_eq!(source.notes.len(), 1);
-        assert_eq!(source.total_duration, Duration::from_secs(1));
-    }
-
-    #[test]
-    fn test_generate_sample_silence() {
-        let notes = vec![
-            MidiNote {
-                note: 60,
-                velocity: 100,
-                channel: 0,
-                start_time: Duration::from_secs(1), // Note starts at 1 second
-                duration: Duration::from_secs(1),
-            }
-        ];
-        
-        let source = MidiSource::new(notes);
-        
-        // At time 0, no note should be playing
-        let sample = source.generate_sample(Duration::from_secs(0));
-        assert_eq!(sample, 0.0, "Should be silent when no notes are playing");
-    }
-
-    #[test]
-    fn test_generate_sample_with_note() {
-        let notes = vec![
-            MidiNote {
-                note: 60,
-                velocity: 127, // Max velocity
-                channel: 0,
-                start_time: Duration::from_secs(0),
-                duration: Duration::from_secs(1),
-            }
-        ];
-        
-        let source = MidiSource::new(notes);
-        
-        // At time 0.1s, the note should be playing
-        let sample = source.generate_sample(Duration::from_millis(100));
-        assert!(sample.abs() > 0.01, "Should generate non-zero audio when note is playing");
-    }
-
-    #[test]
-    fn test_multiple_notes_mixing() {
-        let notes = vec![
-            MidiNote {
-                note: 60, // C4
-                velocity: 100,
-                channel: 0,
-                start_time: Duration::from_secs(0),
-                duration: Duration::from_secs(1),
-            },
-            MidiNote {
-                note: 64, // E4
-                velocity: 100,
-                channel: 0,
-                start_time: Duration::from_secs(0),
-                duration: Duration::from_secs(1),
-            }
-        ];
-        
-        let source = MidiSource::new(notes);
-        
-        // Both notes should be playing and mixed together
-        let sample = source.generate_sample(Duration::from_millis(100));
-        assert!(sample.abs() > 0.01, "Should mix multiple notes together");
-    }
-
-    // Note: We can't easily test MidiPlayer::new() in unit tests because it requires
-    // audio hardware. In a real testing environment, we'd use dependency injection
-    // or mocking to test the player without requiring actual audio output.
 } 
