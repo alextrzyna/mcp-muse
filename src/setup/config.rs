@@ -20,12 +20,22 @@ pub struct HostConfig {
 
 impl SetupConfig {
     pub fn config_path() -> PathBuf {
+        // Cross-platform data directory:
+        // - Linux: $XDG_DATA_HOME or $HOME/.local/share
+        // - macOS: $HOME/Library/Application Support
+        // - Windows: %APPDATA% (RoamingAppData)
         let config_dir = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("mcp-muse");
 
         // Ensure the directory exists
-        let _ = fs::create_dir_all(&config_dir);
+        if let Err(e) = fs::create_dir_all(&config_dir) {
+            eprintln!(
+                "Warning: Could not create config directory {:?}: {}",
+                config_dir, e
+            );
+            eprintln!("Configuration may not be saved properly");
+        }
 
         config_dir.join(CONFIG_FILE)
     }

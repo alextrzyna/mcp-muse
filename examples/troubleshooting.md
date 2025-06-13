@@ -251,8 +251,9 @@ RUST_LOG=debug ./mcp-muse
 ```
 
 **Check Log Files**:
-- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
 - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
+- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
+- **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log`
 
 ### Common Log Messages
 
@@ -316,7 +317,12 @@ When asking for help, provide:
 
 3. **Logs**:
    ```bash
+   # Linux:
+   tail -50 ~/.local/share/mcp-muse/mcp-muse.log
+   # macOS:
    tail -50 ~/Library/Application\ Support/mcp-muse/mcp-muse.log
+   # Windows (PowerShell):
+   Get-Content $env:APPDATA\mcp-muse\mcp-muse.log -Tail 50
    ```
 
 4. **Error reproduction**: Exact steps and commands that cause the issue
