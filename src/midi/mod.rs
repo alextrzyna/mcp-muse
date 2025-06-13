@@ -71,6 +71,7 @@ fn default_tempo() -> u32 {
 }
 
 impl SimpleSequence {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             notes: Vec::new(),
@@ -79,7 +80,14 @@ impl SimpleSequence {
     }
 
     /// Add a note to the sequence
-    pub fn add_note(&mut self, note: u8, velocity: u8, start_time: f64, duration: f64) -> &mut Self {
+    #[allow(dead_code)]
+    pub fn add_note(
+        &mut self,
+        note: u8,
+        velocity: u8,
+        start_time: f64,
+        duration: f64,
+    ) -> &mut Self {
         self.notes.push(SimpleNote {
             note,
             velocity,
@@ -99,7 +107,15 @@ impl SimpleSequence {
     }
 
     /// Add a note with channel
-    pub fn add_note_with_channel(&mut self, note: u8, velocity: u8, start_time: f64, duration: f64, channel: u8) -> &mut Self {
+    #[allow(dead_code)]
+    pub fn add_note_with_channel(
+        &mut self,
+        note: u8,
+        velocity: u8,
+        start_time: f64,
+        duration: f64,
+        channel: u8,
+    ) -> &mut Self {
         self.notes.push(SimpleNote {
             note,
             velocity,
@@ -119,7 +135,16 @@ impl SimpleSequence {
     }
 
     /// Add a note with channel and instrument
-    pub fn add_note_with_instrument(&mut self, note: u8, velocity: u8, start_time: f64, duration: f64, channel: u8, instrument: u8) -> &mut Self {
+    #[allow(dead_code)]
+    pub fn add_note_with_instrument(
+        &mut self,
+        note: u8,
+        velocity: u8,
+        start_time: f64,
+        duration: f64,
+        channel: u8,
+        instrument: u8,
+    ) -> &mut Self {
         self.notes.push(SimpleNote {
             note,
             velocity,
@@ -139,6 +164,7 @@ impl SimpleSequence {
     }
 
     /// Create a simple melody with equal note durations
+    #[allow(dead_code)]
     pub fn melody(notes: &[u8], note_duration: f64, velocity: u8) -> Self {
         let mut sequence = Self::new();
         for (i, &note) in notes.iter().enumerate() {
@@ -148,6 +174,7 @@ impl SimpleSequence {
     }
 
     /// Create a chord (notes played simultaneously)
+    #[allow(dead_code)]
     pub fn chord(notes: &[u8], start_time: f64, duration: f64, velocity: u8) -> Self {
         let mut sequence = Self::new();
         for &note in notes {
@@ -155,4 +182,4 @@ impl SimpleSequence {
         }
         sequence
     }
-} 
+}
