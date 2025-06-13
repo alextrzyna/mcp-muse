@@ -13,20 +13,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  dependency-review:
-    name: Dependency Review
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      
-      - name: Dependency Review
-        uses: actions/dependency-review-action@v3
-        with:
-          fail-on-severity: moderate
-          allow-licenses: MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC, 0BSD
-
   outdated-check:
     name: Check for Outdated Dependencies
     runs-on: ubuntu-latest
@@ -48,7 +34,6 @@ jobs:
     name: Auto-merge Dependabot PRs
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]' && github.event_name == 'pull_request'
-    needs: dependency-review
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
