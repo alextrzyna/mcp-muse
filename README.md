@@ -80,7 +80,7 @@ For **Cursor**:
 ```
 
 This automatically:
-- Downloads FluidR3_GM SoundFont (142MB) for authentic SNES sound
+- Downloads FluidR3_GM SoundFont (142MB) from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip) for authentic SNES sound
 - Configures `~/.cursor/mcp.json`
 - Sets up retro gaming audio synthesis
 
@@ -179,7 +179,7 @@ Ask your AI agent to enhance conversations with nostalgic sound:
 
 ### **Retro Gaming Audio Engine**
 - **OxiSynth Synthesizer**: Pure Rust SoundFont synthesis for authentic SNES sound
-- **FluidR3_GM SoundFont**: 142MB retro gaming instrument collection
+- **FluidR3_GM SoundFont**: 142MB retro gaming instrument collection downloaded from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 - **16-Bit Gaming Audio**: Authentic console-quality synthesis and playback
 - **Real-Time Feedback**: Instant musical reactions for AI conversations
 
@@ -257,6 +257,10 @@ cargo run             # Run MCP server
 
 # Check SoundFont exists and size
 ls -la assets/FluidR3_GM.sf2  # Should be ~142MB
+
+# Manual download if needed
+curl -L https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip -o FluidR3_GM.zip
+unzip FluidR3_GM.zip -d assets/
 ```
 
 ## License
