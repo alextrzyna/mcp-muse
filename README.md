@@ -46,13 +46,15 @@
 ## Features
 
 - 🎮 **16-Bit SNES Sound**: Authentic retro gaming audio using FluidR3_GM SoundFont
+- 🤖 **R2D2 Expressions**: 9 distinct robotic emotions (Happy, Sad, Excited, Worried, Curious, etc.)
+- 🎭 **Mixed Mode**: Combine SNES music with R2D2 reactions in perfect synchronization
 - 🏰 **Classic Game Themes**: Zelda, Mario, Final Fantasy, Metroid-style compositions  
 - ⚡ **Instant Feedback**: Musical reactions for celebrations, questions, discoveries
 - 🎵 **128 Gaming Instruments**: Square waves, chiptune leads, retro synths, classic drums
 - 🔌 **MCP Integration**: Easy AI agent integration with copy-paste examples
-- ⚙️ **Zero Setup**: Automatic retro SoundFont download and configuration
+- ⚙️ **Zero Setup**: Automatic SoundFont download and dual-engine configuration
 - 🎧 **Nostalgic Audio**: Transport users back to the golden age of gaming
-- 🧪 **Ready to Play**: Pre-built SNES-style sound effects and musical phrases
+- 🧪 **Ready to Play**: Pre-built SNES-style effects and R2D2 expressions
 
 ## Installation
 
@@ -146,6 +148,73 @@ Ask your AI agent to enhance conversations with nostalgic sound:
 
 **Perfect for**: Major accomplishments, completing difficult tasks, celebrating victories
 
+## 🤖 Mixed Mode Examples (SNES + R2D2)
+
+### 🎺 Victory Fanfare with R2D2 Celebration
+```json
+{
+  "notes": [
+    {"note": 60, "velocity": 100, "start_time": 0, "duration": 0.5, "instrument": 56, "note_type": "midi"},
+    {"note": 64, "velocity": 100, "start_time": 0.5, "duration": 0.5, "instrument": 56, "note_type": "midi"},
+    {"note": 67, "velocity": 110, "start_time": 1, "duration": 0.5, "instrument": 56, "note_type": "midi"},
+    {"note_type": "r2d2", "start_time": 1.2, "duration": 1.0, "r2d2_emotion": "Excited", "r2d2_intensity": 0.9, "r2d2_complexity": 4, "r2d2_pitch_range": [400, 1000]},
+    {"note": 72, "velocity": 120, "start_time": 1.5, "duration": 1.5, "instrument": 56, "note_type": "midi"}
+  ]
+}
+```
+
+**Perfect for**: User accomplishments with AI celebrating alongside
+
+### 🔍 Curious Discovery
+```json
+{
+  "notes": [
+    {"note": 36, "velocity": 60, "start_time": 0, "duration": 3, "instrument": 89, "reverb": 80, "note_type": "midi"},
+    {"note_type": "r2d2", "start_time": 1.0, "duration": 0.8, "r2d2_emotion": "Curious", "r2d2_intensity": 0.6, "r2d2_complexity": 2, "r2d2_pitch_range": [250, 600]},
+    {"note": 67, "velocity": 90, "start_time": 2.5, "duration": 0.3, "instrument": 73, "note_type": "midi"}
+  ]
+}
+```
+
+**Perfect for**: Exploring ideas with inquisitive AI companion
+
+### 🧠 Problem-Solving Journey
+```json
+{
+  "notes": [
+    {"note_type": "r2d2", "start_time": 0, "duration": 1.5, "r2d2_emotion": "Thoughtful", "r2d2_intensity": 0.5, "r2d2_complexity": 3, "r2d2_pitch_range": [150, 400]},
+    {"note": 60, "velocity": 70, "start_time": 0.5, "duration": 1.0, "instrument": 0, "note_type": "midi"},
+    {"note_type": "r2d2", "start_time": 2.0, "duration": 0.6, "r2d2_emotion": "Surprised", "r2d2_intensity": 0.8, "r2d2_complexity": 1, "r2d2_pitch_range": [300, 800]}
+  ]
+}
+```
+
+**Perfect for**: AI thinking through problems and having breakthroughs
+
+## 🤖 R2D2 Emotional Range
+
+### **Positive Emotions**
+- **Happy**: Cheerful warbling with musical frequencies `"r2d2_emotion": "Happy"`
+- **Excited**: High-energy rapid beeps `"r2d2_emotion": "Excited"`
+- **Affirmative**: Confident confirmations `"r2d2_emotion": "Affirmative"`
+
+### **Interactive Emotions**  
+- **Curious**: Rising question tones `"r2d2_emotion": "Curious"`
+- **Surprised**: Dramatic upward sweeps `"r2d2_emotion": "Surprised"`
+- **Thoughtful**: Deep contemplative sounds `"r2d2_emotion": "Thoughtful"`
+
+### **Concern Emotions**
+- **Sad**: Gentle descending whimpers `"r2d2_emotion": "Sad"`
+- **Worried**: Nervous trembling patterns `"r2d2_emotion": "Worried"`
+- **Negative**: Sharp disapproval tones `"r2d2_emotion": "Negative"`
+
+### **R2D2 Parameters**
+- **`r2d2_emotion`**: Choose from 9 distinct emotions (required for R2D2 notes)
+- **`r2d2_intensity`**: 0.0-1.0 emotional strength (0.5=moderate, 0.9=dramatic)
+- **`r2d2_complexity`**: 1-5 syllables (1=simple beep, 5=complex phrase)
+- **`r2d2_pitch_range`**: [min_hz, max_hz] frequency range ([200,600]=low, [400,1000]=high)
+- **`note_type`**: Set to "r2d2" for robotic expressions, "midi" for musical notes
+
 ## 🎮 Gaming Sound Parameters
 
 ### **Basic Sound Properties**
@@ -177,14 +246,18 @@ Ask your AI agent to enhance conversations with nostalgic sound:
 
 ## Technical Architecture
 
-### **Retro Gaming Audio Engine**
-- **OxiSynth Synthesizer**: Pure Rust SoundFont synthesis for authentic SNES sound
+### **Dual-Engine Audio System**
+- **OxiSynth Engine**: Pure Rust SoundFont synthesis for authentic SNES sound
+- **ExpressiveSynth Engine**: Ring modulation synthesis for R2D2-style vocalizations
 - **FluidR3_GM SoundFont**: 142MB retro gaming instrument collection downloaded from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
+- **HybridAudioSource**: Real-time mixing of both engines with sample-accurate timing
 - **16-Bit Gaming Audio**: Authentic console-quality synthesis and playback
-- **Real-Time Feedback**: Instant musical reactions for AI conversations
+- **R2D2 Character**: Ring modulation with emotion-specific pitch contours
+- **Real-Time Feedback**: Instant musical reactions and robotic expressions for AI conversations
 
-### **Gaming-Focused Tools**
-- **`play_notes`**: Gaming-optimized JSON interface with copy-paste examples
+### **AI Conversation Tools**
+- **`play_notes`**: Mixed mode JSON interface supporting both MIDI and R2D2 in single sequences
+- **`play_r2d2_expression`**: Dedicated robotic expression tool with 9 distinct emotions
 - **`play_midi`**: Classic MIDI support for authentic retro compositions
 
 ### **Tool Schema**
@@ -281,3 +354,21 @@ MIT License - See LICENSE file for details.
   <h3>🎮 Give your AI the voice of classic SNES games! 🎮</h3>
   <p>Transform conversations with nostalgic 16-bit sounds that instantly transport users back to the golden age of gaming.</p>
 </div>
+
+### 🤖 **R2D2 Expressive Emotions**
+- **Robotic Personality** - 9 distinct emotional expressions add character to AI conversations
+- **Authentic R2D2 Sound** - Ring modulation synthesis creates genuine robotic vocalizations
+- **Perfect Timing** - Expressive sounds synchronized perfectly with musical moments
+- **Mixed Mode** - Combine SNES music with R2D2 reactions in single sequences
+
+### 🎭 **Rich Musical Storytelling**
+- **Victory + Celebration** - MIDI fanfare with excited R2D2 cheering
+- **Discovery + Curiosity** - Mysterious pads with inquisitive R2D2 sounds
+- **Problem Solving** - Thoughtful R2D2 contemplation followed by surprised realization
+- **Emotional Enhancement** - Every AI interaction enriched with expressive character
+
+### 🎵 **Dual-Engine Architecture**
+- **SNES Gaming Sounds** - Classic 16-bit music and sound effects
+- **R2D2 Expressions** - Authentic robotic vocalizations with 9 emotions
+- **Mixed Sequences** - Both engines working together in perfect synchronization
+- **AI Conversation Focus** - Purpose-built for enhancing AI interactions

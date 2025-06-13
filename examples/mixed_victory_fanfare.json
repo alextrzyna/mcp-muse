@@ -1,0 +1,62 @@
+{
+  "notes": [
+    {
+      "note": 60,
+      "velocity": 100,
+      "start_time": 0,
+      "duration": 0.5,
+      "channel": 0,
+      "instrument": 56,
+      "note_type": "midi"
+    },
+    {
+      "note": 64,
+      "velocity": 100,
+      "start_time": 0.5,
+      "duration": 0.5,
+      "channel": 0,
+      "instrument": 56,
+      "note_type": "midi"
+    },
+    {
+      "note": 67,
+      "velocity": 110,
+      "start_time": 1.0,
+      "duration": 0.5,
+      "channel": 0,
+      "instrument": 56,
+      "note_type": "midi"
+    },
+    {
+      "note": 60,
+      "velocity": 100,
+      "start_time": 1.2,
+      "duration": 1.0,
+      "note_type": "r2d2",
+      "r2d2_emotion": "Excited",
+      "r2d2_intensity": 0.9,
+      "r2d2_complexity": 4,
+      "r2d2_pitch_range": [400, 1000]
+    },
+    {
+      "note": 72,
+      "velocity": 120,
+      "start_time": 1.5,
+      "duration": 1.5,
+      "channel": 0,
+      "instrument": 56,
+      "note_type": "midi"
+    },
+    {
+      "note": 60,
+      "velocity": 100,
+      "start_time": 2.8,
+      "duration": 0.8,
+      "note_type": "r2d2",
+      "r2d2_emotion": "Happy",
+      "r2d2_intensity": 0.8,
+      "r2d2_complexity": 3,
+      "r2d2_pitch_range": [300, 700]
+    }
+  ]
+} 
