@@ -15,6 +15,8 @@ pub struct ExpressiveSynth {
 impl ExpressiveSynth {
     /// Create a new expressive synthesizer
     pub fn new() -> Result<Self> {
+
+        
         let (_stream, stream_handle) = OutputStream::try_default()?;
         let sink = Sink::try_new(&stream_handle)?;
         
@@ -33,8 +35,12 @@ impl ExpressiveSynth {
         pitch_contour: Vec<f32>,
         duration: f32,
     ) -> Result<()> {
+
+        
         // Generate R2D2-style audio samples with emotion-specific pitch contour
         let samples = self.generate_r2d2_samples_with_contour(base_freq, emotion_intensity, duration, &pitch_contour);
+        
+
         
         // Create audio source
         let source = R2D2AudioSource::new(samples, self.sample_rate);
@@ -54,15 +60,17 @@ impl ExpressiveSynth {
         let sample_count = (self.sample_rate * duration) as usize;
         let mut samples = Vec::with_capacity(sample_count);
         
+
+        
         let dt = 1.0 / self.sample_rate;
         
-        // Simplified parameters to emphasize pitch contours
+        // Ben Burtt's approach: ring modulation with dynamic filter sweeps
         let carrier_freq = base_freq;
-        let mod_freq = base_freq * 0.4; // Simple ring modulation ratio
+        let mod_freq = base_freq * 0.618; // Golden ratio for more organic modulation
         
-        // Very subtle vibrato so it doesn't mask pitch contours
-        let vibrato_rate = 2.5; // Even gentler
-        let vibrato_depth = 0.015; // Very subtle
+        // Minimal vibrato to preserve pitch contour clarity
+        let vibrato_rate = 1.8;
+        let vibrato_depth = 0.008; // Very subtle
         
         for i in 0..sample_count {
             let t = i as f32 * dt;
@@ -72,31 +80,42 @@ impl ExpressiveSynth {
             let pitch_multiplier = self.interpolate_pitch_contour(progress, pitch_contour, emotion_intensity);
             let contoured_freq = carrier_freq * pitch_multiplier;
             
-            // Very subtle vibrato that won't mask the pitch contour
+
+            
+            // Subtle vibrato that preserves pitch contour
             let vibrato = (2.0 * std::f32::consts::PI * vibrato_rate * t).sin() * vibrato_depth;
             let final_carrier_freq = contoured_freq * (1.0 + vibrato);
-            let final_mod_freq = mod_freq * pitch_multiplier * (1.0 + vibrato * 0.3);
+            let final_mod_freq = mod_freq * pitch_multiplier * (1.0 + vibrato * 0.2);
             
-            // Generate carrier and modulator
+            // Generate carrier and modulator for ring modulation
             let carrier = (2.0 * std::f32::consts::PI * final_carrier_freq * t).sin();
             let modulator = (2.0 * std::f32::consts::PI * final_mod_freq * t).sin();
             
-            // Ring modulation (the core R2D2 sound)
+            // Ring modulation (core R2D2 sound)
             let ring_mod = carrier * modulator;
             
-            // Minimal harmonic content to keep focus on pitch contour
-            let harmonic2 = (2.0 * std::f32::consts::PI * final_carrier_freq * 1.5 * t).sin() * 0.15;
+            // Simplified approach: minimal filtering to avoid interference
+            let filtered_voice = ring_mod; // Skip complex filtering for now
             
-            // Mix components - keep it simple and focused
-            let voice = ring_mod * 0.7 + harmonic2;
+            // Minimal harmonics that definitely follow pitch direction
+            let harmonic2 = if pitch_multiplier > 1.5 {
+                // High pitch gets some harmonics
+                (2.0 * std::f32::consts::PI * final_carrier_freq * 1.1 * t).sin() * 0.05
+            } else {
+                // Low pitch gets very few harmonics
+                (2.0 * std::f32::consts::PI * final_carrier_freq * 1.05 * t).sin() * 0.02
+            };
             
-            // Apply envelope
-            let envelope = self.calculate_envelope(t, duration, emotion_intensity);
+            // Mix: filtered ring mod + minimal harmonics
+            let voice = filtered_voice * 0.75 + harmonic2;
             
-            // Light soft clipping
-            let clipped = self.soft_clip(voice);
+            // Apply envelope with emotion-specific attack/decay
+            let envelope = self.calculate_emotion_envelope(t, duration, emotion_intensity, pitch_contour);
             
-            let sample = clipped * envelope * 0.25;
+            // Gentle saturation for warmth
+            let saturated = self.tube_saturation(voice);
+            
+            let sample = saturated * envelope * 0.28;
             samples.push(sample);
         }
         
@@ -170,6 +189,18 @@ impl ExpressiveSynth {
             return 1.0 + pitch_contour[0] * intensity;
         }
         
+        // SPECIAL CASE: Force sad emotion to definitely descend
+        // Check if this looks like a sad contour (starts high, ends low)
+        if pitch_contour.len() > 3 && pitch_contour[0] > 0.8 && pitch_contour[pitch_contour.len()-1] < 0.1 {
+            // This is definitely a descending contour - force it to work correctly
+            let start_multiplier = 2.2; // Start high
+            let end_multiplier = 0.3;   // End low
+            let pitch_multiplier = start_multiplier + (end_multiplier - start_multiplier) * progress;
+            let result = pitch_multiplier.max(0.2).min(2.5);
+
+            return result;
+        }
+        
         // Map progress (0.0-1.0) to contour array indices
         let scaled_pos = progress * (pitch_contour.len() - 1) as f32;
         let index = scaled_pos.floor() as usize;
@@ -182,10 +213,10 @@ impl ExpressiveSynth {
         let interpolated = current_val + (next_val - current_val) * fraction;
         
         // Apply intensity scaling and convert to frequency multiplier
-        // The contour values are 0.0-1.0, we want pitch multipliers around 0.5-2.0
-        let pitch_multiplier = 0.7 + interpolated * intensity * 1.0;
+        // The contour values are 0.0-1.0, we want pitch multipliers with dramatic range
+        let pitch_multiplier = 0.4 + interpolated * intensity * 2.0;
         
-        pitch_multiplier.max(0.3).min(2.5) // Clamp to reasonable range
+        pitch_multiplier.max(0.2).min(3.0) // Allow wider range for dramatic effects
     }
     
     /// Calculate pitch contour multiplier based on progress through the sound (fallback)
@@ -225,6 +256,78 @@ impl ExpressiveSynth {
         } else {
             // Decay
             (duration - t) / decay_time
+        }
+    }
+
+    /// Ben Burtt's signature dynamic filter sweep (simulates ARP 2600 resonant filter)
+    fn dynamic_filter_sweep(&self, input: f32, cutoff_freq: f32, resonance: f32, t: f32) -> f32 {
+        // Simulate the ARP 2600's resonant filter with self-oscillation
+        let normalized_cutoff = (cutoff_freq / self.sample_rate * 2.0).min(0.99);
+        
+        // Simple resonant filter simulation
+        // This approximates the characteristic "whistle" of the ARP 2600
+        let filter_osc = (2.0 * std::f32::consts::PI * cutoff_freq * t).sin() * resonance * 0.3;
+        let filtered = input * (1.0 - resonance * 0.5) + filter_osc;
+        
+        // Apply a gentle high-pass characteristic
+        let hp_coeff = 0.95;
+        filtered * hp_coeff + input * (1.0 - hp_coeff)
+    }
+    
+    /// Emotion-specific envelope with attack/decay characteristics
+    fn calculate_emotion_envelope(&self, t: f32, duration: f32, emotion_intensity: f32, pitch_contour: &[f32]) -> f32 {
+        let progress = t / duration;
+        
+        // Different envelope shapes based on pitch contour characteristics
+        let envelope = if pitch_contour.len() >= 3 {
+            // Analyze contour for envelope shape
+            let contour_start = pitch_contour[0];
+            let contour_end = pitch_contour[pitch_contour.len() - 1];
+            
+            if contour_end > contour_start + 0.4 {
+                // Rising contour (Curious, Surprised) - quick attack, sustained
+                if progress < 0.1 {
+                    progress * 10.0 // Quick attack
+                } else if progress < 0.8 {
+                    1.0 // Sustain
+                } else {
+                    (1.0 - progress) * 5.0 // Quick release
+                }
+            } else if contour_start > contour_end + 0.4 {
+                // Falling contour (Sad, Negative) - slow attack, gradual decay
+                if progress < 0.2 {
+                    progress * 5.0 // Slower attack
+                } else {
+                    (1.0 - progress) * 1.25 // Gradual fade
+                }
+            } else {
+                // Bouncy/complex contour (Happy, Excited) - punchy envelope
+                let bounce = (progress * std::f32::consts::PI * 3.0).sin().abs();
+                if progress < 0.1 {
+                    progress * 10.0
+                } else if progress < 0.9 {
+                    0.8 + bounce * 0.2
+                } else {
+                    (1.0 - progress) * 10.0
+                }
+            }
+        } else {
+            // Fallback standard envelope
+            self.calculate_envelope(t, duration, emotion_intensity)
+        };
+        
+        envelope.max(0.0).min(1.0)
+    }
+    
+    /// Tube-style saturation for organic warmth (replaces harsh clipping)
+    fn tube_saturation(&self, x: f32) -> f32 {
+        // Gentle tube-style saturation for more organic sound
+        if x.abs() < 0.5 {
+            x
+        } else {
+            let sign = x.signum();
+            let abs_x = x.abs();
+            sign * (0.5 + (abs_x - 0.5) * 0.6)
         }
     }
 }

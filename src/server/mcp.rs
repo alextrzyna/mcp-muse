@@ -645,7 +645,7 @@ fn handle_play_r2d2_expression_tool(arguments: Value, id: Option<Value>) -> Json
     // Play the R2D2 expression
     match synth.play_r2d2_expression(
         synth_params.base_freq,
-        synth_params.modulation_depth,
+        expression.intensity,  // Use the original intensity, not modulation_depth!
         synth_params.pitch_contour,
         synth_params.duration,
     ) {
