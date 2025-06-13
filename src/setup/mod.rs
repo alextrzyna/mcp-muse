@@ -1,7 +1,5 @@
 // setup module placeholder 
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::io::{Write, Read};
 use std::path::PathBuf;
@@ -102,19 +100,6 @@ fn download_soundfont() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-struct CursorConfig {
-    #[serde(rename = "mcpServers")]
-    mcp_servers: HashMap<String, CursorServerEntry>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-struct CursorServerEntry {
-    transport: String,
-    command: String,
-    enabled: bool,
-}
-
 pub fn run_setup() {
     println!("🎵 Setting up MCP Muse...\n");
     
@@ -148,41 +133,76 @@ fn setup_cursor_config() {
         }
     };
 
-    let mut config: CursorConfig = if config_path.exists() {
+    // Read existing config as generic JSON to preserve all fields
+    let mut config_value: serde_json::Value = if config_path.exists() {
         match fs::read_to_string(&config_path) {
             Ok(content) if !content.trim().is_empty() => {
-                serde_json::from_str(&content).unwrap_or_default()
+                match serde_json::from_str(&content) {
+                    Ok(value) => value,
+                    Err(e) => {
+                        eprintln!("⚠️  Warning: Could not parse existing config ({}), creating backup and starting fresh", e);
+                        // Create backup of malformed config
+                        let backup_path = config_path.with_extension("json.backup");
+                        if let Err(backup_err) = fs::copy(&config_path, &backup_path) {
+                            eprintln!("   Failed to create backup: {}", backup_err);
+                        } else {
+                            println!("   Backup saved to: {:?}", backup_path);
+                        }
+                        serde_json::json!({})
+                    }
+                }
             }
-            _ => CursorConfig::default(),
+            _ => serde_json::json!({}),
         }
     } else {
-        CursorConfig::default()
+        serde_json::json!({})
     };
 
-    let muse_entry = CursorServerEntry {
-        transport: "stdio".to_string(),
-        command: get_server_command(),
-        enabled: true,
-    };
+    // Ensure mcpServers object exists
+    if !config_value.is_object() {
+        config_value = serde_json::json!({});
+    }
+    
+    let config_obj = config_value.as_object_mut().unwrap();
+    if !config_obj.contains_key("mcpServers") {
+        config_obj.insert("mcpServers".to_string(), serde_json::json!({}));
+    }
 
+    // Get the mcpServers object
+    let mcp_servers = config_obj.get_mut("mcpServers").unwrap().as_object_mut();
+    if mcp_servers.is_none() {
+        eprintln!("⚠️  Warning: mcpServers is not an object, replacing it");
+        config_obj.insert("mcpServers".to_string(), serde_json::json!({}));
+    }
+    let mcp_servers = config_obj.get_mut("mcpServers").unwrap().as_object_mut().unwrap();
+
+    // Create the new mcp-muse entry
+    let muse_entry = serde_json::json!({
+        "transport": "stdio",
+        "command": get_server_command(),
+        "enabled": true
+    });
+
+    // Check if we need to update
     let mut updated = false;
-    match config.mcp_servers.get(SERVER_NAME) {
+    match mcp_servers.get(SERVER_NAME) {
         Some(existing) if existing == &muse_entry => {
             println!("✓ mcp-muse entry already up to date in Cursor config.");
         }
         _ => {
-            config.mcp_servers.insert(SERVER_NAME.to_string(), muse_entry);
+            mcp_servers.insert(SERVER_NAME.to_string(), muse_entry);
             updated = true;
             println!("✓ Added or updated mcp-muse entry in Cursor config.");
         }
     }
 
+    // Write back the config if updated
     if updated {
         if let Some(parent) = config_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
         match fs::File::create(&config_path).and_then(|mut f| {
-            let content = serde_json::to_string_pretty(&config).unwrap();
+            let content = serde_json::to_string_pretty(&config_value).unwrap();
             f.write_all(content.as_bytes())
         }) {
             Ok(_) => println!("✓ Saved Cursor MCP config to {:?}", config_path),
