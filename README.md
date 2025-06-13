@@ -81,10 +81,24 @@ For **Cursor**:
 ./target/release/mcp-muse --setup
 ```
 
-This automatically:
-- Downloads FluidR3_GM SoundFont (142MB) from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip) for authentic SNES sound
-- Configures `~/.cursor/mcp.json`
-- Sets up retro gaming audio synthesis
+This **interactively** guides you through:
+- **Step 1: SoundFont Configuration**
+  - Option to specify a custom SoundFont file location
+  - Or use the default FluidR3_GM SoundFont
+- **Step 2: SoundFont Download** (if using default)
+  - Shows exact download URL: [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
+  - Displays file size (~130MB) and destination path
+  - Asks for user permission before downloading
+  - Downloads FluidR3_GM SoundFont (142MB) for authentic SNES sound
+- **Step 3: MCP Host Configuration**
+  - Shows configuration file location (~/.cursor/mcp.json)
+  - Asks for user permission before configuring Cursor
+  - Provides manual configuration instructions if skipped
+
+**NEW: Custom SoundFont Support**
+- Bring your own SoundFont (.sf2 file) for personalized audio
+- Configuration saved to Application Support directory (`~/Library/Application Support/mcp-muse/config.json` on macOS)
+- Automatically used by the audio engine when configured
 
 ### 2. Restart Cursor
 
@@ -334,6 +348,23 @@ ls -la assets/FluidR3_GM.sf2  # Should be ~142MB
 # Manual download if needed
 curl -L https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip -o FluidR3_GM.zip
 unzip FluidR3_GM.zip -d assets/
+```
+
+**Custom SoundFont issues:**
+```bash
+# Check configuration file (macOS)
+cat ~/Library/Application\ Support/mcp-muse/config.json
+
+# Check configuration file (Linux)
+cat ~/.local/share/mcp-muse/config.json
+
+# Verify custom SoundFont exists and is valid
+ls -la /path/to/your/soundfont.sf2
+
+# Reset to default SoundFont (removes config file)
+rm ~/Library/Application\ Support/mcp-muse/config.json  # macOS
+rm ~/.local/share/mcp-muse/config.json                  # Linux
+./target/release/mcp-muse --setup
 ```
 
 ## License

@@ -467,6 +467,19 @@ impl MidiPlayer {
 }
 
 fn find_soundfont() -> Result<PathBuf, String> {
+    // First check if there's a custom soundfont path configured
+    if let Ok(config) = crate::setup::config::SetupConfig::load() {
+        if let Some(custom_path) = config.soundfont_path {
+            let path = PathBuf::from(custom_path);
+            if path.exists() {
+                tracing::info!("Using custom SoundFont from config: {:?}", path);
+                return Ok(path);
+            } else {
+                tracing::warn!("Configured custom SoundFont not found: {:?}", path);
+            }
+        }
+    }
+
     // Try to find the SoundFont in various locations
     let exe_path = env::current_exe().map_err(|e| format!("Cannot find executable: {}", e))?;
     let exe_dir = exe_path
