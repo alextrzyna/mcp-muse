@@ -97,7 +97,10 @@ This **interactively** guides you through:
 
 **NEW: Custom SoundFont Support**
 - Bring your own SoundFont (.sf2 file) for personalized audio
-- Configuration saved to Application Support directory (`~/Library/Application Support/mcp-muse/config.json` on macOS)
+- Configuration saved to platform-specific data directory:
+  - **Linux**: `~/.local/share/mcp-muse/config.json`
+  - **macOS**: `~/Library/Application Support/mcp-muse/config.json`
+  - **Windows**: `%APPDATA%\mcp-muse\config.json`
 - Automatically used by the audio engine when configured
 
 ### 2. Restart Cursor
@@ -352,18 +355,26 @@ unzip FluidR3_GM.zip -d assets/
 
 **Custom SoundFont issues:**
 ```bash
-# Check configuration file (macOS)
-cat ~/Library/Application\ Support/mcp-muse/config.json
-
-# Check configuration file (Linux)
+# Check configuration file
+# Linux:
 cat ~/.local/share/mcp-muse/config.json
+# macOS:
+cat ~/Library/Application\ Support/mcp-muse/config.json
+# Windows (Command Prompt):
+type %APPDATA%\mcp-muse\config.json
+# Windows (PowerShell):
+Get-Content $env:APPDATA\mcp-muse\config.json
 
 # Verify custom SoundFont exists and is valid
 ls -la /path/to/your/soundfont.sf2
 
 # Reset to default SoundFont (removes config file)
-rm ~/Library/Application\ Support/mcp-muse/config.json  # macOS
-rm ~/.local/share/mcp-muse/config.json                  # Linux
+# Linux:
+rm ~/.local/share/mcp-muse/config.json
+# macOS:
+rm ~/Library/Application\ Support/mcp-muse/config.json
+# Windows:
+del %APPDATA%\mcp-muse\config.json
 ./target/release/mcp-muse --setup
 ```
 

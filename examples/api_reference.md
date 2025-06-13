@@ -209,8 +209,8 @@ Creates/updates `~/.cursor/mcp.json`:
 ### Logging
 
 #### Log Locations
-- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
 - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
+- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
 - **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log`
 
 #### Log Levels

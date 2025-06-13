@@ -13,6 +13,19 @@ const SERVER_NAME: &str = "mcp-muse";
 const SOUNDFONT_URL: &str = "https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip";
 const SOUNDFONT_FILENAME: &str = "FluidR3_GM.sf2";
 
+/// Get the platform-specific data directory path for display purposes
+fn get_data_dir_info() -> String {
+    if let Some(data_dir) = dirs::data_dir() {
+        let mcp_muse_dir = data_dir.join("mcp-muse");
+        format!(
+            "Platform data directory: {:?}\n   (Linux: ~/.local/share, macOS: ~/Library/Application Support, Windows: %APPDATA%)",
+            mcp_muse_dir
+        )
+    } else {
+        "Platform data directory: Current directory (.)".to_string()
+    }
+}
+
 // Use the current executable path instead of a hardcoded path
 fn get_server_command() -> String {
     env::current_exe()
@@ -265,10 +278,9 @@ pub fn run_setup() {
     println!("   2. Try asking: \"Can you play a simple MIDI melody?\"");
     println!("   3. For help: Run with --help or check the documentation");
     println!();
-    println!(
-        "   Configuration stored in: {:?}",
-        SetupConfig::config_path()
-    );
+    println!("   {}", get_data_dir_info());
+    println!("   Configuration file: {:?}", SetupConfig::config_path());
+    println!("   Log files will be stored in the same directory");
 }
 
 fn setup_cursor_config() {

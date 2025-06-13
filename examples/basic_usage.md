@@ -153,7 +153,10 @@ base64 -i your_file.mid
 If examples don't produce sound:
 1. Check system volume
 2. Test with Example 1 (single note)
-3. Check the logs: `~/Library/Application Support/mcp-muse/mcp-muse.log`
+3. Check the logs:
+   - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
+   - **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
+   - **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log`
 
 ### Invalid MIDI Error
 - Ensure base64 data is not corrupted
