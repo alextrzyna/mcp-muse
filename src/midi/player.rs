@@ -1,5 +1,5 @@
 use crate::midi::parser::{ParsedMidi, MidiNote};
-use crate::midi::{SimpleSequence, SimpleNote};
+use crate::midi::SimpleSequence;
 use rodio::{OutputStream, Sink, Source};
 use oxisynth::{SoundFont, Synth, MidiEvent};
 use std::time::Duration;
@@ -22,6 +22,72 @@ impl MidiPlayer {
             .map_err(|e| format!("Failed to create audio sink: {}", e))?;
 
         Ok(MidiPlayer { _stream, sink })
+    }
+
+    /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
+    fn calculate_tail_time(notes: &[MidiNote]) -> Duration {
+        let mut max_tail_seconds: f64 = 2.0; // Base tail time for natural instrument decay
+        
+        // Check for reverb effects
+        let has_reverb = notes.iter().any(|note| note.reverb.map_or(false, |r| r > 0));
+        if has_reverb {
+            let max_reverb = notes.iter()
+                .filter_map(|note| note.reverb)
+                .max()
+                .unwrap_or(0);
+            // Reverb can add 1-6 seconds of tail depending on depth
+            let reverb_tail = 1.0 + (max_reverb as f64 / 127.0) * 5.0;
+            max_tail_seconds = max_tail_seconds.max(reverb_tail);
+        }
+        
+        // Check for chorus effects
+        let has_chorus = notes.iter().any(|note| note.chorus.map_or(false, |c| c > 0));
+        if has_chorus {
+            let max_chorus = notes.iter()
+                .filter_map(|note| note.chorus)
+                .max()
+                .unwrap_or(0);
+            // Chorus can add 0.5-2 seconds of tail
+            let chorus_tail = 0.5 + (max_chorus as f64 / 127.0) * 1.5;
+            max_tail_seconds = max_tail_seconds.max(chorus_tail);
+        }
+        
+        // Check for sustain pedal
+        let has_sustain = notes.iter().any(|note| note.sustain.map_or(false, |s| s > 0));
+        if has_sustain {
+            // Sustain pedal can significantly extend notes
+            max_tail_seconds = max_tail_seconds.max(4.0);
+        }
+        
+        // Check for instruments that naturally have long decay
+        for note in notes {
+            if let Some(instrument) = note.instrument {
+                let additional_tail = match instrument {
+                    // Piano family - long sustain and decay
+                    0..=7 => 3.0,
+                    // Organ family - can sustain indefinitely
+                    16..=23 => 2.0,
+                    // Guitar family - natural sustain
+                    24..=31 => 2.5,
+                    // Strings - natural decay
+                    40..=47 => 2.0,
+                    // Choir/Voice - natural decay  
+                    52..=55 => 1.5,
+                    // Brass - can have long release
+                    56..=63 => 1.5,
+                    // Woodwinds - shorter decay
+                    64..=71 => 1.0,
+                    // Synth pads - often have long release
+                    88..=95 => 3.0,
+                    // Sound effects - variable
+                    120..=127 => 2.0,
+                    _ => 0.5,
+                };
+                max_tail_seconds = max_tail_seconds.max(additional_tail);
+            }
+        }
+        
+        Duration::from_secs_f64(max_tail_seconds)
     }
 
     /// Play a simple sequence of notes (much easier to use!)
@@ -52,11 +118,14 @@ impl MidiPlayer {
             }
         }).collect();
 
-        // Calculate total playback time
-        let total_time = notes.iter()
+        // Calculate total playback time including tail time for effects
+        let note_end_time = notes.iter()
             .map(|note| note.start_time + note.duration)
             .max()
             .unwrap_or(Duration::from_secs(1));
+        
+        let tail_time = Self::calculate_tail_time(&notes);
+        let total_time = note_end_time + tail_time;
 
         // Log first few notes for debugging
         for (i, note) in notes.iter().take(3).enumerate() {
@@ -64,10 +133,11 @@ impl MidiPlayer {
                           i, note.note, note.velocity, note.start_time.as_secs_f64(), note.duration.as_secs_f64());
         }
 
-        tracing::info!("Total playback time: {:.2}s", total_time.as_secs_f64());
+        tracing::info!("Note end time: {:.2}s, tail time: {:.2}s, total playback time: {:.2}s", 
+                      note_end_time.as_secs_f64(), tail_time.as_secs_f64(), total_time.as_secs_f64());
 
         // Create OxiSynth-based source
-        let synth_source = OxiSynthSource::new(notes)
+        let synth_source = OxiSynthSource::new(notes, total_time)
             .map_err(|e| format!("Failed to create synthesizer source: {}", e))?;
         
         tracing::info!("Created OxiSynth audio source, starting playback");
@@ -76,7 +146,7 @@ impl MidiPlayer {
         
         // Wait for the audio to finish playing
         // Add a small buffer to ensure we don't cut off early
-        let wait_time = total_time + Duration::from_millis(500);
+        let wait_time = total_time + Duration::from_millis(200);
         tracing::info!("Waiting {:.2}s for playback to complete...", wait_time.as_secs_f64());
         
         std::thread::sleep(wait_time);
@@ -95,11 +165,14 @@ impl MidiPlayer {
             return Ok(());
         }
 
-        // Calculate total playback time
-        let total_time = parsed_midi.notes.iter()
+        // Calculate total playback time including tail time for effects
+        let note_end_time = parsed_midi.notes.iter()
             .map(|note| note.start_time + note.duration)
             .max()
             .unwrap_or(Duration::from_secs(1));
+        
+        let tail_time = Self::calculate_tail_time(&parsed_midi.notes);
+        let total_time = note_end_time + tail_time;
 
         // Log first few notes for debugging
         for (i, note) in parsed_midi.notes.iter().take(3).enumerate() {
@@ -107,10 +180,11 @@ impl MidiPlayer {
                           i, note.note, note.velocity, note.start_time, note.duration);
         }
 
-        tracing::info!("Total playback time: {:.2}s", total_time.as_secs_f64());
+        tracing::info!("Note end time: {:.2}s, tail time: {:.2}s, total playback time: {:.2}s", 
+                      note_end_time.as_secs_f64(), tail_time.as_secs_f64(), total_time.as_secs_f64());
 
         // Create OxiSynth-based source
-        let synth_source = OxiSynthSource::new(parsed_midi.notes)
+        let synth_source = OxiSynthSource::new(parsed_midi.notes, total_time)
             .map_err(|e| format!("Failed to create synthesizer source: {}", e))?;
         
         tracing::info!("Created OxiSynth audio source, starting playback");
@@ -119,7 +193,7 @@ impl MidiPlayer {
         
         // Wait for the audio to finish playing
         // Add a small buffer to ensure we don't cut off early
-        let wait_time = total_time + Duration::from_millis(500);
+        let wait_time = total_time + Duration::from_millis(200);
         tracing::info!("Waiting {:.2}s for playback to complete...", wait_time.as_secs_f64());
         
         std::thread::sleep(wait_time);
@@ -194,7 +268,7 @@ struct OxiSynthSource {
 }
 
 impl OxiSynthSource {
-    fn new(notes: Vec<MidiNote>) -> Result<Self, String> {
+    fn new(notes: Vec<MidiNote>, total_duration: Duration) -> Result<Self, String> {
         let sample_rate = 44100;
         
         // Find and load the SoundFont
@@ -211,23 +285,19 @@ impl OxiSynthSource {
         
         tracing::info!("Loaded SoundFont from: {:?}", soundfont_path);
         
-        // Calculate total duration
-        let total_duration = notes.iter()
-            .map(|note| note.start_time + note.duration)
-            .max()
-            .unwrap_or(Duration::from_secs(1))
-            .max(Duration::from_secs(5)); // Minimum 5 seconds to hear the audio
+        // Use the provided total duration which includes tail time
+        let final_duration = total_duration.max(Duration::from_secs(1));
 
         let buffer_size = 1024; // Process audio in chunks
         
-        tracing::info!("OxiSynth source created: {} notes, total duration: {:?}", notes.len(), total_duration);
+        tracing::info!("OxiSynth source created: {} notes, total duration: {:?}", notes.len(), final_duration);
 
         Ok(Self {
             synth,
             notes,
             sample_rate,
             current_sample: 0,
-            total_duration,
+            total_duration: final_duration,
             left_buffer: vec![0.0; buffer_size],
             right_buffer: vec![0.0; buffer_size],
             buffer_size,
