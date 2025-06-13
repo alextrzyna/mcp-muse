@@ -1,13 +1,14 @@
-use std::process::{Command, Stdio};
-use std::io::{BufRead, BufReader, Write};
-use serde_json::{json, Value};
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use serde_json::{json, Value};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Command, Stdio};
 
 #[test]
+#[allow(clippy::zombie_processes)]
 fn test_mcp_initialize() {
     let mut child = Command::new("cargo")
-        .args(&["run", "--"])
+        .args(["run", "--"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -34,10 +35,12 @@ fn test_mcp_initialize() {
 
     // Read response
     let mut response_line = String::new();
-    reader.read_line(&mut response_line).expect("Failed to read response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read response");
 
-    let response: Value = serde_json::from_str(&response_line)
-        .expect("Failed to parse JSON response");
+    let response: Value =
+        serde_json::from_str(&response_line).expect("Failed to parse JSON response");
 
     assert_eq!(response["jsonrpc"], "2.0");
     assert_eq!(response["id"], 1);
@@ -49,9 +52,10 @@ fn test_mcp_initialize() {
 }
 
 #[test]
+#[allow(clippy::zombie_processes)]
 fn test_mcp_tools_list() {
     let mut child = Command::new("cargo")
-        .args(&["run", "--"])
+        .args(["run", "--"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -76,7 +80,9 @@ fn test_mcp_tools_list() {
 
     writeln!(stdin, "{}", init_request).expect("Failed to write to stdin");
     let mut response_line = String::new();
-    reader.read_line(&mut response_line).expect("Failed to read init response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read init response");
 
     // Send tools/list request
     let tools_request = json!({
@@ -89,28 +95,42 @@ fn test_mcp_tools_list() {
 
     // Read response
     response_line.clear();
-    reader.read_line(&mut response_line).expect("Failed to read tools response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read tools response");
 
-    let response: Value = serde_json::from_str(&response_line)
-        .expect("Failed to parse JSON response");
+    let response: Value =
+        serde_json::from_str(&response_line).expect("Failed to parse JSON response");
 
     assert_eq!(response["jsonrpc"], "2.0");
     assert_eq!(response["id"], 2);
     assert!(response["result"]["tools"].is_array());
-    
+
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["name"], "play_midi");
-    assert!(tools[0]["description"].is_string());
-    assert!(tools[0]["inputSchema"].is_object());
+    assert_eq!(tools.len(), 2);
+
+    // Check that both tools are present
+    let tool_names: Vec<&str> = tools
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    assert!(tool_names.contains(&"play_midi"));
+    assert!(tool_names.contains(&"play_notes"));
+
+    // Verify structure of both tools
+    for tool in tools {
+        assert!(tool["description"].is_string());
+        assert!(tool["inputSchema"].is_object());
+    }
 
     child.kill().expect("Failed to kill child process");
 }
 
 #[test]
+#[allow(clippy::zombie_processes)]
 fn test_play_midi_tool_with_invalid_base64() {
     let mut child = Command::new("cargo")
-        .args(&["run", "--"])
+        .args(["run", "--"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -135,7 +155,9 @@ fn test_play_midi_tool_with_invalid_base64() {
 
     writeln!(stdin, "{}", init_request).expect("Failed to write to stdin");
     let mut response_line = String::new();
-    reader.read_line(&mut response_line).expect("Failed to read init response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read init response");
 
     // Send play_midi with invalid base64
     let play_request = json!({
@@ -154,10 +176,12 @@ fn test_play_midi_tool_with_invalid_base64() {
 
     // Read response
     response_line.clear();
-    reader.read_line(&mut response_line).expect("Failed to read play response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read play response");
 
-    let response: Value = serde_json::from_str(&response_line)
-        .expect("Failed to parse JSON response");
+    let response: Value =
+        serde_json::from_str(&response_line).expect("Failed to parse JSON response");
 
     assert_eq!(response["jsonrpc"], "2.0");
     assert_eq!(response["id"], 2);
@@ -168,30 +192,31 @@ fn test_play_midi_tool_with_invalid_base64() {
 }
 
 #[test]
+#[allow(clippy::zombie_processes)]
 fn test_play_midi_tool_with_valid_midi() {
     // Create a simple valid MIDI file
     let mut midi_bytes = Vec::new();
-    
+
     // MIDI header
     midi_bytes.extend_from_slice(&[
-        0x4D, 0x54, 0x68, 0x64,  // "MThd"
-        0x00, 0x00, 0x00, 0x06,  // Header length (6 bytes)
-        0x00, 0x00,              // Format type 0
-        0x00, 0x01,              // Number of tracks (1)
-        0x00, 0x60               // Ticks per quarter note (96)
+        0x4D, 0x54, 0x68, 0x64, // "MThd"
+        0x00, 0x00, 0x00, 0x06, // Header length (6 bytes)
+        0x00, 0x00, // Format type 0
+        0x00, 0x01, // Number of tracks (1)
+        0x00, 0x60, // Ticks per quarter note (96)
     ]);
-    
+
     // Track
     midi_bytes.extend_from_slice(&[
-        0x4D, 0x54, 0x72, 0x6B,  // "MTrk"
-        0x00, 0x00, 0x00, 0x04,  // Track length (4 bytes)
-        0x00, 0xFF, 0x2F, 0x00   // End of track
+        0x4D, 0x54, 0x72, 0x6B, // "MTrk"
+        0x00, 0x00, 0x00, 0x04, // Track length (4 bytes)
+        0x00, 0xFF, 0x2F, 0x00, // End of track
     ]);
 
     let midi_b64 = BASE64.encode(&midi_bytes);
 
     let mut child = Command::new("cargo")
-        .args(&["run", "--"])
+        .args(["run", "--"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -216,7 +241,9 @@ fn test_play_midi_tool_with_valid_midi() {
 
     writeln!(stdin, "{}", init_request).expect("Failed to write to stdin");
     let mut response_line = String::new();
-    reader.read_line(&mut response_line).expect("Failed to read init response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read init response");
 
     // Send play_midi with valid MIDI
     let play_request = json!({
@@ -235,17 +262,19 @@ fn test_play_midi_tool_with_valid_midi() {
 
     // Read response
     response_line.clear();
-    reader.read_line(&mut response_line).expect("Failed to read play response");
+    reader
+        .read_line(&mut response_line)
+        .expect("Failed to read play response");
 
-    let response: Value = serde_json::from_str(&response_line)
-        .expect("Failed to parse JSON response");
+    let response: Value =
+        serde_json::from_str(&response_line).expect("Failed to parse JSON response");
 
     assert_eq!(response["jsonrpc"], "2.0");
     assert_eq!(response["id"], 2);
-    
+
     // The response might be an error if audio hardware isn't available in CI,
     // but it should be a proper JSON-RPC response either way
     assert!(response["result"].is_object() || response["error"].is_object());
 
     child.kill().expect("Failed to kill child process");
-} 
+}

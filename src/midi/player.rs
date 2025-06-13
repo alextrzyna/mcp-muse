@@ -1,12 +1,12 @@
-use crate::midi::parser::{ParsedMidi, MidiNote};
+use crate::midi::parser::{MidiNote, ParsedMidi};
 use crate::midi::SimpleSequence;
+use oxisynth::{MidiEvent, SoundFont, Synth};
 use rodio::{OutputStream, Sink, Source};
-use oxisynth::{SoundFont, Synth, MidiEvent};
 use std::time::Duration;
 
-use std::path::PathBuf;
 use std::env;
 use std::fs;
+use std::path::PathBuf;
 
 pub struct MidiPlayer {
     _stream: OutputStream,
@@ -17,7 +17,7 @@ impl MidiPlayer {
     pub fn new() -> Result<Self, String> {
         let (_stream, stream_handle) = OutputStream::try_default()
             .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
-        
+
         let sink = Sink::try_new(&stream_handle)
             .map_err(|e| format!("Failed to create audio sink: {}", e))?;
 
@@ -27,11 +27,12 @@ impl MidiPlayer {
     /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
     fn calculate_tail_time(notes: &[MidiNote]) -> Duration {
         let mut max_tail_seconds: f64 = 2.0; // Base tail time for natural instrument decay
-        
+
         // Check for reverb effects
-        let has_reverb = notes.iter().any(|note| note.reverb.map_or(false, |r| r > 0));
+        let has_reverb = notes.iter().any(|note| note.reverb.is_some_and(|r| r > 0));
         if has_reverb {
-            let max_reverb = notes.iter()
+            let max_reverb = notes
+                .iter()
                 .filter_map(|note| note.reverb)
                 .max()
                 .unwrap_or(0);
@@ -39,11 +40,12 @@ impl MidiPlayer {
             let reverb_tail = 1.0 + (max_reverb as f64 / 127.0) * 5.0;
             max_tail_seconds = max_tail_seconds.max(reverb_tail);
         }
-        
+
         // Check for chorus effects
-        let has_chorus = notes.iter().any(|note| note.chorus.map_or(false, |c| c > 0));
+        let has_chorus = notes.iter().any(|note| note.chorus.is_some_and(|c| c > 0));
         if has_chorus {
-            let max_chorus = notes.iter()
+            let max_chorus = notes
+                .iter()
                 .filter_map(|note| note.chorus)
                 .max()
                 .unwrap_or(0);
@@ -51,14 +53,14 @@ impl MidiPlayer {
             let chorus_tail = 0.5 + (max_chorus as f64 / 127.0) * 1.5;
             max_tail_seconds = max_tail_seconds.max(chorus_tail);
         }
-        
+
         // Check for sustain pedal
-        let has_sustain = notes.iter().any(|note| note.sustain.map_or(false, |s| s > 0));
+        let has_sustain = notes.iter().any(|note| note.sustain.is_some_and(|s| s > 0));
         if has_sustain {
             // Sustain pedal can significantly extend notes
             max_tail_seconds = max_tail_seconds.max(4.0);
         }
-        
+
         // Check for instruments that naturally have long decay
         for note in notes {
             if let Some(instrument) = note.instrument {
@@ -71,7 +73,7 @@ impl MidiPlayer {
                     24..=31 => 2.5,
                     // Strings - natural decay
                     40..=47 => 2.0,
-                    // Choir/Voice - natural decay  
+                    // Choir/Voice - natural decay
                     52..=55 => 1.5,
                     // Brass - can have long release
                     56..=63 => 1.5,
@@ -86,22 +88,27 @@ impl MidiPlayer {
                 max_tail_seconds = max_tail_seconds.max(additional_tail);
             }
         }
-        
+
         Duration::from_secs_f64(max_tail_seconds)
     }
 
     /// Play a simple sequence of notes (much easier to use!)
     pub fn play_simple(&self, sequence: SimpleSequence) -> Result<(), String> {
-        tracing::info!("Playing simple sequence with {} notes", sequence.notes.len());
-        
+        tracing::info!(
+            "Playing simple sequence with {} notes",
+            sequence.notes.len()
+        );
+
         if sequence.notes.is_empty() {
             tracing::warn!("No notes to play - sequence is empty");
             return Ok(());
         }
 
         // Convert SimpleNote to MidiNote
-        let notes: Vec<MidiNote> = sequence.notes.into_iter().map(|simple_note| {
-            MidiNote {
+        let notes: Vec<MidiNote> = sequence
+            .notes
+            .into_iter()
+            .map(|simple_note| MidiNote {
                 note: simple_note.note,
                 velocity: simple_note.velocity,
                 channel: simple_note.channel,
@@ -115,42 +122,56 @@ impl MidiPlayer {
                 balance: simple_note.balance,
                 expression: simple_note.expression,
                 sustain: simple_note.sustain,
-            }
-        }).collect();
+            })
+            .collect();
 
         // Calculate total playback time including tail time for effects
-        let note_end_time = notes.iter()
+        let note_end_time = notes
+            .iter()
             .map(|note| note.start_time + note.duration)
             .max()
             .unwrap_or(Duration::from_secs(1));
-        
+
         let tail_time = Self::calculate_tail_time(&notes);
         let total_time = note_end_time + tail_time;
 
         // Log first few notes for debugging
         for (i, note) in notes.iter().take(3).enumerate() {
-            tracing::info!("Note {}: MIDI note {}, velocity {}, start={:.2}s, duration={:.2}s", 
-                          i, note.note, note.velocity, note.start_time.as_secs_f64(), note.duration.as_secs_f64());
+            tracing::info!(
+                "Note {}: MIDI note {}, velocity {}, start={:.2}s, duration={:.2}s",
+                i,
+                note.note,
+                note.velocity,
+                note.start_time.as_secs_f64(),
+                note.duration.as_secs_f64()
+            );
         }
 
-        tracing::info!("Note end time: {:.2}s, tail time: {:.2}s, total playback time: {:.2}s", 
-                      note_end_time.as_secs_f64(), tail_time.as_secs_f64(), total_time.as_secs_f64());
+        tracing::info!(
+            "Note end time: {:.2}s, tail time: {:.2}s, total playback time: {:.2}s",
+            note_end_time.as_secs_f64(),
+            tail_time.as_secs_f64(),
+            total_time.as_secs_f64()
+        );
 
         // Create OxiSynth-based source
         let synth_source = OxiSynthSource::new(notes, total_time)
             .map_err(|e| format!("Failed to create synthesizer source: {}", e))?;
-        
+
         tracing::info!("Created OxiSynth audio source, starting playback");
         self.sink.append(synth_source);
         self.sink.play();
-        
+
         // Wait for the audio to finish playing
         // Add a small buffer to ensure we don't cut off early
         let wait_time = total_time + Duration::from_millis(200);
-        tracing::info!("Waiting {:.2}s for playback to complete...", wait_time.as_secs_f64());
-        
+        tracing::info!(
+            "Waiting {:.2}s for playback to complete...",
+            wait_time.as_secs_f64()
+        );
+
         std::thread::sleep(wait_time);
-        
+
         tracing::info!("OxiSynth playback completed");
 
         Ok(())
@@ -158,55 +179,76 @@ impl MidiPlayer {
 
     /// Play parsed MIDI data (legacy method)
     pub fn play_midi(&self, parsed_midi: ParsedMidi) -> Result<(), String> {
-        tracing::info!("Playing MIDI with {} notes using OxiSynth", parsed_midi.notes.len());
-        
+        tracing::info!(
+            "Playing MIDI with {} notes using OxiSynth",
+            parsed_midi.notes.len()
+        );
+
         if parsed_midi.notes.is_empty() {
             tracing::warn!("No notes to play - MIDI file contains no note events");
             return Ok(());
         }
 
         // Calculate total playback time including tail time for effects
-        let note_end_time = parsed_midi.notes.iter()
+        let note_end_time = parsed_midi
+            .notes
+            .iter()
             .map(|note| note.start_time + note.duration)
             .max()
             .unwrap_or(Duration::from_secs(1));
-        
+
         let tail_time = Self::calculate_tail_time(&parsed_midi.notes);
         let total_time = note_end_time + tail_time;
 
         // Log first few notes for debugging
         for (i, note) in parsed_midi.notes.iter().take(3).enumerate() {
-            tracing::info!("Note {}: MIDI note {}, velocity {}, start={:?}, duration={:?}", 
-                          i, note.note, note.velocity, note.start_time, note.duration);
+            tracing::info!(
+                "Note {}: MIDI note {}, velocity {}, start={:?}, duration={:?}",
+                i,
+                note.note,
+                note.velocity,
+                note.start_time,
+                note.duration
+            );
         }
 
-        tracing::info!("Note end time: {:.2}s, tail time: {:.2}s, total playback time: {:.2}s", 
-                      note_end_time.as_secs_f64(), tail_time.as_secs_f64(), total_time.as_secs_f64());
+        tracing::info!(
+            "Note end time: {:.2}s, tail time: {:.2}s, total playback time: {:.2}s",
+            note_end_time.as_secs_f64(),
+            tail_time.as_secs_f64(),
+            total_time.as_secs_f64()
+        );
 
         // Create OxiSynth-based source
         let synth_source = OxiSynthSource::new(parsed_midi.notes, total_time)
             .map_err(|e| format!("Failed to create synthesizer source: {}", e))?;
-        
+
         tracing::info!("Created OxiSynth audio source, starting playback");
         self.sink.append(synth_source);
         self.sink.play();
-        
+
         // Wait for the audio to finish playing
         // Add a small buffer to ensure we don't cut off early
         let wait_time = total_time + Duration::from_millis(200);
-        tracing::info!("Waiting {:.2}s for playback to complete...", wait_time.as_secs_f64());
-        
+        tracing::info!(
+            "Waiting {:.2}s for playback to complete...",
+            wait_time.as_secs_f64()
+        );
+
         std::thread::sleep(wait_time);
-        
+
         tracing::info!("OxiSynth playback completed");
 
         Ok(())
     }
 
+    /// Stop playback (if any)
+    #[allow(dead_code)]
     pub fn stop(&self) {
         self.sink.stop();
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.sink.empty()
     }
@@ -215,32 +257,34 @@ impl MidiPlayer {
 fn find_soundfont() -> Result<PathBuf, String> {
     // Try to find the SoundFont in various locations
     let exe_path = env::current_exe().map_err(|e| format!("Cannot find executable: {}", e))?;
-    let exe_dir = exe_path.parent().ok_or("Cannot find executable directory")?;
-    
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Cannot find executable directory")?;
+
     let possible_paths = vec![
-        exe_dir.join("../assets/FluidR3_GM.sf2"),      // Development
-        exe_dir.join("assets/FluidR3_GM.sf2"),         // Installed
-        PathBuf::from("assets/FluidR3_GM.sf2"),        // Current directory
-        PathBuf::from("FluidR3_GM.sf2"),               // Current directory
+        exe_dir.join("../assets/FluidR3_GM.sf2"), // Development
+        exe_dir.join("assets/FluidR3_GM.sf2"),    // Installed
+        PathBuf::from("assets/FluidR3_GM.sf2"),   // Current directory
+        PathBuf::from("FluidR3_GM.sf2"),          // Current directory
         // Also check target/debug/assets for development
         PathBuf::from("target/debug/assets/FluidR3_GM.sf2"),
         PathBuf::from("target/release/assets/FluidR3_GM.sf2"),
         // Fallback to old soundfont if it exists
-        exe_dir.join("../assets/TimGM6mb.sf2"),      // Development (old)
-        exe_dir.join("assets/TimGM6mb.sf2"),         // Installed (old)
-        PathBuf::from("assets/TimGM6mb.sf2"),        // Current directory (old)
-        PathBuf::from("TimGM6mb.sf2"),               // Current directory (old)
-        PathBuf::from("target/debug/assets/TimGM6mb.sf2"),   // Development (old)
+        exe_dir.join("../assets/TimGM6mb.sf2"), // Development (old)
+        exe_dir.join("assets/TimGM6mb.sf2"),    // Installed (old)
+        PathBuf::from("assets/TimGM6mb.sf2"),   // Current directory (old)
+        PathBuf::from("TimGM6mb.sf2"),          // Current directory (old)
+        PathBuf::from("target/debug/assets/TimGM6mb.sf2"), // Development (old)
         PathBuf::from("target/release/assets/TimGM6mb.sf2"), // Release (old)
     ];
-    
+
     for path in possible_paths {
         if path.exists() {
             tracing::info!("Found SoundFont at: {:?}", path);
             return Ok(path);
         }
     }
-    
+
     Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
 }
 
@@ -258,39 +302,43 @@ struct OxiSynthSource {
     playing_notes: std::collections::HashMap<(u32, u8), Duration>, // (start_sample, note) -> duration
     samples_generated: usize,
     channel_instruments: std::collections::HashMap<u8, u8>, // channel -> current instrument
-    channel_reverb: std::collections::HashMap<u8, u8>, // channel -> current reverb depth
-    channel_chorus: std::collections::HashMap<u8, u8>, // channel -> current chorus depth
-    channel_volume: std::collections::HashMap<u8, u8>, // channel -> current volume
-    channel_pan: std::collections::HashMap<u8, u8>, // channel -> current pan position
-    channel_balance: std::collections::HashMap<u8, u8>, // channel -> current balance
-    channel_expression: std::collections::HashMap<u8, u8>, // channel -> current expression
-    channel_sustain: std::collections::HashMap<u8, u8>, // channel -> current sustain
+    channel_reverb: std::collections::HashMap<u8, u8>,      // channel -> current reverb depth
+    channel_chorus: std::collections::HashMap<u8, u8>,      // channel -> current chorus depth
+    channel_volume: std::collections::HashMap<u8, u8>,      // channel -> current volume
+    channel_pan: std::collections::HashMap<u8, u8>,         // channel -> current pan position
+    channel_balance: std::collections::HashMap<u8, u8>,     // channel -> current balance
+    channel_expression: std::collections::HashMap<u8, u8>,  // channel -> current expression
+    channel_sustain: std::collections::HashMap<u8, u8>,     // channel -> current sustain
 }
 
 impl OxiSynthSource {
     fn new(notes: Vec<MidiNote>, total_duration: Duration) -> Result<Self, String> {
         let sample_rate = 44100;
-        
+
         // Find and load the SoundFont
         let soundfont_path = find_soundfont()?;
         let mut soundfont_file = fs::File::open(&soundfont_path)
             .map_err(|e| format!("Failed to open SoundFont file: {}", e))?;
-        
+
         let soundfont = SoundFont::load(&mut soundfont_file)
             .map_err(|e| format!("Failed to parse SoundFont: {}", e))?;
-        
+
         // Create synthesizer
         let mut synth = Synth::default();
         synth.add_font(soundfont, true);
-        
+
         tracing::info!("Loaded SoundFont from: {:?}", soundfont_path);
-        
+
         // Use the provided total duration which includes tail time
         let final_duration = total_duration.max(Duration::from_secs(1));
 
         let buffer_size = 1024; // Process audio in chunks
-        
-        tracing::info!("OxiSynth source created: {} notes, total duration: {:?}", notes.len(), final_duration);
+
+        tracing::info!(
+            "OxiSynth source created: {} notes, total duration: {:?}",
+            notes.len(),
+            final_duration
+        );
 
         Ok(Self {
             synth,
@@ -318,12 +366,14 @@ impl OxiSynthSource {
     fn process_audio_chunk(&mut self) {
         // Handle note on/off events for this chunk
         for note in &self.notes {
-            let note_start_sample = (note.start_time.as_secs_f32() * self.sample_rate as f32) as u32;
-            let note_end_sample = ((note.start_time + note.duration).as_secs_f32() * self.sample_rate as f32) as u32;
-            
+            let note_start_sample =
+                (note.start_time.as_secs_f32() * self.sample_rate as f32) as u32;
+            let note_end_sample =
+                ((note.start_time + note.duration).as_secs_f32() * self.sample_rate as f32) as u32;
+
             let current_sample_u32 = self.current_sample as u32;
             let chunk_end = current_sample_u32 + self.buffer_size as u32;
-            
+
             // Check if we should start this note in this chunk
             if note_start_sample >= current_sample_u32 && note_start_sample < chunk_end {
                 let key = (note_start_sample, note.note);
@@ -336,11 +386,11 @@ impl OxiSynthSource {
                             // Bank Select MSB (Controller 0) = 128 for drums
                             let bank_select_msb = MidiEvent::ControlChange {
                                 channel: note.channel,
-                                ctrl: 0, // Bank Select MSB
+                                ctrl: 0,    // Bank Select MSB
                                 value: 128, // Percussion Bank
                             };
                             let _ = self.synth.send_event(bank_select_msb);
-                            
+
                             // Program Change to Standard Kit (program 0 in percussion bank)
                             let program_change = MidiEvent::ProgramChange {
                                 channel: note.channel,
@@ -348,12 +398,15 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(program_change);
                             self.channel_instruments.insert(note.channel, 128);
-                            tracing::debug!("Drum Setup: channel 9 -> percussion bank 128, standard kit");
+                            tracing::debug!(
+                                "Drum Setup: channel 9 -> percussion bank 128, standard kit"
+                            );
                         }
                     } else {
                         // Check if we need to send a program change for this channel
                         if let Some(instrument) = note.instrument {
-                            let current_instrument = self.channel_instruments.get(&note.channel).copied();
+                            let current_instrument =
+                                self.channel_instruments.get(&note.channel).copied();
                             if current_instrument != Some(instrument) {
                                 let program_change = MidiEvent::ProgramChange {
                                     channel: note.channel,
@@ -361,11 +414,15 @@ impl OxiSynthSource {
                                 };
                                 let _ = self.synth.send_event(program_change);
                                 self.channel_instruments.insert(note.channel, instrument);
-                                tracing::debug!("Program Change: channel {} -> instrument {}", note.channel, instrument);
+                                tracing::debug!(
+                                    "Program Change: channel {} -> instrument {}",
+                                    note.channel,
+                                    instrument
+                                );
                             }
                         }
                     }
-                    
+
                     // Check if we need to send reverb control change for this channel
                     if let Some(reverb) = note.reverb {
                         let current_reverb = self.channel_reverb.get(&note.channel).copied();
@@ -377,10 +434,14 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(reverb_cc);
                             self.channel_reverb.insert(note.channel, reverb);
-                            tracing::debug!("Reverb CC: channel {} -> depth {}", note.channel, reverb);
+                            tracing::debug!(
+                                "Reverb CC: channel {} -> depth {}",
+                                note.channel,
+                                reverb
+                            );
                         }
                     }
-                    
+
                     // Check if we need to send chorus control change for this channel
                     if let Some(chorus) = note.chorus {
                         let current_chorus = self.channel_chorus.get(&note.channel).copied();
@@ -392,10 +453,14 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(chorus_cc);
                             self.channel_chorus.insert(note.channel, chorus);
-                            tracing::debug!("Chorus CC: channel {} -> depth {}", note.channel, chorus);
+                            tracing::debug!(
+                                "Chorus CC: channel {} -> depth {}",
+                                note.channel,
+                                chorus
+                            );
                         }
                     }
-                    
+
                     // Check if we need to send volume control change for this channel
                     if let Some(volume) = note.volume {
                         let current_volume = self.channel_volume.get(&note.channel).copied();
@@ -407,10 +472,14 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(volume_cc);
                             self.channel_volume.insert(note.channel, volume);
-                            tracing::debug!("Volume CC: channel {} -> volume {}", note.channel, volume);
+                            tracing::debug!(
+                                "Volume CC: channel {} -> volume {}",
+                                note.channel,
+                                volume
+                            );
                         }
                     }
-                    
+
                     // Check if we need to send pan control change for this channel
                     if let Some(pan) = note.pan {
                         let current_pan = self.channel_pan.get(&note.channel).copied();
@@ -425,7 +494,7 @@ impl OxiSynthSource {
                             tracing::debug!("Pan CC: channel {} -> pan {}", note.channel, pan);
                         }
                     }
-                    
+
                     // Check if we need to send balance control change for this channel
                     if let Some(balance) = note.balance {
                         let current_balance = self.channel_balance.get(&note.channel).copied();
@@ -437,13 +506,18 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(balance_cc);
                             self.channel_balance.insert(note.channel, balance);
-                            tracing::debug!("Balance CC: channel {} -> balance {}", note.channel, balance);
+                            tracing::debug!(
+                                "Balance CC: channel {} -> balance {}",
+                                note.channel,
+                                balance
+                            );
                         }
                     }
-                    
+
                     // Check if we need to send expression control change for this channel
                     if let Some(expression) = note.expression {
-                        let current_expression = self.channel_expression.get(&note.channel).copied();
+                        let current_expression =
+                            self.channel_expression.get(&note.channel).copied();
                         if current_expression != Some(expression) {
                             let expression_cc = MidiEvent::ControlChange {
                                 channel: note.channel,
@@ -452,10 +526,14 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(expression_cc);
                             self.channel_expression.insert(note.channel, expression);
-                            tracing::debug!("Expression CC: channel {} -> expression {}", note.channel, expression);
+                            tracing::debug!(
+                                "Expression CC: channel {} -> expression {}",
+                                note.channel,
+                                expression
+                            );
                         }
                     }
-                    
+
                     // Check if we need to send sustain control change for this channel
                     if let Some(sustain) = note.sustain {
                         let current_sustain = self.channel_sustain.get(&note.channel).copied();
@@ -467,10 +545,14 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(sustain_cc);
                             self.channel_sustain.insert(note.channel, sustain);
-                            tracing::debug!("Sustain CC: channel {} -> sustain {}", note.channel, sustain);
+                            tracing::debug!(
+                                "Sustain CC: channel {} -> sustain {}",
+                                note.channel,
+                                sustain
+                            );
                         }
                     }
-                    
+
                     let midi_event = MidiEvent::NoteOn {
                         channel: note.channel,
                         key: note.note,
@@ -478,10 +560,15 @@ impl OxiSynthSource {
                     };
                     let _ = self.synth.send_event(midi_event);
                     self.playing_notes.insert(key, note.duration);
-                    tracing::debug!("Note ON: {} channel {} at sample {}", note.note, note.channel, note_start_sample);
+                    tracing::debug!(
+                        "Note ON: {} channel {} at sample {}",
+                        note.note,
+                        note.channel,
+                        note_start_sample
+                    );
                 }
             }
-            
+
             // Check if we should end this note in this chunk
             if note_end_sample >= current_sample_u32 && note_end_sample < chunk_end {
                 let key = (note_start_sample, note.note);
@@ -491,27 +578,41 @@ impl OxiSynthSource {
                         key: note.note,
                     };
                     let _ = self.synth.send_event(midi_event);
-                    tracing::debug!("Note OFF: {} channel {} at sample {}", note.note, note.channel, note_end_sample);
+                    tracing::debug!(
+                        "Note OFF: {} channel {} at sample {}",
+                        note.note,
+                        note.channel,
+                        note_end_sample
+                    );
                 }
             }
         }
-        
+
         // Clear buffers
         self.left_buffer.fill(0.0);
         self.right_buffer.fill(0.0);
-        
+
         // Render audio - OxiSynth expects stereo output
-        self.synth.write((&mut self.left_buffer[..], &mut self.right_buffer[..]));
-        
+        self.synth
+            .write((&mut self.left_buffer[..], &mut self.right_buffer[..]));
+
         // Log some debug info about the audio levels
         let max_left = self.left_buffer.iter().map(|x| x.abs()).fold(0.0, f32::max);
-        let max_right = self.right_buffer.iter().map(|x| x.abs()).fold(0.0, f32::max);
-        
+        let max_right = self
+            .right_buffer
+            .iter()
+            .map(|x| x.abs())
+            .fold(0.0, f32::max);
+
         if max_left > 0.001 || max_right > 0.001 {
-            tracing::debug!("Audio chunk: max_left={:.4}, max_right={:.4}, samples={}", 
-                           max_left, max_right, self.buffer_size);
+            tracing::debug!(
+                "Audio chunk: max_left={:.4}, max_right={:.4}, samples={}",
+                max_left,
+                max_right,
+                self.buffer_size
+            );
         }
-        
+
         // Reset buffer position
         self.buffer_pos = 0;
         self.samples_generated += self.buffer_size;
@@ -522,11 +623,15 @@ impl Iterator for OxiSynthSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_time = Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-        
+        let current_time =
+            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+
         if current_time > self.total_duration {
-            tracing::info!("Audio playback finished after {} samples ({:.2}s)", 
-                          self.samples_generated, current_time.as_secs_f32());
+            tracing::info!(
+                "Audio playback finished after {} samples ({:.2}s)",
+                self.samples_generated,
+                current_time.as_secs_f32()
+            );
             return None;
         }
 
@@ -545,7 +650,7 @@ impl Iterator for OxiSynthSource {
 
         self.buffer_pos += 1;
         self.current_sample += 1;
-        
+
         Some(sample)
     }
 }
@@ -579,4 +684,4 @@ mod tests {
             // Success
         }
     }
-} 
+}

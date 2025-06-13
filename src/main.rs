@@ -2,9 +2,9 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 
+mod midi;
 mod server;
 mod setup;
-mod midi;
 
 fn init_logging() {
     // macOS Application Support path
@@ -12,10 +12,7 @@ fn init_logging() {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("mcp-muse");
     let _ = fs::create_dir_all(&log_dir);
-    let file_appender = tracing_appender::rolling::daily(
-        &log_dir,
-        "mcp-muse.log"
-    );
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "mcp-muse.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     tracing_subscriber::fmt()
         .with_writer(non_blocking)

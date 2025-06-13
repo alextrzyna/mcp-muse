@@ -1,17 +1,18 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use std::io::{self, BufRead, Write};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use crate::midi::{parse_midi_data, MidiPlayer, SimpleSequence};
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use std::io::{self, BufRead, Write};
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
+    #[allow(dead_code)]
     jsonrpc: String,
-    id: Option<Value>,
     method: String,
     params: Option<Value>,
+    id: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,9 +36,12 @@ struct JsonRpcError {
 #[derive(Debug, Deserialize)]
 struct InitializeParams {
     #[serde(rename = "protocolVersion")]
+    #[allow(dead_code)]
     protocol_version: String,
+    #[allow(dead_code)]
     capabilities: Value,
     #[serde(rename = "clientInfo")]
+    #[allow(dead_code)]
     client_info: Value,
 }
 
@@ -49,7 +53,7 @@ struct ToolCallParams {
 
 fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling initialize request");
-    
+
     let server_capabilities = json!({
         "tools": {
             "listChanged": false
@@ -82,7 +86,7 @@ fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcRespon
 
 fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling tools/list request");
-    
+
     let tools = json!([
         {
             "name": "play_midi",
@@ -117,7 +121,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                     "maximum": 127
                                 },
                                 "velocity": {
-                                    "type": "integer", 
+                                    "type": "integer",
                                     "description": "🔊 Note attack velocity (intensity): 40=soft, 80=medium, 110=forte, 127=maximum. Affects both volume and timbre",
                                     "minimum": 0,
                                     "maximum": 127
@@ -213,7 +217,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 
 fn handle_resources_list(id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling resources/list request");
-    
+
     JsonRpcResponse {
         jsonrpc: "2.0".to_string(),
         id,
@@ -226,7 +230,7 @@ fn handle_resources_list(id: Option<Value>) -> JsonRpcResponse {
 
 fn handle_prompts_list(id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling prompts/list request");
-    
+
     JsonRpcResponse {
         jsonrpc: "2.0".to_string(),
         id,
@@ -239,7 +243,7 @@ fn handle_prompts_list(id: Option<Value>) -> JsonRpcResponse {
 
 fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling tools/call request");
-    
+
     let params = match params {
         Some(p) => p,
         None => {
@@ -372,18 +376,16 @@ fn handle_play_midi_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse
                 error: None,
             }
         }
-        Err(e) => {
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to play MIDI: {}", e),
-                    data: None,
-                }),
-            }
-        }
+        Err(e) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32603,
+                message: format!("Failed to play MIDI: {}", e),
+                data: None,
+            }),
+        },
     }
 }
 
@@ -452,24 +454,22 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
                 error: None,
             }
         }
-        Err(e) => {
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to play note sequence: {}", e),
-                    data: None,
-                }),
-            }
-        }
+        Err(e) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32603,
+                message: format!("Failed to play note sequence: {}", e),
+                data: None,
+            }),
+        },
     }
 }
 
 pub fn run_stdio_server() {
     tracing::info!("MCP server starting");
-    
+
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let reader = stdin.lock();
@@ -478,7 +478,7 @@ pub fn run_stdio_server() {
         match line {
             Ok(line) if !line.trim().is_empty() => {
                 tracing::debug!("Received: {}", line);
-                
+
                 let request: JsonRpcRequest = match serde_json::from_str(&line) {
                     Ok(req) => req,
                     Err(e) => {
@@ -543,6 +543,6 @@ pub fn run_stdio_server() {
             }
         }
     }
-    
+
     tracing::info!("MCP server shutting down");
-} 
+}
