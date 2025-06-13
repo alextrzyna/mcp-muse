@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::expressive::{ExpressiveSynth, R2D2Emotion, R2D2Expression, R2D2Voice};
 use crate::midi::{parse_midi_data, MidiPlayer, SimpleSequence};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -202,6 +203,52 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                 },
                 "required": ["notes"]
             }
+        },
+        {
+            "name": "play_r2d2_expression",
+            "description": "🤖 Express emotions through authentic R2D2-style robotic vocalizations! This advanced synthesizer uses ring modulation, formant filtering, and emotional parameter mapping to create expressive robot sounds that enhance AI conversations:\n\n🎭 EMOTIONAL EXPRESSIONS:\n• Happy: Rising pitch contours with bright harmonics - perfect for celebrating user successes\n• Sad: Falling pitch with reduced harmonics - gentle empathy for disappointments\n• Excited: Rapid modulation and high energy bursts - enthusiasm for discoveries\n• Worried: Tremulous modulation with unstable pitch - concern for problems\n• Curious: Rising question-like intonations - engagement with mysteries\n• Affirmative: Confident, stable pitch patterns - agreement and confirmation\n• Negative: Sharp, decisive rejection patterns - clear disagreement\n• Surprised: Sudden pitch jumps with expanded range - shock and amazement\n• Thoughtful: Slow, contemplative patterns - deep consideration\n\n🔧 TECHNICAL FEATURES:\n• Ring modulation synthesis for authentic robotic character\n• Multi-formant filtering for organic vocal-like qualities\n• Dynamic pitch contours that match emotional states\n• Phrase complexity control (1-5 syllables for varied expressions)\n• Intensity scaling for subtle to dramatic emotional range\n• Real-time parameter modulation for expressive dynamics\n\n💬 CONVERSATION ENHANCEMENT:\n• Use Happy expressions when users solve problems or achieve goals\n• Express Curiosity when presenting questions or exploring topics\n• Show Surprise for unexpected revelations or plot twists\n• Demonstrate Thoughtfulness during complex explanations\n• Provide Affirmative responses for confirmations and agreements\n• Use Worried tones when discussing problems or concerns\n• Express Excitement for breakthroughs and discoveries\n\n🎵 USAGE EXAMPLES:\n**Celebrating Success**: emotion=\"Happy\", intensity=0.8, duration=1.2, phrase_complexity=3\n**Asking Questions**: emotion=\"Curious\", intensity=0.6, duration=0.8, phrase_complexity=2  \n**Showing Concern**: emotion=\"Worried\", intensity=0.7, duration=1.0, phrase_complexity=2\n**Expressing Wonder**: emotion=\"Surprised\", intensity=0.9, duration=0.6, phrase_complexity=1\n\n🌟 ADD PERSONALITY TO EVERY INTERACTION! R2D2-style expressions make AI conversations more engaging, memorable, and emotionally resonant. Use liberally to create a rich, expressive robotic personality that users will love!",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "emotion": {
+                        "type": "string",
+                        "description": "🎭 R2D2 emotional state",
+                        "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]
+                    },
+                    "intensity": {
+                        "type": "number",
+                        "description": "🔥 Emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic",
+                        "minimum": 0.0,
+                        "maximum": 1.0
+                    },
+                    "duration": {
+                        "type": "number",
+                        "description": "⏱️ Expression duration in seconds: 0.5=quick, 1.0=normal, 2.0=extended",
+                        "minimum": 0.1,
+                        "maximum": 5.0
+                    },
+                    "phrase_complexity": {
+                        "type": "integer",
+                        "description": "🗣️ Number of syllables (1-5): 1=simple beep, 3=conversational, 5=complex phrase",
+                        "minimum": 1,
+                        "maximum": 5
+                    },
+                    "pitch_range": {
+                        "type": "array",
+                        "description": "🎵 Frequency range [min_hz, max_hz]: [200,600]=low, [300,800]=normal, [400,1000]=high",
+                        "items": {
+                            "type": "number"
+                        },
+                        "minItems": 2,
+                        "maxItems": 2
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "💭 Optional conversation context for enhanced expression adaptation"
+                    }
+                },
+                "required": ["emotion", "intensity", "duration", "phrase_complexity", "pitch_range"]
+            }
         }
     ]);
 
@@ -279,6 +326,7 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
     match tool_params.name.as_str() {
         "play_midi" => handle_play_midi_tool(tool_params.arguments, id),
         "play_notes" => handle_play_notes_tool(tool_params.arguments, id),
+        "play_r2d2_expression" => handle_play_r2d2_expression_tool(tool_params.arguments, id),
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -461,6 +509,173 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
             error: Some(JsonRpcError {
                 code: -32603,
                 message: format!("Failed to play note sequence: {}", e),
+                data: None,
+            }),
+        },
+    }
+}
+
+fn handle_play_r2d2_expression_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+    // Parse the R2D2 expression parameters
+    #[derive(serde::Deserialize)]
+    struct R2D2ExpressionArgs {
+        emotion: String,
+        intensity: f32,
+        duration: f32,
+        phrase_complexity: u8,
+        pitch_range: Vec<f32>,
+        context: Option<String>,
+    }
+
+    let args: R2D2ExpressionArgs = match serde_json::from_value(arguments) {
+        Ok(args) => args,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Failed to parse R2D2 expression arguments: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    // Validate arguments
+    if args.pitch_range.len() != 2 {
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: "pitch_range must contain exactly 2 values [min_hz, max_hz]".to_string(),
+                data: None,
+            }),
+        };
+    }
+
+    if args.intensity < 0.0 || args.intensity > 1.0 {
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: "intensity must be between 0.0 and 1.0".to_string(),
+                data: None,
+            }),
+        };
+    }
+
+    // Parse emotion
+    let emotion = match args.emotion.as_str() {
+        "Happy" => R2D2Emotion::Happy,
+        "Sad" => R2D2Emotion::Sad,
+        "Excited" => R2D2Emotion::Excited,
+        "Worried" => R2D2Emotion::Worried,
+        "Curious" => R2D2Emotion::Curious,
+        "Affirmative" => R2D2Emotion::Affirmative,
+        "Negative" => R2D2Emotion::Negative,
+        "Surprised" => R2D2Emotion::Surprised,
+        "Thoughtful" => R2D2Emotion::Thoughtful,
+        _ => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Unknown emotion: {}", args.emotion),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    // Create R2D2 expression
+    let expression = R2D2Expression {
+        emotion,
+        intensity: args.intensity,
+        duration: args.duration,
+        phrase_complexity: args.phrase_complexity,
+        pitch_range: (args.pitch_range[0], args.pitch_range[1]),
+        context: args.context,
+    };
+
+    // Create expressive synthesizer
+    let synth = match ExpressiveSynth::new() {
+        Ok(s) => s,
+        Err(e) => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Failed to create expressive synthesizer: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    // Create R2D2 voice generator
+    let r2d2_voice = R2D2Voice::new();
+
+    // Generate synthesis parameters
+    let synth_params = match r2d2_voice.generate_expression_params(&expression) {
+        Some(params) => params,
+        None => {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: "Failed to generate R2D2 expression parameters".to_string(),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    // Play the R2D2 expression
+    match synth.play_r2d2_expression(
+        synth_params.base_freq,
+        synth_params.modulation_depth,
+        synth_params.pitch_contour,
+        synth_params.duration,
+    ) {
+        Ok(()) => {
+            tracing::info!("Successfully started R2D2 expression playback: {:?}", expression.emotion);
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: Some(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("🤖 R2D2 {} expression played successfully using FunDSP synthesizer! The robotic vocalization conveyed the emotion with {:.1}% intensity over {:.1} seconds.", 
+                                expression.emotion, 
+                                expression.intensity * 100.0, 
+                                expression.duration
+                            )
+                        }
+                    ]
+                })),
+                error: None,
+            }
+        }
+        Err(e) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32603,
+                message: format!("Failed to play R2D2 expression: {}", e),
                 data: None,
             }),
         },

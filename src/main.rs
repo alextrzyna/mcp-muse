@@ -2,6 +2,7 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 
+mod expressive;
 mod midi;
 mod server;
 mod setup;
