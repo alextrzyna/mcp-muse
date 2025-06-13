@@ -29,9 +29,7 @@ impl MidiPlayer {
         let mut max_tail_seconds: f64 = 2.0; // Base tail time for natural instrument decay
 
         // Check for reverb effects
-        let has_reverb = notes
-            .iter()
-            .any(|note| note.reverb.is_some_and(|r| r > 0));
+        let has_reverb = notes.iter().any(|note| note.reverb.is_some_and(|r| r > 0));
         if has_reverb {
             let max_reverb = notes
                 .iter()
@@ -44,9 +42,7 @@ impl MidiPlayer {
         }
 
         // Check for chorus effects
-        let has_chorus = notes
-            .iter()
-            .any(|note| note.chorus.is_some_and(|c| c > 0));
+        let has_chorus = notes.iter().any(|note| note.chorus.is_some_and(|c| c > 0));
         if has_chorus {
             let max_chorus = notes
                 .iter()
@@ -59,9 +55,7 @@ impl MidiPlayer {
         }
 
         // Check for sustain pedal
-        let has_sustain = notes
-            .iter()
-            .any(|note| note.sustain.is_some_and(|s| s > 0));
+        let has_sustain = notes.iter().any(|note| note.sustain.is_some_and(|s| s > 0));
         if has_sustain {
             // Sustain pedal can significantly extend notes
             max_tail_seconds = max_tail_seconds.max(4.0);

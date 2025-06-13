@@ -108,14 +108,15 @@ fn test_mcp_tools_list() {
 
     let tools = response["result"]["tools"].as_array().unwrap();
     assert_eq!(tools.len(), 2);
-    
+
     // Check that both tools are present
-    let tool_names: Vec<&str> = tools.iter()
+    let tool_names: Vec<&str> = tools
+        .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
     assert!(tool_names.contains(&"play_midi"));
     assert!(tool_names.contains(&"play_notes"));
-    
+
     // Verify structure of both tools
     for tool in tools {
         assert!(tool["description"].is_string());
