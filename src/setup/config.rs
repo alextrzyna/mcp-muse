@@ -3,11 +3,12 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-const CONFIG_FILE: &str = ".mcp_muse_config.json";
+const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct SetupConfig {
     pub hosts: Vec<HostConfig>,
+    pub soundfont_path: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -19,8 +20,14 @@ pub struct HostConfig {
 
 impl SetupConfig {
     pub fn config_path() -> PathBuf {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
-            .join(CONFIG_FILE)
+        let config_dir = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("mcp-muse");
+
+        // Ensure the directory exists
+        let _ = fs::create_dir_all(&config_dir);
+
+        config_dir.join(CONFIG_FILE)
     }
 
     pub fn load() -> io::Result<Self> {
@@ -32,8 +39,7 @@ impl SetupConfig {
         if content.trim().is_empty() {
             return Ok(SetupConfig::default());
         }
-        let config: SetupConfig = serde_json::from_str(&content)
-            .unwrap_or_default();
+        let config: SetupConfig = serde_json::from_str(&content).unwrap_or_default();
         Ok(config)
     }
 
@@ -43,12 +49,4 @@ impl SetupConfig {
         let mut file = fs::File::create(path)?;
         file.write_all(content.as_bytes())
     }
-
-    pub fn upsert_host(&mut self, host: HostConfig) {
-        if let Some(existing) = self.hosts.iter_mut().find(|h| h.name == host.name) {
-            *existing = host;
-        } else {
-            self.hosts.push(host);
-        }
-    }
-} 
+}
