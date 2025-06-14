@@ -107,9 +107,9 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 3);
+    assert_eq!(tools.len(), 4);
 
-    // Check that all three tools are present
+    // Check that all four tools are present
     let tool_names: Vec<&str> = tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
@@ -117,6 +117,7 @@ fn test_mcp_tools_list() {
     assert!(tool_names.contains(&"play_midi"));
     assert!(tool_names.contains(&"play_notes"));
     assert!(tool_names.contains(&"play_r2d2_expression"));
+    assert!(tool_names.contains(&"play_expressive_synth"));
 
     // Verify structure of both tools
     for tool in tools {

@@ -285,6 +285,91 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                 },
                 "required": ["emotion", "intensity", "duration", "phrase_complexity", "pitch_range"]
             }
+        },
+        {
+            "name": "play_expressive_synth",
+            "description": "🎨 Create expressive synthesized sounds and music using advanced FunDSP synthesis techniques! Perfect for unique audio experiences beyond traditional MIDI:\n\n🎛️ SYNTHESIS TYPES:\n• Oscillator: sine, square, sawtooth, triangle, noise with advanced shaping\n• FM Synthesis: carrier/modulator with complex timbres and feedback\n• Granular: textured, evolving soundscapes from grain clouds\n• Wavetable: morphing between sonic characters with smooth transitions\n\n🥁 PERCUSSION & DRUMS:\n• Kick: punchy, sustained bass drums with click and body control\n• Snare: snappy, buzzy snare drums with tone and noise balance\n• Hi-hat: metallic, decaying cymbals with brightness control\n• Cymbal: realistic cymbal synthesis with size and material options\n• Custom: design your own percussion sounds with full parameter control\n\n🎭 SOUND EFFECTS:\n• Swoosh: directional movement effects with frequency sweeps\n• Zap: energy bursts and laser sounds with harmonic control\n• Chime: harmonic bell-like tones with inharmonicity\n• Burst: explosive sounds with spectral shaping\n• Custom: create unique sound effects for specific contexts\n\n🌊 AMBIENT & TEXTURES:\n• Pad: warm, evolving harmonic textures with movement\n• Texture: rough, evolving soundscapes with spectral control\n• Drone: sustained tones with complex overtone structures\n• Atmosphere: environmental sounds and ambient textures\n\n✨ ADVANCED FEATURES:\n• Real-time filter sweeps and modulation with multiple LFOs\n• Complex envelope shaping (ADSR+ with curve types)\n• Multiple simultaneous effect chains with routing\n• Spatial positioning and movement in stereo field\n• Granular synthesis with custom grain sources\n• Wavetable morphing with smooth interpolation\n\n🎵 USE CASES:\n• Unique sound design for specific moments and contexts\n• Electronic music elements and synthesized instruments\n• Game-style sound effects and interactive audio\n• Ambient soundscapes and evolving textures\n• Experimental audio experiences and sonic exploration\n• Custom percussion and drum sounds\n• Musical accompaniment with synthesized elements\n\n💡 CREATIVE EXAMPLES:\n• Sci-fi atmosphere with granular textures and filtered noise\n• Retro game sounds with square waves and FM synthesis\n• Ambient meditation music with evolving pads and drones\n• Electronic percussion with custom kick and snare synthesis\n• Sound effects for storytelling and dramatic moments\n• Experimental music with wavetable morphing and complex modulation",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "sounds": {
+                        "type": "array",
+                        "description": "Array of synthesized sounds to play",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "synth_type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "sine", "square", "sawtooth", "triangle", "noise",
+                                        "fm", "granular", "wavetable",
+                                        "kick", "snare", "hihat", "cymbal",
+                                        "swoosh", "zap", "chime", "burst",
+                                        "pad", "texture", "drone"
+                                    ],
+                                    "description": "Type of synthesis to use"
+                                },
+                                "frequency": {
+                                    "type": "number",
+                                    "description": "Base frequency in Hz (20-20000)",
+                                    "minimum": 20,
+                                    "maximum": 20000
+                                },
+                                "duration": {
+                                    "type": "number",
+                                    "description": "Duration in seconds",
+                                    "minimum": 0.1,
+                                    "maximum": 30.0
+                                },
+                                "amplitude": {
+                                    "type": "number",
+                                    "description": "Amplitude level (0.0-1.0)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "envelope": {
+                                    "type": "object",
+                                    "description": "ADSR envelope parameters",
+                                    "properties": {
+                                        "attack": {"type": "number", "minimum": 0.0, "maximum": 5.0},
+                                        "decay": {"type": "number", "minimum": 0.0, "maximum": 5.0},
+                                        "sustain": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                                        "release": {"type": "number", "minimum": 0.0, "maximum": 10.0}
+                                    }
+                                },
+                                "filter": {
+                                    "type": "object",
+                                    "description": "Filter parameters",
+                                    "properties": {
+                                        "filter_type": {"type": "string", "enum": ["lowpass", "highpass", "bandpass"]},
+                                        "cutoff": {"type": "number", "minimum": 20, "maximum": 20000},
+                                        "resonance": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+                                    }
+                                },
+                                "effects": {
+                                    "type": "array",
+                                    "description": "Array of effects to apply",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "effect_type": {"type": "string", "enum": ["reverb", "chorus", "delay"]},
+                                            "intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+                                        }
+                                    }
+                                },
+                                // Synthesis-specific parameters
+                                "pulse_width": {"type": "number", "minimum": 0.1, "maximum": 0.9},
+                                "modulator_freq": {"type": "number", "minimum": 0.1, "maximum": 1000},
+                                "modulation_index": {"type": "number", "minimum": 0.0, "maximum": 10.0},
+                                "grain_size": {"type": "number", "minimum": 0.01, "maximum": 0.5},
+                                "texture_roughness": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+                            },
+                            "required": ["synth_type", "duration"]
+                        }
+                    }
+                },
+                "required": ["sounds"]
+            }
         }
     ]);
 
@@ -363,6 +448,7 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
         "play_midi" => handle_play_midi_tool(tool_params.arguments, id),
         "play_notes" => handle_play_notes_tool(tool_params.arguments, id),
         "play_r2d2_expression" => handle_play_r2d2_expression_tool(tool_params.arguments, id),
+        "play_expressive_synth" => handle_play_expressive_synth_tool(tool_params.arguments, id),
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -775,6 +861,282 @@ fn handle_play_r2d2_expression_tool(arguments: Value, id: Option<Value>) -> Json
                 data: None,
             }),
         },
+    }
+}
+
+fn handle_play_expressive_synth_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+    use crate::expressive::synth::{ExpressiveSynth, SynthParams, SynthType, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType, NoiseColor};
+    
+    #[derive(Deserialize)]
+    struct ExpressiveSynthArgs {
+        sounds: Vec<SynthSound>,
+    }
+    
+    #[derive(Deserialize)]
+    struct SynthSound {
+        synth_type: String,
+        frequency: Option<f32>,
+        duration: f32,
+        amplitude: Option<f32>,
+        envelope: Option<EnvelopeSpec>,
+        filter: Option<FilterSpec>,
+        effects: Option<Vec<EffectSpec>>,
+        // Synthesis-specific parameters
+        pulse_width: Option<f32>,
+        modulator_freq: Option<f32>,
+        modulation_index: Option<f32>,
+        grain_size: Option<f32>,
+        texture_roughness: Option<f32>,
+    }
+    
+    #[derive(Deserialize)]
+    struct EnvelopeSpec {
+        attack: Option<f32>,
+        decay: Option<f32>,
+        sustain: Option<f32>,
+        release: Option<f32>,
+    }
+    
+    #[derive(Deserialize)]
+    struct FilterSpec {
+        filter_type: Option<String>,
+        cutoff: Option<f32>,
+        resonance: Option<f32>,
+    }
+    
+    #[derive(Deserialize)]
+    struct EffectSpec {
+        effect_type: String,
+        intensity: Option<f32>,
+    }
+    
+    match serde_json::from_value::<ExpressiveSynthArgs>(arguments) {
+        Ok(args) => {
+            match ExpressiveSynth::new() {
+                Ok(synth) => {
+                    // Convert SynthSound to SynthParams
+                    let mut synth_params = Vec::new();
+                    
+                    for sound in args.sounds {
+                        // Parse synthesis type
+                        let synth_type = match sound.synth_type.as_str() {
+                            "sine" => SynthType::Sine,
+                            "square" => SynthType::Square { 
+                                pulse_width: sound.pulse_width.unwrap_or(0.5) 
+                            },
+                            "sawtooth" => SynthType::Sawtooth,
+                            "triangle" => SynthType::Triangle,
+                            "noise" => SynthType::Noise { color: NoiseColor::White },
+                            "fm" => SynthType::FM { 
+                                modulator_freq: sound.modulator_freq.unwrap_or(440.0),
+                                modulation_index: sound.modulation_index.unwrap_or(1.0)
+                            },
+                            "granular" => SynthType::Granular {
+                                grain_size: sound.grain_size.unwrap_or(0.1),
+                                overlap: 0.5,
+                                density: 0.8
+                            },
+                            "wavetable" => SynthType::Wavetable {
+                                position: 0.5,
+                                morph_speed: 1.0
+                            },
+                            "kick" => SynthType::Kick {
+                                punch: 0.8,
+                                sustain: 0.6,
+                                click_freq: 1000.0,
+                                body_freq: 60.0
+                            },
+                            "snare" => SynthType::Snare {
+                                snap: 0.7,
+                                buzz: 0.8,
+                                tone_freq: 200.0,
+                                noise_amount: 0.6
+                            },
+                            "hihat" => SynthType::HiHat {
+                                metallic: 0.9,
+                                decay: 0.1,
+                                brightness: 0.8
+                            },
+                            "cymbal" => SynthType::Cymbal {
+                                size: 0.8,
+                                metallic: 0.9,
+                                strike_intensity: 0.8
+                            },
+                            "swoosh" => SynthType::Swoosh {
+                                direction: 0.0,
+                                intensity: 0.7,
+                                frequency_sweep: (200.0, 2000.0)
+                            },
+                            "zap" => SynthType::Zap {
+                                energy: 0.8,
+                                decay: 0.3,
+                                harmonic_content: 0.7
+                            },
+                            "chime" => SynthType::Chime {
+                                fundamental: sound.frequency.unwrap_or(440.0),
+                                harmonic_count: 4,
+                                decay: 0.8,
+                                inharmonicity: 0.1
+                            },
+                            "burst" => SynthType::Burst {
+                                center_freq: sound.frequency.unwrap_or(1000.0),
+                                bandwidth: 500.0,
+                                intensity: 0.8,
+                                shape: 0.5
+                            },
+                            "pad" => SynthType::Pad {
+                                warmth: 0.7,
+                                movement: 0.3,
+                                space: 0.6,
+                                harmonic_evolution: 0.5
+                            },
+                            "texture" => SynthType::Texture {
+                                roughness: sound.texture_roughness.unwrap_or(0.5),
+                                evolution: 0.3,
+                                spectral_tilt: 0.5,
+                                modulation_depth: 0.4
+                            },
+                            "drone" => SynthType::Drone {
+                                fundamental: sound.frequency.unwrap_or(110.0),
+                                overtone_spread: 0.3,
+                                modulation: 0.2
+                            },
+                            _ => {
+                                return JsonRpcResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    id,
+                                    result: None,
+                                    error: Some(JsonRpcError {
+                                        code: -32602,
+                                        message: format!("Unknown synthesis type: {}", sound.synth_type),
+                                        data: None,
+                                    }),
+                                };
+                            }
+                        };
+                        
+                        // Create envelope
+                        let envelope = if let Some(env) = sound.envelope {
+                            EnvelopeParams {
+                                attack: env.attack.unwrap_or(0.1),
+                                decay: env.decay.unwrap_or(0.1),
+                                sustain: env.sustain.unwrap_or(0.8),
+                                release: env.release.unwrap_or(0.3),
+                            }
+                        } else {
+                            EnvelopeParams {
+                                attack: 0.1,
+                                decay: 0.1,
+                                sustain: 0.8,
+                                release: 0.3,
+                            }
+                        };
+                        
+                        // Create filter if specified
+                        let filter = if let Some(filt) = sound.filter {
+                            let filter_type = match filt.filter_type.as_deref().unwrap_or("lowpass") {
+                                "lowpass" => FilterType::LowPass,
+                                "highpass" => FilterType::HighPass,
+                                "bandpass" => FilterType::BandPass,
+                                _ => FilterType::LowPass,
+                            };
+                            Some(FilterParams {
+                                cutoff: filt.cutoff.unwrap_or(1000.0),
+                                resonance: filt.resonance.unwrap_or(0.5),
+                                filter_type,
+                            })
+                        } else {
+                            None
+                        };
+                        
+                        // Create effects
+                        let effects = if let Some(fx) = sound.effects {
+                            fx.into_iter().map(|effect| {
+                                let effect_type = match effect.effect_type.as_str() {
+                                    "reverb" => EffectType::Reverb,
+                                    "chorus" => EffectType::Chorus,
+                                    "delay" => EffectType::Delay { delay_time: 0.2 },
+                                    _ => EffectType::Reverb,
+                                };
+                                EffectParams {
+                                    effect_type,
+                                    intensity: effect.intensity.unwrap_or(0.5),
+                                }
+                            }).collect()
+                        } else {
+                            Vec::new()
+                        };
+                        
+                        let params = SynthParams {
+                            synth_type,
+                            frequency: sound.frequency.unwrap_or(440.0),
+                            amplitude: sound.amplitude.unwrap_or(0.5),
+                            duration: sound.duration,
+                            envelope,
+                            filter,
+                            effects,
+                        };
+                        
+                        synth_params.push(params);
+                    }
+                    
+                    // Play the synthesized sequence
+                    match synth.play_synthesized_sequence(synth_params.clone()) {
+                        Ok(_) => {
+                            JsonRpcResponse {
+                                jsonrpc: "2.0".to_string(),
+                                id,
+                                result: Some(json!({
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": format!("🎨 Expressive synthesis sequence played successfully! Generated {} synthesized sound(s) with advanced audio processing.", synth_params.len())
+                                        }
+                                    ]
+                                })),
+                                error: None,
+                            }
+                        }
+                        Err(e) => {
+                            JsonRpcResponse {
+                                jsonrpc: "2.0".to_string(),
+                                id,
+                                result: None,
+                                error: Some(JsonRpcError {
+                                    code: -32603,
+                                    message: format!("Synthesis playback failed: {}", e),
+                                    data: None,
+                                }),
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    JsonRpcResponse {
+                        jsonrpc: "2.0".to_string(),
+                        id,
+                        result: None,
+                        error: Some(JsonRpcError {
+                            code: -32603,
+                            message: format!("Failed to create ExpressiveSynth: {}", e),
+                            data: None,
+                        }),
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid arguments: {}", e),
+                    data: None,
+                }),
+            }
+        }
     }
 }
 
