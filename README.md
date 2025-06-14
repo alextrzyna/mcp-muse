@@ -3,16 +3,28 @@
   
   <table>
     <tr>
-      <td>
+      <td align="center">
         <a href="https://youtu.be/0ZWhG9d-SQA">
-          <img src="https://img.youtube.com/vi/0ZWhG9d-SQA/maxresdefault.jpg" alt="Watch MCP Muse Demo Video" width="400">
+          <img src="https://img.youtube.com/vi/0ZWhG9d-SQA/maxresdefault.jpg" alt="Watch MCP Muse Demo Video" width="300">
         </a>
+        <br>
+        <strong>MCP Muse Intro</strong>
       </td>
-      <td width="50"></td>
-      <td>
+      <td width="30"></td>
+      <td align="center">
         <a href="https://youtu.be/aPbnR2KNRfs?si=iUDkXY1Jxe8h_mfS&t=39">
-          <img src="https://img.youtube.com/vi/aPbnR2KNRfs/hqdefault.jpg" alt="Watch MCP Muse Demo Video" width="400">
+          <img src="https://img.youtube.com/vi/aPbnR2KNRfs/hqdefault.jpg" alt="Watch MCP Muse Demo Video" width="300">
         </a>
+        <br>
+        <strong>MCP Muse Makes Grunge and Metal</strong>
+      </td>
+      <td width="30"></td>
+      <td align="center">
+        <a href="https://youtu.be/sG9LZWkvGNA">
+          <img src="https://img.youtube.com/vi/sG9LZWkvGNA/maxresdefault.jpg" alt="Watch MCP Muse Demo Video" width="300">
+        </a>
+        <br>
+        <strong>MCP Muse Makes RPG Music In Realtime</strong>
       </td>
     </tr>
   </table>
