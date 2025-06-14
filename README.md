@@ -1,9 +1,23 @@
 
 <div align="center">
   
-  [![Watch MCP Muse Demo Video](https://img.youtube.com/vi/0ZWhG9d-SQA/maxresdefault.jpg)](https://youtu.be/0ZWhG9d-SQA)
+  <table>
+    <tr>
+      <td>
+        <a href="https://youtu.be/0ZWhG9d-SQA">
+          <img src="https://img.youtube.com/vi/0ZWhG9d-SQA/maxresdefault.jpg" alt="Watch MCP Muse Demo Video" width="400">
+        </a>
+      </td>
+      <td width="50"></td>
+      <td>
+        <a href="https://youtu.be/aPbnR2KNRfs?si=iUDkXY1Jxe8h_mfS&t=39">
+          <img src="https://img.youtube.com/vi/aPbnR2KNRfs/hqdefault.jpg" alt="Watch MCP Muse Demo Video" width="400">
+        </a>
+      </td>
+    </tr>
+  </table>
   
-  **🎬 Click the image above to watch the demo video! 🎬**
+  **🎬 Click the images above to watch the demo videos! 🎬**
   
   <br/>
   <br/>
