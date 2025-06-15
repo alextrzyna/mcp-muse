@@ -148,6 +148,20 @@ pub struct SimpleNote {
     /// Texture roughness (0.0-1.0, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_texture_roughness: Option<f32>,
+
+    // NEW: Classic Synthesizer Preset parameters (optional)
+    /// Preset name to load (e.g., "Minimoog Bass", "TB-303 Acid")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_name: Option<String>,
+    /// Preset category to select from (e.g., "bass", "pad", "lead")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_category: Option<String>,
+    /// Preset variation to apply (e.g., "bright", "dark")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_variation: Option<String>,
+    /// If true, select random preset from category
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_random: Option<bool>,
 }
 
 fn default_note_type() -> String {
@@ -224,6 +238,10 @@ impl SimpleSequence {
             synth_modulation_index: None,
             synth_grain_size: None,
             synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -277,6 +295,10 @@ impl SimpleSequence {
             synth_modulation_index: None,
             synth_grain_size: None,
             synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -331,6 +353,10 @@ impl SimpleSequence {
             synth_modulation_index: None,
             synth_grain_size: None,
             synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -407,6 +433,10 @@ impl SimpleSequence {
             synth_modulation_index: None,
             synth_grain_size: None,
             synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -423,6 +453,13 @@ impl SimpleNote {
     /// Check if this note is a synthesis note
     pub fn is_synthesis(&self) -> bool {
         self.synth_type.is_some()
+    }
+
+    /// Check if this note uses presets
+    pub fn is_preset(&self) -> bool {
+        self.preset_name.is_some() || 
+        self.preset_category.is_some() || 
+        self.preset_random.unwrap_or(false)
     }
 
     /// Validate R2D2 parameters if this is an R2D2 note
@@ -637,6 +674,47 @@ impl SimpleNote {
         if let Some(roughness) = self.synth_texture_roughness {
             if roughness < 0.0 || roughness > 1.0 {
                 return Err(format!("Texture roughness {} is out of range (0.0-1.0)", roughness));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate preset parameters if this note uses presets
+    pub fn validate_preset(&self) -> Result<(), String> {
+        if !self.is_preset() {
+            return Ok(());
+        }
+
+        // Validate that we have either a name or category (but not both conflicting modes)
+        let has_name = self.preset_name.is_some();
+        let has_category = self.preset_category.is_some();
+        let has_random = self.preset_random.unwrap_or(false);
+
+        if has_name && has_random {
+            return Err("Cannot use both 'preset_name' and 'preset_random' - choose one".to_string());
+        }
+
+        if has_category && has_name {
+            // This is fine - category can be used with name for validation
+        }
+
+        if has_random && !has_category {
+            return Err("When using 'preset_random', you must specify 'preset_category'".to_string());
+        }
+
+        if !has_name && !has_category && !has_random {
+            return Err("Preset note must specify either 'preset_name', 'preset_category', or 'preset_random'".to_string());
+        }
+
+        // Validate category if provided
+        if let Some(category) = &self.preset_category {
+            let valid_categories = ["bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects"];
+            if !valid_categories.contains(&category.to_lowercase().as_str()) {
+                return Err(format!(
+                    "Invalid preset category '{}'. Valid categories: {:?}",
+                    category, valid_categories
+                ));
             }
         }
 

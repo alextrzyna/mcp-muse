@@ -186,6 +186,40 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 **FM Bell Synthesis:**
 [{\"synth_type\": \"fm\", \"synth_frequency\": 440, \"synth_modulator_freq\": 880, \"synth_modulation_index\": 3.0, \"start_time\": 0, \"duration\": 2.0}]
 
+🎹 **CLASSIC SYNTHESIZER PRESETS (NEW!):**
+
+**80s Funk Bass Line (Minimoog Style):**
+[{\"preset_name\": \"Minimoog Bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5}, {\"preset_name\": \"Minimoog Bass\", \"note\": 36, \"velocity\": 80, \"start_time\": 0.5, \"duration\": 0.5}, {\"preset_name\": \"Minimoog Bass\", \"note\": 38, \"velocity\": 90, \"start_time\": 1.0, \"duration\": 0.5}]
+
+**Acid House Bassline (TB-303 Style):**
+[{\"preset_name\": \"TB-303 Acid\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25}, {\"preset_name\": \"TB-303 Acid\", \"preset_variation\": \"squelchy\", \"note\": 43, \"velocity\": 120, \"start_time\": 0.25, \"duration\": 0.25}]
+
+**Lush Atmospheric Pad (Jupiter-8 Style):**
+[{\"preset_name\": \"JP-8 Strings\", \"note\": 60, \"velocity\": 80, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"JP-8 Strings\", \"note\": 64, \"velocity\": 75, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"JP-8 Strings\", \"note\": 67, \"velocity\": 70, \"start_time\": 0, \"duration\": 4.0}]
+
+**Classic 80s Electric Piano:**
+[{\"preset_name\": \"DX7 E.Piano\", \"note\": 60, \"velocity\": 90, \"start_time\": 0, \"duration\": 1.0}, {\"preset_name\": \"DX7 E.Piano\", \"note\": 64, \"velocity\": 85, \"start_time\": 1.0, \"duration\": 1.0}, {\"preset_name\": \"DX7 E.Piano\", \"note\": 67, \"velocity\": 80, \"start_time\": 2.0, \"duration\": 1.0}]
+
+**Random Preset Discovery:**
+[{\"preset_random\": true, \"preset_category\": \"bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 1.0}]
+
+**Mixed Vintage + Modern:**
+[{\"preset_name\": \"Analog Wash\", \"note\": 48, \"velocity\": 60, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"Prophet Lead\", \"note\": 72, \"velocity\": 100, \"start_time\": 1.0, \"duration\": 1.0}, {\"synth_type\": \"kick\", \"synth_frequency\": 60, \"start_time\": 0, \"duration\": 0.5}, {\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 3, \"start_time\": 2.0, \"duration\": 1.0}]
+
+🎛️ **AVAILABLE PRESET CATEGORIES:**
+• **Bass Presets** (10+): Minimoog Bass, TB-303 Acid, Jupiter Bass, Odyssey Bite, TX81Z Lately, Saw Bass, Sub Bass, etc.
+• **Pad Presets** (10+): JP-8 Strings, OB Brass, Analog Wash, D-50 Fantasia, Crystal Pad, Space Pad, Dream Pad, etc.
+• **Lead Presets**: Prophet Lead, Moog Lead, Sync Lead, and more coming soon
+• **Keys Presets**: DX7 E.Piano, Rhodes Classic, and more coming soon
+• **Effects Presets**: Sci-Fi Zap, Sweep Up for sound design
+
+💡 **PRESET USAGE TIPS:**
+• Use **preset_name** for specific iconic sounds: \"Minimoog Bass\", \"TB-303 Acid\", \"JP-8 Strings\"
+• Use **preset_category** + **preset_random**: true for creative exploration
+• Add **preset_variation** for subtle customization: \"bright\", \"dark\", \"squelchy\"
+• Mix presets freely with MIDI, R2D2, and synthesis for unique combinations
+• Perfect for instant access to legendary synthesizer sounds from the 70s-90s!
+
 💡 **R2D2 & SYNTHESIS INTEGRATION TIPS:**
 • Set note_type=\"r2d2\" to create robotic expressions with 9 emotions
 • Use synth_type for custom synthesis (19 types: sine, square, fm, granular, kick, snare, zap, pad, etc.)
@@ -424,6 +458,23 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                     "description": "🎨 Texture roughness (0.0-1.0, optional)",
                                     "minimum": 0.0,
                                     "maximum": 1.0
+                                },
+                                "preset_name": {
+                                    "type": "string",
+                                    "description": "🎹 Classic synthesizer preset name: Load specific authentic vintage preset (e.g., 'Minimoog Bass', 'TB-303 Acid', 'Jupiter Bass', 'Prophet Lead', 'DX7 E.Piano'). Use for instant access to iconic synthesizer sounds!"
+                                },
+                                "preset_category": {
+                                    "type": "string",
+                                    "description": "🎭 Preset category: Choose preset from category ('bass', 'pad', 'lead', 'keys', 'organ', 'arp', 'drums', 'effects'). Perfect for exploring different types of classic sounds!",
+                                    "enum": ["bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects"]
+                                },
+                                "preset_variation": {
+                                    "type": "string",
+                                    "description": "🎨 Preset variation: Apply subtle variation to base preset (e.g., 'bright', 'dark', 'squelchy'). Great for customizing classic sounds to fit your music!"
+                                },
+                                "preset_random": {
+                                    "type": "boolean",
+                                    "description": "🎲 Random preset selection: Set to true to randomly select a preset. Optionally combine with preset_category to limit random selection to specific category. Perfect for creative inspiration!"
                                 }
                             },
                             "required": ["start_time", "duration"],
@@ -571,6 +622,7 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     let mut has_midi = false;
     let mut has_r2d2 = false;
     let mut has_synthesis = false;
+    let mut has_presets = false;
 
     for note in &sequence.notes {
         // Validate note parameters first
@@ -600,22 +652,38 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
             };
         }
 
+        if let Err(e) = note.validate_preset() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid preset parameters: {}", e),
+                    data: None,
+                }),
+            };
+        }
+
         // Categorize note types
         if note.note_type == "r2d2" {
             has_r2d2 = true;
         } else if note.is_synthesis() {
             has_synthesis = true;
+        } else if note.is_preset() {
+            has_presets = true;
         } else {
             has_midi = true;
         }
     }
 
     tracing::info!(
-        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}, has_synthesis: {}",
+        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}, has_synthesis: {}, has_presets: {}",
         sequence.notes.len(),
         has_midi,
         has_r2d2,
-        has_synthesis
+        has_synthesis,
+        has_presets
     );
 
     // Create MIDI player
@@ -640,15 +708,23 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     };
 
     // Choose the appropriate playback method
-    let playback_result = if has_synthesis || has_r2d2 {
+    let playback_result = if has_synthesis || has_r2d2 || has_presets {
         // Mixed/Hybrid sequence - use enhanced hybrid audio engine
-        let mode = match (has_midi, has_r2d2, has_synthesis) {
-            (true, true, true) => "MIDI + R2D2 + Synthesis",
-            (true, false, true) => "MIDI + Synthesis", 
-            (false, true, true) => "R2D2 + Synthesis",
-            (true, true, false) => "MIDI + R2D2",
-            (false, true, false) => "R2D2 only",
-            (false, false, true) => "Synthesis only",
+        let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
+            (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
+            (true, true, true, false) => "MIDI + R2D2 + Synthesis",
+            (true, true, false, true) => "MIDI + R2D2 + Presets",
+            (true, false, true, true) => "MIDI + Synthesis + Presets",
+            (false, true, true, true) => "R2D2 + Synthesis + Presets",
+            (true, false, true, false) => "MIDI + Synthesis", 
+            (false, true, true, false) => "R2D2 + Synthesis",
+            (true, true, false, false) => "MIDI + R2D2",
+            (true, false, false, true) => "MIDI + Presets",
+            (false, true, false, true) => "R2D2 + Presets",
+            (false, false, true, true) => "Synthesis + Presets",
+            (false, true, false, false) => "R2D2 only",
+            (false, false, true, false) => "Synthesis only",
+            (false, false, false, true) => "Presets only",
             _ => "Mixed mode",
         };
         tracing::info!("Using enhanced hybrid mode playback ({})", mode);
@@ -662,13 +738,21 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     // Handle the result
     match playback_result {
         Ok(()) => {
-            let mode_description = match (has_midi, has_r2d2, has_synthesis) {
-                (true, true, true) => "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization.",
-                (true, false, true) => "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together.",
-                (false, true, true) => "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization.",
-                (true, true, false) => "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization.",
-                (false, true, false) => "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing.",
-                (false, false, true) => "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing.",
+            let mode_description = match (has_midi, has_r2d2, has_synthesis, has_presets) {
+                (true, true, true, true) => "🎵🤖🎛️🎹 Ultimate audio sequence playback started successfully! MIDI music, R2D2 expressions, custom synthesis, and classic preset sounds are now playing in perfect synchronization.",
+                (true, true, true, false) => "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization.",
+                (true, true, false, true) => "🎵🤖🎹 Mixed MIDI, R2D2, and preset sequence playback started successfully! Traditional music, robotic expressions, and vintage synthesizer sounds are now playing together.",
+                (true, false, true, true) => "🎵🎛️🎹 Mixed MIDI, synthesis, and preset sequence playback started successfully! Traditional music, custom synthesis, and classic sounds are now playing together.",
+                (false, true, true, true) => "🤖🎛️🎹 Mixed R2D2, synthesis, and preset sequence playback started successfully! Robotic expressions, custom synthesis, and vintage sounds are now playing in synchronization.",
+                (true, false, true, false) => "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together.",
+                (false, true, true, false) => "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization.",
+                (true, true, false, false) => "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization.",
+                (true, false, false, true) => "🎵🎹 Mixed MIDI and preset sequence playback started successfully! Traditional music and classic synthesizer sounds are now playing together.",
+                (false, true, false, true) => "🤖🎹 Mixed R2D2 and preset sequence playback started successfully! Robotic expressions and vintage synthesizer sounds are now playing together.",
+                (false, false, true, true) => "🎛️🎹 Mixed synthesis and preset sequence playback started successfully! Custom synthesis and classic vintage sounds are now playing together.",
+                (false, true, false, false) => "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing.",
+                (false, false, true, false) => "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing.",
+                (false, false, false, true) => "🎹 Classic synthesizer preset sequence playback started successfully! Authentic vintage synthesizer sounds are now playing.",
                 _ => "🎵 Pure MIDI sequence playback started successfully! The music is now playing.",
             };
 

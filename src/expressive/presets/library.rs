@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use rand::seq::SliceRandom;
 use rand::thread_rng;
+use rand::prelude::IndexedRandom;
 use crate::expressive::{SynthParams, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType};
 
 /// Classic synthesizer preset inspired by vintage hardware
