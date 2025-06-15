@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;

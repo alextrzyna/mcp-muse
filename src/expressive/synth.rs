@@ -221,7 +221,7 @@ impl ExpressiveSynth {
     }
 
     /// Generate audio samples using simplified synthesis (not FunDSP for now)
-    fn generate_synthesized_samples(&self, params: &SynthParams) -> Result<Vec<f32>> {
+    pub fn generate_synthesized_samples(&self, params: &SynthParams) -> Result<Vec<f32>> {
         let sample_count = (self.sample_rate * params.duration) as usize;
         let mut samples = Vec::with_capacity(sample_count);
         

@@ -464,6 +464,161 @@ impl MidiPlayer {
 
         Ok(())
     }
+
+    /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes
+    pub fn play_enhanced_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
+        tracing::info!("Playing enhanced mixed sequence with {} notes", sequence.notes.len());
+
+        if sequence.notes.is_empty() {
+            tracing::warn!("No notes to play - sequence is empty");
+            return Ok(());
+        }
+
+        // Separate MIDI, R2D2, and synthesis notes
+        let mut midi_notes = Vec::new();
+        let mut r2d2_events = Vec::new();
+        let mut synthesis_events = Vec::new();
+
+        for note in sequence.notes {
+            if note.note_type == "r2d2" {
+                // Handle R2D2 notes (existing logic)
+                if let Err(e) = note.validate_r2d2() {
+                    return Err(format!("Invalid R2D2 note: {}", e));
+                }
+
+                let emotion_str = note.r2d2_emotion.as_ref().ok_or("R2D2 emotion is required")?;
+                let emotion = match emotion_str.as_str() {
+                    "Happy" => R2D2Emotion::Happy,
+                    "Sad" => R2D2Emotion::Sad,
+                    "Excited" => R2D2Emotion::Excited,
+                    "Worried" => R2D2Emotion::Worried,
+                    "Curious" => R2D2Emotion::Curious,
+                    "Affirmative" => R2D2Emotion::Affirmative,
+                    "Negative" => R2D2Emotion::Negative,
+                    "Surprised" => R2D2Emotion::Surprised,
+                    "Thoughtful" => R2D2Emotion::Thoughtful,
+                    _ => return Err(format!("Unknown R2D2 emotion: {}", emotion_str)),
+                };
+
+                let expression = R2D2Expression {
+                    emotion,
+                    intensity: note.r2d2_intensity.unwrap_or(0.7),
+                    duration: note.duration as f32,
+                    phrase_complexity: note.r2d2_complexity.unwrap_or(2),
+                    pitch_range: if let Some(range) = &note.r2d2_pitch_range {
+                        if range.len() == 2 {
+                            (range[0], range[1])
+                        } else {
+                            (200.0, 800.0)
+                        }
+                    } else {
+                        (200.0, 800.0)
+                    },
+                    context: note.r2d2_context,
+                };
+
+                r2d2_events.push(R2D2Event {
+                    start_time: note.start_time,
+                    expression,
+                });
+            } else if note.is_synthesis() {
+                // Handle synthesis notes
+                if let Err(e) = note.validate_synthesis() {
+                    return Err(format!("Invalid synthesis note: {}", e));
+                }
+
+                // Convert SimpleNote to SynthEvent
+                synthesis_events.push(SynthEvent {
+                    start_time: note.start_time,
+                    note: note,
+                });
+            } else {
+                // Handle MIDI notes (existing logic)
+                midi_notes.push(MidiNote {
+                    note: note.note,
+                    velocity: note.velocity,
+                    channel: note.channel,
+                    start_time: Duration::from_secs_f64(note.start_time),
+                    duration: Duration::from_secs_f64(note.duration),
+                    instrument: note.instrument,
+                    reverb: note.reverb,
+                    chorus: note.chorus,
+                    volume: note.volume,
+                    pan: note.pan,
+                    balance: note.balance,
+                    expression: note.expression,
+                    sustain: note.sustain,
+                });
+            }
+        }
+
+        // Calculate total playback time
+        let midi_end_time = if !midi_notes.is_empty() {
+            midi_notes
+                .iter()
+                .map(|note| note.start_time + note.duration)
+                .max()
+                .unwrap_or(Duration::from_secs(1))
+        } else {
+            Duration::from_secs(0)
+        };
+
+        let r2d2_end_time = if !r2d2_events.is_empty() {
+            r2d2_events
+                .iter()
+                .map(|event| {
+                    Duration::from_secs_f64(event.start_time + event.expression.duration as f64)
+                })
+                .max()
+                .unwrap_or(Duration::from_secs(1))
+        } else {
+            Duration::from_secs(0)
+        };
+
+        let synthesis_end_time = if !synthesis_events.is_empty() {
+            synthesis_events
+                .iter()
+                .map(|event| {
+                    Duration::from_secs_f64(event.start_time + event.note.duration)
+                })
+                .max()
+                .unwrap_or(Duration::from_secs(1))
+        } else {
+            Duration::from_secs(0)
+        };
+
+        let note_end_time = midi_end_time.max(r2d2_end_time).max(synthesis_end_time);
+        let tail_time = Self::calculate_tail_time(&midi_notes);
+        let total_time = note_end_time + tail_time;
+
+        tracing::info!(
+            "Enhanced mixed sequence: {} MIDI notes, {} R2D2 events, {} synthesis events, total time: {:.2}s",
+            midi_notes.len(),
+            r2d2_events.len(),
+            synthesis_events.len(),
+            total_time.as_secs_f64()
+        );
+
+        // Create enhanced hybrid audio source
+        let enhanced_source = EnhancedHybridAudioSource::new(midi_notes, r2d2_events, synthesis_events, total_time)
+            .map_err(|e| format!("Failed to create enhanced hybrid audio source: {}", e))?;
+
+        tracing::info!("Created enhanced hybrid audio source, starting playback");
+        self.sink.append(enhanced_source);
+        self.sink.play();
+
+        // Wait for playback to complete
+        let wait_time = total_time + Duration::from_millis(200);
+        tracing::info!(
+            "Waiting {:.2}s for enhanced mixed playback to complete...",
+            wait_time.as_secs_f64()
+        );
+
+        std::thread::sleep(wait_time);
+        tracing::info!("Enhanced mixed sequence playback completed");
+
+        Ok(())
+    }
 }
 
 fn find_soundfont() -> Result<PathBuf, String> {
@@ -930,6 +1085,20 @@ struct R2D2PrecomputedEvent {
     samples: Vec<f32>,
 }
 
+/// Event for synthesis notes
+#[derive(Debug, Clone)]
+struct SynthEvent {
+    start_time: f64,
+    note: crate::midi::SimpleNote,
+}
+
+/// Pre-computed synthesis event with generated audio samples
+#[derive(Debug, Clone)]
+struct SynthPrecomputedEvent {
+    start_sample: u32,
+    samples: Vec<f32>,
+}
+
 impl HybridAudioSource {
     fn new(
         midi_notes: Vec<MidiNote>,
@@ -1050,6 +1219,362 @@ impl Iterator for HybridAudioSource {
 }
 
 impl Source for HybridAudioSource {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        1 // Mono output
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        Some(self.total_duration)
+    }
+}
+
+/// Enhanced hybrid audio source that mixes MIDI, R2D2, and synthesis
+struct EnhancedHybridAudioSource {
+    // MIDI synthesis
+    oxisynth_source: Option<OxiSynthSource>,
+
+    // R2D2 synthesis
+    r2d2_events: Vec<R2D2PrecomputedEvent>,
+    
+    // Synthesis events
+    synthesis_events: Vec<SynthPrecomputedEvent>,
+
+    sample_rate: u32,
+    current_sample: usize,
+    total_duration: Duration,
+
+    // Audio mixing
+    #[allow(dead_code)]
+    mixing_buffer: Vec<f32>,
+    #[allow(dead_code)]
+    buffer_size: usize,
+}
+
+impl EnhancedHybridAudioSource {
+    fn new(
+        midi_notes: Vec<MidiNote>,
+        r2d2_events: Vec<R2D2Event>,
+        synthesis_events: Vec<SynthEvent>,
+        total_duration: Duration,
+    ) -> Result<Self, String> {
+        let sample_rate = 44100;
+        let buffer_size = 4096;
+
+        // Create MIDI synthesizer source if there are MIDI notes
+        let oxisynth_source = if !midi_notes.is_empty() {
+            Some(
+                OxiSynthSource::new(midi_notes, total_duration)
+                    .map_err(|e| format!("Failed to create OxiSynth source: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        // Pre-generate R2D2 audio samples
+        let mut precomputed_r2d2_events = Vec::new();
+
+        if !r2d2_events.is_empty() {
+            let expressive_synth = ExpressiveSynth::new()
+                .map_err(|e| format!("Failed to create ExpressiveSynth: {}", e))?;
+
+            let r2d2_voice = R2D2Voice::new();
+
+            for event in r2d2_events {
+                let start_sample = (event.start_time * sample_rate as f64) as u32;
+
+                let synth_params = r2d2_voice
+                    .generate_expression_params(&event.expression)
+                    .ok_or("Failed to generate R2D2 synthesis parameters")?;
+
+                let samples = expressive_synth.generate_r2d2_samples_with_contour(
+                    synth_params.base_freq,
+                    event.expression.intensity,
+                    synth_params.duration,
+                    &synth_params.pitch_contour,
+                );
+
+                precomputed_r2d2_events.push(R2D2PrecomputedEvent {
+                    start_sample,
+                    samples,
+                });
+            }
+        }
+
+        // Pre-generate synthesis audio samples
+        let mut precomputed_synthesis_events = Vec::new();
+
+        if !synthesis_events.is_empty() {
+            let expressive_synth = ExpressiveSynth::new()
+                .map_err(|e| format!("Failed to create ExpressiveSynth for synthesis: {}", e))?;
+
+            for event in synthesis_events {
+                let start_sample = (event.start_time * sample_rate as f64) as u32;
+                
+                // Convert SimpleNote to SynthParams
+                let synth_params = Self::convert_simple_note_to_synth_params(&event.note)?;
+                
+                // Generate synthesis samples
+                let samples = expressive_synth.generate_synthesized_samples(&synth_params)
+                    .map_err(|e| format!("Failed to generate synthesis samples: {}", e))?;
+
+                precomputed_synthesis_events.push(SynthPrecomputedEvent {
+                    start_sample,
+                    samples,
+                });
+            }
+        }
+
+        Ok(EnhancedHybridAudioSource {
+            oxisynth_source,
+            r2d2_events: precomputed_r2d2_events,
+            synthesis_events: precomputed_synthesis_events,
+            sample_rate,
+            current_sample: 0,
+            total_duration,
+            mixing_buffer: vec![0.0; buffer_size],
+            buffer_size,
+        })
+    }
+
+    /// Convert SimpleNote to SynthParams for the ExpressiveSynth
+    fn convert_simple_note_to_synth_params(note: &crate::midi::SimpleNote) -> Result<crate::expressive::SynthParams, String> {
+        use crate::expressive::{SynthParams, SynthType, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType, NoiseColor};
+
+        let synth_type_str = note.synth_type.as_ref().ok_or("Synthesis type is required")?;
+        
+        // Parse synthesis type
+        let synth_type = match synth_type_str.as_str() {
+            "sine" => SynthType::Sine,
+            "square" => SynthType::Square { 
+                pulse_width: note.synth_pulse_width.unwrap_or(0.5) 
+            },
+            "sawtooth" => SynthType::Sawtooth,
+            "triangle" => SynthType::Triangle,
+            "noise" => SynthType::Noise { color: NoiseColor::White },
+            "fm" => SynthType::FM { 
+                modulator_freq: note.synth_modulator_freq.unwrap_or(440.0),
+                modulation_index: note.synth_modulation_index.unwrap_or(1.0),
+            },
+            "granular" => SynthType::Granular { 
+                grain_size: note.synth_grain_size.unwrap_or(0.1),
+                overlap: 0.5,
+                density: 1.0,
+            },
+            "wavetable" => SynthType::Wavetable { 
+                position: 0.0,
+                morph_speed: 1.0,
+            },
+            "kick" => SynthType::Kick { 
+                punch: 0.8,
+                sustain: 0.3,
+                click_freq: 8000.0,
+                body_freq: 60.0,
+            },
+            "snare" => SynthType::Snare { 
+                snap: 0.7,
+                buzz: 0.6,
+                tone_freq: 200.0,
+                noise_amount: 0.8,
+            },
+            "hihat" => SynthType::HiHat { 
+                metallic: 0.8,
+                decay: 0.15,
+                brightness: 0.9,
+            },
+            "cymbal" => SynthType::Cymbal {
+                size: 0.7,
+                metallic: 0.9,
+                strike_intensity: 0.8,
+            },
+            "swoosh" => SynthType::Swoosh { 
+                direction: 0.0,
+                intensity: 0.7,
+                frequency_sweep: (200.0, 2000.0),
+            },
+            "zap" => SynthType::Zap { 
+                energy: 0.8,
+                decay: 0.3,
+                harmonic_content: 0.7,
+            },
+            "chime" => SynthType::Chime { 
+                fundamental: note.synth_frequency.unwrap_or(440.0),
+                harmonic_count: 5,
+                decay: 0.5,
+                inharmonicity: 0.1,
+            },
+            "burst" => SynthType::Burst {
+                center_freq: note.synth_frequency.unwrap_or(1000.0),
+                bandwidth: 500.0,
+                intensity: 0.8,
+                shape: 0.5,
+            },
+            "pad" => SynthType::Pad { 
+                warmth: 0.7,
+                movement: 0.3,
+                space: 0.6,
+                harmonic_evolution: 0.4,
+            },
+            "texture" => SynthType::Texture { 
+                roughness: note.synth_texture_roughness.unwrap_or(0.5),
+                evolution: 0.3,
+                spectral_tilt: 0.0,
+                modulation_depth: 0.4,
+            },
+            "drone" => SynthType::Drone {
+                fundamental: note.synth_frequency.unwrap_or(110.0),
+                overtone_spread: 0.5,
+                modulation: 0.3,
+            },
+            _ => return Err(format!("Unknown synthesis type: {}", synth_type_str)),
+        };
+
+        // Determine frequency (synthesis frequency overrides MIDI note)
+        let frequency = if let Some(synth_freq) = note.synth_frequency {
+            synth_freq
+        } else {
+            // Convert MIDI note to frequency
+            440.0 * 2.0_f32.powf((note.note as f32 - 69.0) / 12.0)
+        };
+
+        // Create envelope
+        let envelope = EnvelopeParams {
+            attack: note.synth_attack.unwrap_or(0.01),
+            decay: note.synth_decay.unwrap_or(0.1),
+            sustain: note.synth_sustain.unwrap_or(0.7),
+            release: note.synth_release.unwrap_or(0.3),
+        };
+
+        // Create filter if specified
+        let filter = if note.synth_filter_type.is_some() || note.synth_filter_cutoff.is_some() {
+            let filter_type = match note.synth_filter_type.as_deref().unwrap_or("lowpass") {
+                "lowpass" => FilterType::LowPass,
+                "highpass" => FilterType::HighPass,
+                "bandpass" => FilterType::BandPass,
+                _ => FilterType::LowPass,
+            };
+
+            Some(FilterParams {
+                cutoff: note.synth_filter_cutoff.unwrap_or(1000.0),
+                resonance: note.synth_filter_resonance.unwrap_or(0.1),
+                filter_type,
+            })
+        } else {
+            None
+        };
+
+        // Create effects
+        let mut effects = Vec::new();
+        
+        if let Some(reverb) = note.synth_reverb {
+            if reverb > 0.0 {
+                effects.push(EffectParams {
+                    effect_type: EffectType::Reverb,
+                    intensity: reverb,
+                });
+            }
+        }
+        
+        if let Some(chorus) = note.synth_chorus {
+            if chorus > 0.0 {
+                effects.push(EffectParams {
+                    effect_type: EffectType::Chorus,
+                    intensity: chorus,
+                });
+            }
+        }
+        
+        if let Some(delay) = note.synth_delay {
+            if delay > 0.0 {
+                let delay_time = note.synth_delay_time.unwrap_or(0.25);
+                effects.push(EffectParams {
+                    effect_type: EffectType::Delay { delay_time },
+                    intensity: delay,
+                });
+            }
+        }
+
+        Ok(SynthParams {
+            synth_type,
+            frequency,
+            amplitude: note.synth_amplitude.unwrap_or(0.7),
+            duration: note.duration as f32,
+            envelope,
+            filter,
+            effects,
+        })
+    }
+
+    /// Get R2D2 sample at the given sample index
+    fn get_r2d2_sample(&self, sample_index: usize) -> f32 {
+        let mut sample = 0.0;
+
+        for event in &self.r2d2_events {
+            let event_sample_index = sample_index as i32 - event.start_sample as i32;
+            if event_sample_index >= 0 && (event_sample_index as usize) < event.samples.len() {
+                sample += event.samples[event_sample_index as usize];
+            }
+        }
+
+        sample
+    }
+
+    /// Get synthesis sample at the given sample index
+    fn get_synthesis_sample(&self, sample_index: usize) -> f32 {
+        let mut sample = 0.0;
+
+        for event in &self.synthesis_events {
+            let event_sample_index = sample_index as i32 - event.start_sample as i32;
+            if event_sample_index >= 0 && (event_sample_index as usize) < event.samples.len() {
+                sample += event.samples[event_sample_index as usize];
+            }
+        }
+
+        sample
+    }
+}
+
+impl Iterator for EnhancedHybridAudioSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_time =
+            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+
+        if current_time > self.total_duration {
+            return None;
+        }
+
+        // Get MIDI sample
+        let midi_sample = if let Some(ref mut oxisynth) = self.oxisynth_source {
+            oxisynth.next().unwrap_or(0.0)
+        } else {
+            0.0
+        };
+
+        // Get R2D2 sample
+        let r2d2_sample = self.get_r2d2_sample(self.current_sample);
+
+        // Get synthesis sample
+        let synthesis_sample = self.get_synthesis_sample(self.current_sample);
+
+        // Mix all audio sources
+        let mixed_sample = midi_sample + r2d2_sample + synthesis_sample;
+
+        self.current_sample += 1;
+
+        Some(mixed_sample)
+    }
+}
+
+impl Source for EnhancedHybridAudioSource {
     fn current_frame_len(&self) -> Option<usize> {
         None
     }

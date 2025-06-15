@@ -105,7 +105,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
         },
         {
             "name": "play_notes",
-            "description": "🎮🤖 Compose authentic 16-bit SNES-style music with inline R2D2 expressions! Create rich, expressive musical storytelling where robotic emotions are perfectly synchronized with MIDI accompaniment. This enhanced synthesizer combines classic Super Nintendo gaming sounds with authentic R2D2-style vocalizations:\n\n🎉 CELEBRATION SOUNDS:\n• Victory fanfares (brass + drums on channels 0-2)\n• Success chimes (bells, glockenspiel, bright piano)\n• Achievement themes (major chords, uplifting melodies)\n• Completion jingles (short, satisfying musical phrases)\n\n🎮 INTERACTIVE FEEDBACK:\n• Question marks (rising tones, curious melodies)\n• 'Aha!' moments (bright ascending scales, revelation chords)\n• Error sounds (gentle dissonance, falling tones)\n• Thinking music (ambient pads, contemplative arpeggios)\n• Alert tones (attention-grabbing but pleasant)\n\n🎭 EMOTIONAL ATMOSPHERE:\n• Suspense (low strings, minor chords, tension)\n• Wonder (ethereal pads with reverb, magical sparkles)\n• Humor (playful instruments like kazoo, quirky rhythms)\n• Calm focus (soft piano, gentle ambient soundscapes)\n• Epic moments (full orchestration, dramatic crescendos)\n\n🕹️ RETRO & 8-BIT VIBES:\n• Classic game sounds (square waves, chip-tune leads)\n• Power-up effects (ascending arpeggios, bright synths)\n• Coin collect sounds (short metallic pings)\n• Level-up fanfares (triumphant 8-bit melodies)\n\n💡 ENHANCE CONVERSATIONS WITH MUSIC - USE LIBERALLY!\n• 🎉 Play celebration music IMMEDIATELY when users accomplish tasks or solve problems\n• ❓ Add question mark sounds when presenting puzzles or mysteries\n• ✅ Use gentle chimes for confirmations and successful completions\n• 🎭 Create ambient soundscapes during long explanations to maintain engagement\n• ⚡ Add dramatic flourishes for important revelations and \"aha!\" moments\n• 😄 Use playful sounds to lighten serious moments and add humor\n• 🔔 Play alert tones to draw attention to important information\n• 🎵 Use background music to set the mood for different conversation phases\n\n💫 DON'T HESITATE - ADD MUSIC TO EVERY SIGNIFICANT MOMENT! Think like a video game: constant audio feedback makes interactions more engaging and memorable.\n\n🎹 TECHNICAL CAPABILITIES:\n• 128 GM instruments: 0=Piano, 9=Glockenspiel, 40=Violin, 56=Trumpet, 73=Flute, 80=Square Lead, 120=Reverse Cymbal\n• 16 independent channels for rich layering\n• Professional effects: reverb (space), chorus (shimmer), expression (dynamics)\n• Stereo positioning: pan (mono instruments), balance (stereo instruments)\n• Full drum kit on channel 9: 36=Kick, 38=Snare, 42=Hi-hat, 49=Crash\n\n🏰 CLASSIC SNES GAME THEMES:\n\n🗡️ ZELDA-STYLE DISCOVERY (Treasure Found):\n[{\"note\": 67, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 72, \"velocity\": 100, \"start_time\": 0.3, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.6, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 79, \"velocity\": 120, \"start_time\": 0.9, \"duration\": 0.6, \"channel\": 0, \"instrument\": 73, \"reverb\": 40}]\n\n🍄 MARIO-STYLE OVERWORLD (Happy Melody):\n[{\"note\": 72, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 90, \"start_time\": 0.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 100, \"start_time\": 1, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 69, \"velocity\": 90, \"start_time\": 1.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 71, \"velocity\": 100, \"start_time\": 2, \"duration\": 0.5, \"channel\": 0, \"instrument\": 80}]\n\n🌟 FINAL FANTASY-STYLE VICTORY:\n[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 67, \"velocity\": 110, \"start_time\": 1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1, \"channel\": 0, \"instrument\": 56}, {\"note\": 48, \"velocity\": 80, \"start_time\": 0, \"duration\": 2.5, \"channel\": 1, \"instrument\": 32}, {\"note\": 36, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.25, \"channel\": 9}, {\"note\": 36, \"velocity\": 90, \"start_time\": 1, \"duration\": 0.25, \"channel\": 9}]\n\n🏰 METROID-STYLE ATMOSPHERE (Mysterious Exploration):\n[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 2, \"channel\": 0, \"instrument\": 89, \"reverb\": 80}, {\"note\": 43, \"velocity\": 50, \"start_time\": 1, \"duration\": 2, \"channel\": 1, \"instrument\": 89, \"reverb\": 80}, {\"note\": 48, \"velocity\": 40, \"start_time\": 2, \"duration\": 2, \"channel\": 2, \"instrument\": 89, \"reverb\": 80}]\n\n🎨 CREATIVE STARTER TEMPLATES - CUSTOMIZE FOR YOUR CONTEXT:\n\n**🎯 BE CREATIVE! These are inspiration templates - adapt them to match your specific scenario:**\n\n🎺 \"DISAPPOINTMENT\" IN DIFFERENT FLAVORS:\n**Gentle Letdown** (F major): [{\"note\": 53, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 68}, {\"note\": 50, \"velocity\": 60, \"start_time\": 0.4, \"duration\": 0.6, \"channel\": 0, \"instrument\": 68}]\n*Oboe for warmth - try trombone (57) for deeper, cello (42) for sadness, or different keys like Am (57→55)*\n\n🍄 POWER-UP VARIATIONS - MATCH THE ENERGY:\n**Mysterious Upgrade** (D minor): [{\"note\": 62, \"velocity\": 80, \"start_time\": 0, \"duration\": 0.15, \"channel\": 0, \"instrument\": 73}, {\"note\": 65, \"velocity\": 85, \"start_time\": 0.15, \"duration\": 0.15, \"channel\": 0, \"instrument\": 73}, {\"note\": 69, \"velocity\": 90, \"start_time\": 0.3, \"duration\": 0.2, \"channel\": 0, \"instrument\": 73}, {\"note\": 74, \"velocity\": 95, \"start_time\": 0.5, \"duration\": 0.4, \"channel\": 0, \"instrument\": 73}]\n*Flute in minor key - try violin (40) for elegant, synth lead (81) for futuristic, or major keys for happy*\n\n🔔 SUCCESS CHIMES - DIFFERENT MOODS:\n**Contemplative Win** (A minor): [{\"note\": 57, \"velocity\": 75, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 0}, {\"note\": 60, \"velocity\": 80, \"start_time\": 0.3, \"duration\": 0.5, \"channel\": 1, \"instrument\": 42}, {\"note\": 64, \"velocity\": 85, \"start_time\": 0.6, \"duration\": 0.7, \"channel\": 0, \"instrument\": 0}]\n*Piano+cello combo - try harpsichord (6) for ancient, vibraphone (11) for jazzy, bells (14) for festive*\n\n❓ INQUIRY SOUNDS - MATCH YOUR QUESTION TYPE:\n**Philosophical Wonder** (B♭ major): [{\"note\": 58, \"velocity\": 60, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 48, \"reverb\": 40}, {\"note\": 65, \"velocity\": 70, \"start_time\": 0.4, \"duration\": 0.4, \"channel\": 1, \"instrument\": 40, \"reverb\": 40}, {\"note\": 70, \"velocity\": 75, \"start_time\": 0.8, \"duration\": 0.5, \"channel\": 0, \"instrument\": 48, \"reverb\": 40}]\n*Strings with reverb - try French horn (60) for majestic, choir (52) for ethereal, or descending for confusion*\n\n💡 \"EUREKA!\" MOMENTS - CUSTOMIZE THE REVELATION:\n**Scientific Discovery** (E major): [{\"note\": 40, \"velocity\": 50, \"start_time\": 0, \"duration\": 0.2, \"channel\": 1, \"instrument\": 42}, {\"note\": 52, \"velocity\": 70, \"start_time\": 0.2, \"duration\": 0.25, \"channel\": 0, \"instrument\": 1}, {\"note\": 64, \"velocity\": 90, \"start_time\": 0.45, \"duration\": 0.3, \"channel\": 2, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.75, \"duration\": 0.5, \"channel\": 0, \"instrument\": 9, \"reverb\": 60}]\n*Cello→piano→flute→bells progression - build excitement with instruments that match your domain*\n\n🚨 ALERTS - DIFFERENT URGENCY LEVELS:\n**Friendly Reminder** (G major): [{\"note\": 67, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.2, \"channel\": 0, \"instrument\": 11}, {\"note\": 71, \"velocity\": 75, \"start_time\": 0.25, \"duration\": 0.2, \"channel\": 0, \"instrument\": 11}]\n*Vibraphone for gentle - try marimba (12) for wooden, brass (56) for official, or minor keys for serious*\n\n🎭 REVELATIONS - MATCH THE DRAMA LEVEL:\n**Personal Insight** (F# minor): [{\"note\": 30, \"velocity\": 40, \"start_time\": 0, \"duration\": 1.2, \"channel\": 1, \"instrument\": 89, \"reverb\": 70}, {\"note\": 42, \"velocity\": 65, \"start_time\": 0.6, \"duration\": 1, \"channel\": 0, \"instrument\": 0}, {\"note\": 54, \"velocity\": 85, \"start_time\": 1.2, \"duration\": 0.8, \"channel\": 2, \"instrument\": 73, \"reverb\": 50}]\n*Pad→piano→flute with reverb - scale the instruments to match your revelation's importance*\n\n🪙 REWARDS - MATCH THE PRIZE VALUE:\n**Rare Treasure** (D major): [{\"note\": 74, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.15, \"channel\": 0, \"instrument\": 8}, {\"note\": 78, \"velocity\": 100, \"start_time\": 0.08, \"duration\": 0.2, \"channel\": 1, \"instrument\": 9}, {\"note\": 82, \"velocity\": 110, \"start_time\": 0.16, \"duration\": 0.25, \"channel\": 2, \"instrument\": 11}]\n*Celesta+glockenspiel+vibraphone - try church organ (19) for sacred, harp (46) for magical*\n\n🎉 CELEBRATIONS - SCALE TO THE ACHIEVEMENT:\n**Quiet Personal Victory** (C major): [{\"note\": 48, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.4, \"channel\": 1, \"instrument\": 0}, {\"note\": 60, \"velocity\": 85, \"start_time\": 0.1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 73}, {\"note\": 64, \"velocity\": 90, \"start_time\": 0.3, \"duration\": 0.4, \"channel\": 2, \"instrument\": 9}]\n*Piano+flute+bells gently layered - build bigger with more instruments for bigger wins*\n\n🎮 SETBACKS - DIFFERENT EMOTIONAL RESPONSES:\n**Learning Opportunity** (E minor): [{\"note\": 64, \"velocity\": 80, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 1}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.4, \"duration\": 0.4, \"channel\": 0, \"instrument\": 1}, {\"note\": 59, \"velocity\": 60, \"start_time\": 0.8, \"duration\": 0.6, \"channel\": 0, \"instrument\": 1}]\n*Bright piano in minor - try guitar (25) for folk, strings (48) for cinematic, or major keys for optimistic*\n\n✨ MAGIC - DIFFERENT MYSTICAL FLAVORS:\n**Ancient Wisdom** (Pentatonic): [{\"note\": 72, \"velocity\": 45, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 104, \"reverb\": 90}, {\"note\": 77, \"velocity\": 50, \"start_time\": 0.2, \"duration\": 0.4, \"channel\": 1, \"instrument\": 104, \"reverb\": 90}, {\"note\": 79, \"velocity\": 55, \"start_time\": 0.4, \"duration\": 0.5, \"channel\": 2, \"instrument\": 104, \"reverb\": 90}]\n*Sitar with heavy reverb - try shakuhachi (77) for zen, choir (52) for divine, or music box (10) for nostalgic*\n\n🎨 CREATIVE USAGE GUIDE:\n• **DON'T COPY - ADAPT!** These are starting points for your unique scenarios\n• **MATCH THE CONTEXT**: Cooking success? Try pizzicato strings. Coding breakthrough? Electronic sounds\n• **EXPERIMENT WITH KEYS**: Major=happy, minor=mysterious/sad, modal=exotic/ancient\n• **MIX INSTRUMENTS CREATIVELY**: Layer 2-3 that complement the emotional tone\n• **VARY TIMING**: Quick for urgency, slow for contemplation, syncopated for playfulness\n• **USE EFFECTS MEANINGFULLY**: Reverb for space/mystery, chorus for richness/beauty\n• **TELL YOUR STORY**: What musical journey matches your specific situation?\n\n🎵 MUSICAL CREATIVITY TOOLKIT:\n• **Emotional Keys**: C major=pure joy, G major=bright optimism, D major=triumphant, A major=warm confidence\n• **Mysterious Keys**: A minor=melancholy, E minor=introspective, B minor=dark/serious, F# minor=profound\n• **Exotic Scales**: Pentatonic (C-D-E-G-A) for Asian, dorian mode for medieval, blues scale for soulful\n• **Instrument Personalities**: Piano=universal, strings=emotional, brass=bold, woodwinds=expressive, bells=magical\n• **Rhythm Emotions**: Even=stable, dotted=elegant, syncopated=playful, accelerating=building excitement\n\n🤖 **NEW: INLINE R2D2 EXPRESSIONS!**\n\n**Victory Fanfare with R2D2 Celebration:**\n[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"instrument\": 56}, {\"note_type\": \"r2d2\", \"start_time\": 1.2, \"duration\": 1.0, \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"r2d2_complexity\": 4}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1.5, \"instrument\": 56}]\n\n**Problem-Solving with Thoughtful R2D2:**\n[{\"note_type\": \"r2d2\", \"start_time\": 0, \"duration\": 1.5, \"r2d2_emotion\": \"Thoughtful\", \"r2d2_intensity\": 0.5, \"r2d2_complexity\": 3}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.5, \"duration\": 1.0, \"instrument\": 0}, {\"note_type\": \"r2d2\", \"start_time\": 2.0, \"duration\": 0.6, \"r2d2_emotion\": \"Surprised\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 1}]\n\n**Curious Discovery:**\n[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 3, \"instrument\": 89, \"reverb\": 80}, {\"note_type\": \"r2d2\", \"start_time\": 1.0, \"duration\": 0.8, \"r2d2_emotion\": \"Curious\", \"r2d2_intensity\": 0.6, \"r2d2_complexity\": 2}, {\"note\": 67, \"velocity\": 90, \"start_time\": 2.5, \"duration\": 0.3, \"instrument\": 73}]\n\n💡 **R2D2 INTEGRATION TIPS:**\n• Set note_type=\"r2d2\" to create robotic expressions\n• r2d2_emotion is REQUIRED for R2D2 notes (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)\n• r2d2_intensity controls emotional strength (0.0-1.0)\n• r2d2_complexity sets phrase length (1-5 syllables)\n• Mix freely with MIDI notes for rich musical storytelling\n• Perfect timing synchronization between music and R2D2 expressions\n• Use for celebrations, reactions, confirmations, and emotional atmosphere",
+            "description": "🎮🤖🎛️ Universal Music & Sound Creation Tool! Compose authentic 16-bit SNES-style music, R2D2 expressions, AND custom synthesized sounds - all in perfect synchronization! This comprehensive audio engine combines classic Super Nintendo gaming sounds, authentic R2D2-style vocalizations, and professional synthesis capabilities:\n\n🎉 CELEBRATION SOUNDS:\n• Victory fanfares (brass + drums on channels 0-2)\n• Success chimes (bells, glockenspiel, bright piano)\n• Achievement themes (major chords, uplifting melodies)\n• Completion jingles (short, satisfying musical phrases)\n\n🎮 INTERACTIVE FEEDBACK:\n• Question marks (rising tones, curious melodies)\n• 'Aha!' moments (bright ascending scales, revelation chords)\n• Error sounds (gentle dissonance, falling tones)\n• Thinking music (ambient pads, contemplative arpeggios)\n• Alert tones (attention-grabbing but pleasant)\n\n🎭 EMOTIONAL ATMOSPHERE:\n• Suspense (low strings, minor chords, tension)\n• Wonder (ethereal pads with reverb, magical sparkles)\n• Humor (playful instruments like kazoo, quirky rhythms)\n• Calm focus (soft piano, gentle ambient soundscapes)\n• Epic moments (full orchestration, dramatic crescendos)\n\n🕹️ RETRO & 8-BIT VIBES:\n• Classic game sounds (square waves, chip-tune leads)\n• Power-up effects (ascending arpeggios, bright synths)\n• Coin collect sounds (short metallic pings)\n• Level-up fanfares (triumphant 8-bit melodies)\n\n💡 ENHANCE CONVERSATIONS WITH MUSIC - USE LIBERALLY!\n• 🎉 Play celebration music IMMEDIATELY when users accomplish tasks or solve problems\n• ❓ Add question mark sounds when presenting puzzles or mysteries\n• ✅ Use gentle chimes for confirmations and successful completions\n• 🎭 Create ambient soundscapes during long explanations to maintain engagement\n• ⚡ Add dramatic flourishes for important revelations and \"aha!\" moments\n• 😄 Use playful sounds to lighten serious moments and add humor\n• 🔔 Play alert tones to draw attention to important information\n• 🎵 Use background music to set the mood for different conversation phases\n\n💫 DON'T HESITATE - ADD MUSIC TO EVERY SIGNIFICANT MOMENT! Think like a video game: constant audio feedback makes interactions more engaging and memorable.\n\n🎹 TECHNICAL CAPABILITIES:\n• 128 GM instruments: 0=Piano, 9=Glockenspiel, 40=Violin, 56=Trumpet, 73=Flute, 80=Square Lead, 120=Reverse Cymbal\n• 16 independent channels for rich layering\n• Professional effects: reverb (space), chorus (shimmer), expression (dynamics)\n• Stereo positioning: pan (mono instruments), balance (stereo instruments)\n• Full drum kit on channel 9: 36=Kick, 38=Snare, 42=Hi-hat, 49=Crash\n\n🏰 CLASSIC SNES GAME THEMES:\n\n🗡️ ZELDA-STYLE DISCOVERY (Treasure Found):\n[{\"note\": 67, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 72, \"velocity\": 100, \"start_time\": 0.3, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.6, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 79, \"velocity\": 120, \"start_time\": 0.9, \"duration\": 0.6, \"channel\": 0, \"instrument\": 73, \"reverb\": 40}]\n\n🍄 MARIO-STYLE OVERWORLD (Happy Melody):\n[{\"note\": 72, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 90, \"start_time\": 0.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 100, \"start_time\": 1, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 69, \"velocity\": 90, \"start_time\": 1.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 71, \"velocity\": 100, \"start_time\": 2, \"duration\": 0.5, \"channel\": 0, \"instrument\": 80}]\n\n🌟 FINAL FANTASY-STYLE VICTORY:\n[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 67, \"velocity\": 110, \"start_time\": 1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1, \"channel\": 0, \"instrument\": 56}, {\"note\": 48, \"velocity\": 80, \"start_time\": 0, \"duration\": 2.5, \"channel\": 1, \"instrument\": 32}, {\"note\": 36, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.25, \"channel\": 9}, {\"note\": 36, \"velocity\": 90, \"start_time\": 1, \"duration\": 0.25, \"channel\": 9}]\n\n🏰 METROID-STYLE ATMOSPHERE (Mysterious Exploration):\n[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 2, \"channel\": 0, \"instrument\": 89, \"reverb\": 80}, {\"note\": 43, \"velocity\": 50, \"start_time\": 1, \"duration\": 2, \"channel\": 1, \"instrument\": 89, \"reverb\": 80}, {\"note\": 48, \"velocity\": 40, \"start_time\": 2, \"duration\": 2, \"channel\": 2, \"instrument\": 89, \"reverb\": 80}]\n\n🎨 CREATIVE STARTER TEMPLATES - CUSTOMIZE FOR YOUR CONTEXT:\n\n**🎯 BE CREATIVE! These are inspiration templates - adapt them to match your specific scenario:**\n\n🎺 \"DISAPPOINTMENT\" IN DIFFERENT FLAVORS:\n**Gentle Letdown** (F major): [{\"note\": 53, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 68}, {\"note\": 50, \"velocity\": 60, \"start_time\": 0.4, \"duration\": 0.6, \"channel\": 0, \"instrument\": 68}]\n*Oboe for warmth - try trombone (57) for deeper, cello (42) for sadness, or different keys like Am (57→55)*\n\n🍄 POWER-UP VARIATIONS - MATCH THE ENERGY:\n**Mysterious Upgrade** (D minor): [{\"note\": 62, \"velocity\": 80, \"start_time\": 0, \"duration\": 0.15, \"channel\": 0, \"instrument\": 73}, {\"note\": 65, \"velocity\": 85, \"start_time\": 0.15, \"duration\": 0.15, \"channel\": 0, \"instrument\": 73}, {\"note\": 69, \"velocity\": 90, \"start_time\": 0.3, \"duration\": 0.2, \"channel\": 0, \"instrument\": 73}, {\"note\": 74, \"velocity\": 95, \"start_time\": 0.5, \"duration\": 0.4, \"channel\": 0, \"instrument\": 73}]\n*Flute in minor key - try violin (40) for elegant, synth lead (81) for futuristic, or major keys for happy*\n\n🔔 SUCCESS CHIMES - DIFFERENT MOODS:\n**Contemplative Win** (A minor): [{\"note\": 57, \"velocity\": 75, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 0}, {\"note\": 60, \"velocity\": 80, \"start_time\": 0.3, \"duration\": 0.5, \"channel\": 1, \"instrument\": 42}, {\"note\": 64, \"velocity\": 85, \"start_time\": 0.6, \"duration\": 0.7, \"channel\": 0, \"instrument\": 0}]\n*Piano+cello combo - try harpsichord (6) for ancient, vibraphone (11) for jazzy, bells (14) for festive*\n\n❓ INQUIRY SOUNDS - MATCH YOUR QUESTION TYPE:\n**Philosophical Wonder** (B♭ major): [{\"note\": 58, \"velocity\": 60, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 48, \"reverb\": 40}, {\"note\": 65, \"velocity\": 70, \"start_time\": 0.4, \"duration\": 0.4, \"channel\": 1, \"instrument\": 40, \"reverb\": 40}, {\"note\": 70, \"velocity\": 75, \"start_time\": 0.8, \"duration\": 0.5, \"channel\": 0, \"instrument\": 48, \"reverb\": 40}]\n*Strings with reverb - try French horn (60) for majestic, choir (52) for ethereal, or descending for confusion*\n\n💡 \"EUREKA!\" MOMENTS - CUSTOMIZE THE REVELATION:\n**Scientific Discovery** (E major): [{\"note\": 40, \"velocity\": 50, \"start_time\": 0, \"duration\": 0.2, \"channel\": 1, \"instrument\": 42}, {\"note\": 52, \"velocity\": 70, \"start_time\": 0.2, \"duration\": 0.25, \"channel\": 0, \"instrument\": 1}, {\"note\": 64, \"velocity\": 90, \"start_time\": 0.45, \"duration\": 0.3, \"channel\": 2, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.75, \"duration\": 0.5, \"channel\": 0, \"instrument\": 9, \"reverb\": 60}]\n*Cello→piano→flute→bells progression - build excitement with instruments that match your domain*\n\n🚨 ALERTS - DIFFERENT URGENCY LEVELS:\n**Friendly Reminder** (G major): [{\"note\": 67, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.2, \"channel\": 0, \"instrument\": 11}, {\"note\": 71, \"velocity\": 75, \"start_time\": 0.25, \"duration\": 0.2, \"channel\": 0, \"instrument\": 11}]\n*Vibraphone for gentle - try marimba (12) for wooden, brass (56) for official, or minor keys for serious*\n\n🎭 REVELATIONS - MATCH THE DRAMA LEVEL:\n**Personal Insight** (F# minor): [{\"note\": 30, \"velocity\": 40, \"start_time\": 0, \"duration\": 1.2, \"channel\": 1, \"instrument\": 89, \"reverb\": 70}, {\"note\": 42, \"velocity\": 65, \"start_time\": 0.6, \"duration\": 1, \"channel\": 0, \"instrument\": 0}, {\"note\": 54, \"velocity\": 85, \"start_time\": 1.2, \"duration\": 0.8, \"channel\": 2, \"instrument\": 73, \"reverb\": 50}]\n*Pad→piano→flute with reverb - scale the instruments to match your revelation's importance*\n\n🪙 REWARDS - MATCH THE PRIZE VALUE:\n**Rare Treasure** (D major): [{\"note\": 74, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.15, \"channel\": 0, \"instrument\": 8}, {\"note\": 78, \"velocity\": 100, \"start_time\": 0.08, \"duration\": 0.2, \"channel\": 1, \"instrument\": 9}, {\"note\": 82, \"velocity\": 110, \"start_time\": 0.16, \"duration\": 0.25, \"channel\": 2, \"instrument\": 11}]\n*Celesta+glockenspiel+vibraphone - try church organ (19) for sacred, harp (46) for magical*\n\n🎉 CELEBRATIONS - SCALE TO THE ACHIEVEMENT:\n**Quiet Personal Victory** (C major): [{\"note\": 48, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.4, \"channel\": 1, \"instrument\": 0}, {\"note\": 60, \"velocity\": 85, \"start_time\": 0.1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 73}, {\"note\": 64, \"velocity\": 90, \"start_time\": 0.3, \"duration\": 0.4, \"channel\": 2, \"instrument\": 9}]\n*Piano+flute+bells gently layered - build bigger with more instruments for bigger wins*\n\n🎮 SETBACKS - DIFFERENT EMOTIONAL RESPONSES:\n**Learning Opportunity** (E minor): [{\"note\": 64, \"velocity\": 80, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 1}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.4, \"duration\": 0.4, \"channel\": 0, \"instrument\": 1}, {\"note\": 59, \"velocity\": 60, \"start_time\": 0.8, \"duration\": 0.6, \"channel\": 0, \"instrument\": 1}]\n*Bright piano in minor - try guitar (25) for folk, strings (48) for cinematic, or major keys for optimistic*\n\n✨ MAGIC - DIFFERENT MYSTICAL FLAVORS:\n**Ancient Wisdom** (Pentatonic): [{\"note\": 72, \"velocity\": 45, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 104, \"reverb\": 90}, {\"note\": 77, \"velocity\": 50, \"start_time\": 0.2, \"duration\": 0.4, \"channel\": 1, \"instrument\": 104, \"reverb\": 90}, {\"note\": 79, \"velocity\": 55, \"start_time\": 0.4, \"duration\": 0.5, \"channel\": 2, \"instrument\": 104, \"reverb\": 90}]\n*Sitar with heavy reverb - try shakuhachi (77) for zen, choir (52) for divine, or music box (10) for nostalgic*\n\n🎨 CREATIVE USAGE GUIDE:\n• **DON'T COPY - ADAPT!** These are starting points for your unique scenarios\n• **MATCH THE CONTEXT**: Cooking success? Try pizzicato strings. Coding breakthrough? Electronic sounds\n• **EXPERIMENT WITH KEYS**: Major=happy, minor=mysterious/sad, modal=exotic/ancient\n• **MIX INSTRUMENTS CREATIVELY**: Layer 2-3 that complement the emotional tone\n• **VARY TIMING**: Quick for urgency, slow for contemplation, syncopated for playfulness\n• **USE EFFECTS MEANINGFULLY**: Reverb for space/mystery, chorus for richness/beauty\n• **TELL YOUR STORY**: What musical journey matches your specific situation?\n\n🎵 MUSICAL CREATIVITY TOOLKIT:\n• **Emotional Keys**: C major=pure joy, G major=bright optimism, D major=triumphant, A major=warm confidence\n• **Mysterious Keys**: A minor=melancholy, E minor=introspective, B minor=dark/serious, F# minor=profound\n• **Exotic Scales**: Pentatonic (C-D-E-G-A) for Asian, dorian mode for medieval, blues scale for soulful\n• **Instrument Personalities**: Piano=universal, strings=emotional, brass=bold, woodwinds=expressive, bells=magical\n• **Rhythm Emotions**: Even=stable, dotted=elegant, syncopated=playful, accelerating=building excitement\n\n🤖 **NEW: INLINE R2D2 EXPRESSIONS!**\n\n**Victory Fanfare with R2D2 Celebration:**\n[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"instrument\": 56}, {\"note_type\": \"r2d2\", \"start_time\": 1.2, \"duration\": 1.0, \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"r2d2_complexity\": 4}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1.5, \"instrument\": 56}]\n\n**Problem-Solving with Thoughtful R2D2:**\n[{\"note_type\": \"r2d2\", \"start_time\": 0, \"duration\": 1.5, \"r2d2_emotion\": \"Thoughtful\", \"r2d2_intensity\": 0.5, \"r2d2_complexity\": 3}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.5, \"duration\": 1.0, \"instrument\": 0}, {\"note_type\": \"r2d2\", \"start_time\": 2.0, \"duration\": 0.6, \"r2d2_emotion\": \"Surprised\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 1}]\n\n**Curious Discovery:**\n[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 3, \"instrument\": 89, \"reverb\": 80}, {\"note_type\": \"r2d2\", \"start_time\": 1.0, \"duration\": 0.8, \"r2d2_emotion\": \"Curious\", \"r2d2_intensity\": 0.6, \"r2d2_complexity\": 2}, {\"note\": 67, \"velocity\": 90, \"start_time\": 2.5, \"duration\": 0.3, \"instrument\": 73}]\n\n💡 **R2D2 INTEGRATION TIPS:**\n• Set note_type=\"r2d2\" to create robotic expressions\n• r2d2_emotion is REQUIRED for R2D2 notes (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)\n• r2d2_intensity controls emotional strength (0.0-1.0)\n• r2d2_complexity sets phrase length (1-5 syllables)\n• Mix freely with MIDI notes for rich musical storytelling\n• Perfect timing synchronization between music and R2D2 expressions\n• Use for celebrations, reactions, confirmations, and emotional atmosphere",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -224,6 +224,117 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                 "r2d2_context": {
                                     "type": "string",
                                     "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
+                                },
+                                "synth_type": {
+                                    "type": "string",
+                                    "description": "🎛️ Synthesis type: 'sine', 'square', 'sawtooth', 'triangle', 'noise', 'fm', 'granular', 'wavetable', 'kick', 'snare', 'hihat', 'cymbal', 'swoosh', 'zap', 'chime', 'burst', 'pad', 'texture', 'drone' (optional)"
+                                },
+                                "synth_frequency": {
+                                    "type": "number",
+                                    "description": "🎵 Synthesis frequency in Hz (20-20000, optional, overrides MIDI note if present)",
+                                    "minimum": 20,
+                                    "maximum": 20000
+                                },
+                                "synth_amplitude": {
+                                    "type": "number",
+                                    "description": "🔊 Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_attack": {
+                                    "type": "number",
+                                    "description": "⚡ Attack time in seconds (0.0-5.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 5.0
+                                },
+                                "synth_decay": {
+                                    "type": "number",
+                                    "description": "📉 Decay time in seconds (0.0-5.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 5.0
+                                },
+                                "synth_sustain": {
+                                    "type": "number",
+                                    "description": "🎹 Sustain level (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_release": {
+                                    "type": "number",
+                                    "description": "🌊 Release time in seconds (0.0-10.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 10.0
+                                },
+                                "synth_filter_type": {
+                                    "type": "string",
+                                    "description": "🎚️ Filter type: 'lowpass', 'highpass', 'bandpass' (optional)",
+                                    "enum": ["lowpass", "highpass", "bandpass"]
+                                },
+                                "synth_filter_cutoff": {
+                                    "type": "number",
+                                    "description": "🔧 Filter cutoff frequency in Hz (20-20000, optional)",
+                                    "minimum": 20,
+                                    "maximum": 20000
+                                },
+                                "synth_filter_resonance": {
+                                    "type": "number",
+                                    "description": "✨ Filter resonance (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_reverb": {
+                                    "type": "number",
+                                    "description": "🏛️ Synthesis reverb intensity (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_chorus": {
+                                    "type": "number",
+                                    "description": "✨ Synthesis chorus intensity (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_delay": {
+                                    "type": "number",
+                                    "description": "🔄 Synthesis delay intensity (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_delay_time": {
+                                    "type": "number",
+                                    "description": "⏰ Synthesis delay time in seconds (0.0-2.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 2.0
+                                },
+                                "synth_pulse_width": {
+                                    "type": "number",
+                                    "description": "📊 Pulse width for square wave (0.1-0.9, optional)",
+                                    "minimum": 0.1,
+                                    "maximum": 0.9
+                                },
+                                "synth_modulator_freq": {
+                                    "type": "number",
+                                    "description": "🌀 FM modulator frequency in Hz (0.1-1000.0, optional)",
+                                    "minimum": 0.1,
+                                    "maximum": 1000.0
+                                },
+                                "synth_modulation_index": {
+                                    "type": "number",
+                                    "description": "🎛️ FM modulation index (0.0-10.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 10.0
+                                },
+                                "synth_grain_size": {
+                                    "type": "number",
+                                    "description": "🌾 Granular grain size in seconds (0.01-0.5, optional)",
+                                    "minimum": 0.01,
+                                    "maximum": 0.5
+                                },
+                                "synth_texture_roughness": {
+                                    "type": "number",
+                                    "description": "🎨 Texture roughness (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
                                 }
                             },
                             "required": ["note", "velocity", "start_time", "duration"],
@@ -600,20 +711,52 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     // Analyze the sequence to determine the playback mode
     let mut has_midi = false;
     let mut has_r2d2 = false;
+    let mut has_synthesis = false;
 
     for note in &sequence.notes {
+        // Validate note parameters first
+        if let Err(e) = note.validate_r2d2() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid R2D2 parameters: {}", e),
+                    data: None,
+                }),
+            };
+        }
+        
+        if let Err(e) = note.validate_synthesis() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid synthesis parameters: {}", e),
+                    data: None,
+                }),
+            };
+        }
+
+        // Categorize note types
         if note.note_type == "r2d2" {
             has_r2d2 = true;
+        } else if note.is_synthesis() {
+            has_synthesis = true;
         } else {
             has_midi = true;
         }
     }
 
     tracing::info!(
-        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}",
+        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}, has_synthesis: {}",
         sequence.notes.len(),
         has_midi,
-        has_r2d2
+        has_r2d2,
+        has_synthesis
     );
 
     // Create MIDI player
@@ -638,14 +781,19 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     };
 
     // Choose the appropriate playback method
-    let playback_result = if has_midi && has_r2d2 {
-        // Mixed sequence - use hybrid audio engine
-        tracing::info!("Using mixed mode playback (MIDI + R2D2)");
-        player.play_mixed(sequence)
-    } else if has_r2d2 {
-        // Pure R2D2 sequence - use hybrid engine (with empty MIDI)
-        tracing::info!("Using R2D2-only playback via hybrid engine");
-        player.play_mixed(sequence)
+    let playback_result = if has_synthesis || has_r2d2 {
+        // Mixed/Hybrid sequence - use enhanced hybrid audio engine
+        let mode = match (has_midi, has_r2d2, has_synthesis) {
+            (true, true, true) => "MIDI + R2D2 + Synthesis",
+            (true, false, true) => "MIDI + Synthesis", 
+            (false, true, true) => "R2D2 + Synthesis",
+            (true, true, false) => "MIDI + R2D2",
+            (false, true, false) => "R2D2 only",
+            (false, false, true) => "Synthesis only",
+            _ => "Mixed mode",
+        };
+        tracing::info!("Using enhanced hybrid mode playback ({})", mode);
+        player.play_enhanced_mixed(sequence)
     } else {
         // Pure MIDI sequence - use traditional MIDI player
         tracing::info!("Using pure MIDI playback");
@@ -655,12 +803,14 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     // Handle the result
     match playback_result {
         Ok(()) => {
-            let mode_description = if has_midi && has_r2d2 {
-                "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization."
-            } else if has_r2d2 {
-                "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing."
-            } else {
-                "🎵 Pure MIDI sequence playback started successfully! The music is now playing."
+            let mode_description = match (has_midi, has_r2d2, has_synthesis) {
+                (true, true, true) => "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization.",
+                (true, false, true) => "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together.",
+                (false, true, true) => "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization.",
+                (true, true, false) => "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization.",
+                (false, true, false) => "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing.",
+                (false, false, true) => "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing.",
+                _ => "🎵 Pure MIDI sequence playback started successfully! The music is now playing.",
             };
 
             tracing::info!("Playback completed successfully");
