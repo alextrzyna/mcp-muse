@@ -166,10 +166,58 @@ impl ExpressiveSynth {
         })
     }
 
-
-
-    /// Generate audio samples using simplified synthesis (not FunDSP for now)
+    /// Generate audio samples using hybrid approach: FunDSP for quality-critical synthesis, custom DSP for others
     pub fn generate_synthesized_samples(&self, params: &SynthParams) -> Result<Vec<f32>> {
+        // Check if this synthesis type should use FunDSP for higher quality
+        if self.should_use_fundsp(&params.synth_type) {
+            self.generate_with_fundsp(params)
+        } else {
+            self.generate_with_custom_dsp(params)
+        }
+    }
+
+    /// Determine if a synthesis type should use FunDSP for better quality
+    fn should_use_fundsp(&self, synth_type: &SynthType) -> bool {
+        match synth_type {
+            // Use FunDSP for all drum synthesis - this addresses the quality issues identified in user feedback
+            SynthType::Kick { .. } => true,
+            SynthType::Snare { .. } => true,
+            SynthType::HiHat { .. } => true,
+            SynthType::Cymbal { .. } => true,
+            
+            // Use FunDSP for advanced synthesis techniques that benefit from professional algorithms
+            SynthType::FM { .. } => true,
+            SynthType::Granular { .. } => true,
+            
+            // Use FunDSP for sound effects that need dramatic character improvements
+            SynthType::Zap { .. } => true,
+            SynthType::Swoosh { .. } => true,
+            
+            // Use FunDSP for ambient textures that benefit from rich processing
+            SynthType::Pad { .. } => true,
+            SynthType::Texture { .. } => true,
+            
+            // Keep custom DSP for basic oscillators and other synthesis types
+            _ => false,
+        }
+    }
+
+    /// Generate samples using FunDSP for professional quality
+    fn generate_with_fundsp(&self, params: &SynthParams) -> Result<Vec<f32>> {
+        use crate::expressive::fundsp_synth::{FunDSPSynth, FunDSPParams};
+        
+        // Create FunDSP synthesizer
+        let fundsp_synth = FunDSPSynth::new()?;
+        
+        // Convert our parameters to FunDSP parameters
+        let fundsp_params: FunDSPParams = params.clone().into();
+        
+        // Generate samples using FunDSP
+        fundsp_synth.generate_samples(&fundsp_params)
+    }
+
+    /// Generate samples using custom DSP (original implementation)
+    fn generate_with_custom_dsp(&self, params: &SynthParams) -> Result<Vec<f32>> {
         let sample_count = (self.sample_rate * params.duration) as usize;
         let mut samples = Vec::with_capacity(sample_count);
         
@@ -683,8 +731,6 @@ impl ExpressiveSynth {
             env.sustain * (1.0 - release_progress)
         }
     }
-
-
 
     /// Generate R2D2-style audio samples with emotion-specific pitch contours
     pub fn generate_r2d2_samples_with_contour(
