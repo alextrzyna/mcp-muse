@@ -82,7 +82,7 @@ pub struct SimpleNote {
     pub r2d2_context: Option<String>,
 
     // NEW: Synthesis parameters (optional)
-    /// Synthesis type: "sine", "square", "sawtooth", "triangle", "noise", "fm", "granular", "wavetable",
+    /// Synthesis type: "sine", "square", "sawtooth", "triangle", "noise", "fm", "dx7fm", "granular", "wavetable",
     /// "kick", "snare", "hihat", "cymbal", "swoosh", "zap", "chime", "burst", "pad", "texture", "drone"
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_type: Option<String>,
@@ -553,6 +553,7 @@ impl SimpleNote {
             "triangle",
             "noise",
             "fm",
+            "dx7fm",
             "granular",
             "wavetable",
             "kick",

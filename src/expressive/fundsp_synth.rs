@@ -362,10 +362,15 @@ impl FunDSPSynth {
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
+            
+            // Proper FM synthesis: modulate the phase, not the frequency
             let modulator = (2.0 * std::f32::consts::PI * modulator_freq * t).sin();
-            let modulated_frequency = carrier_freq + modulation_index * modulator_freq * modulator;
-            let carrier = (2.0 * std::f32::consts::PI * modulated_frequency * t).sin();
-            let envelope_value = (-t * 4.0).exp();
+            let carrier_phase = 2.0 * std::f32::consts::PI * carrier_freq * t;
+            let modulated_phase = carrier_phase + modulation_index * modulator;
+            let carrier = modulated_phase.sin();
+            
+            // More musical envelope for sustained sounds
+            let envelope_value = (-t * 2.0).exp();
             samples.push(carrier * envelope_value * amplitude);
         }
 

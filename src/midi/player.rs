@@ -330,6 +330,7 @@ impl MidiPlayer {
                 crate::expressive::SynthType::Triangle => "triangle",
                 crate::expressive::SynthType::Noise { .. } => "noise",
                 crate::expressive::SynthType::FM { .. } => "fm",
+                crate::expressive::SynthType::DX7FM { .. } => "dx7fm",
                 crate::expressive::SynthType::Granular { .. } => "granular",
                 crate::expressive::SynthType::Wavetable { .. } => "wavetable",
                 crate::expressive::SynthType::Kick { .. } => "kick",
@@ -1182,6 +1183,44 @@ impl EnhancedHybridAudioSource {
             "fm" => SynthType::FM {
                 modulator_freq: note.synth_modulator_freq.unwrap_or(440.0),
                 modulation_index: note.synth_modulation_index.unwrap_or(1.0),
+            },
+            "dx7fm" => {
+                // Import DX7Operator for default configuration
+                use crate::expressive::DX7Operator;
+                
+                SynthType::DX7FM {
+                    algorithm: 1,  // Default algorithm
+                    operators: [
+                        // Default 2-operator FM configuration
+                        DX7Operator {
+                            frequency_ratio: 1.0,
+                            output_level: 0.8,
+                            detune: 0.0,
+                            envelope: crate::expressive::EnvelopeParams {
+                                attack: note.synth_attack.unwrap_or(0.01),
+                                decay: note.synth_decay.unwrap_or(0.1),
+                                sustain: note.synth_sustain.unwrap_or(0.7),
+                                release: note.synth_release.unwrap_or(0.3),
+                            },
+                        },
+                        DX7Operator {
+                            frequency_ratio: note.synth_modulator_freq.unwrap_or(440.0) / 440.0, // Convert to ratio
+                            output_level: note.synth_modulation_index.unwrap_or(1.0) * 0.5, // Scale modulation index
+                            detune: 0.0,
+                            envelope: crate::expressive::EnvelopeParams {
+                                attack: 0.001,
+                                decay: 0.1,
+                                sustain: 0.3,
+                                release: 0.2,
+                            },
+                        },
+                        // Unused operators
+                        DX7Operator::default(),
+                        DX7Operator::default(),
+                        DX7Operator::default(),
+                        DX7Operator::default(),
+                    ],
+                }
             },
             "granular" => SynthType::Granular {
                 grain_size: note.synth_grain_size.unwrap_or(0.1),

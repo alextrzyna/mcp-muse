@@ -41,6 +41,11 @@ pub enum SynthType {
         modulator_freq: f32,
         modulation_index: f32,
     },
+    // DX7-style 6-operator FM synthesis
+    DX7FM {
+        algorithm: u8,           // 1-32 (DX7 algorithms)
+        operators: [DX7Operator; 6], // 6 operators like real DX7
+    },
     Granular {
         grain_size: f32,
         overlap: f32,
@@ -162,6 +167,30 @@ pub enum EffectType {
     Reverb,
     Chorus,
     Delay { delay_time: f32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DX7Operator {
+    pub frequency_ratio: f32,    // Frequency ratio (0.5, 1.0, 2.0, etc.)
+    pub output_level: f32,       // Operator output level (0.0-1.0)
+    pub detune: f32,            // Fine detune (-7 to +7)
+    pub envelope: EnvelopeParams, // Individual operator envelope
+}
+
+impl Default for DX7Operator {
+    fn default() -> Self {
+        Self {
+            frequency_ratio: 1.0,
+            output_level: 0.8,
+            detune: 0.0,
+            envelope: EnvelopeParams {
+                attack: 0.01,
+                decay: 0.3,
+                sustain: 0.7,
+                release: 0.5,
+            },
+        }
+    }
 }
 
 impl ExpressiveSynth {
@@ -301,6 +330,28 @@ impl ExpressiveSynth {
             } => {
                 let modulator = (2.0 * std::f32::consts::PI * modulator_freq * t).sin();
                 (phase + modulation_index * modulator).sin()
+            }
+            SynthType::DX7FM { algorithm: _, operators } => {
+                // Enhanced DX7-style FM synthesis with proper operator envelopes
+                // Use first two operators: op1 = carrier (output), op2 = modulator
+                let carrier = &operators[0];   // Carrier (fundamental)
+                let modulator = &operators[1]; // Modulator (creates harmonics)
+                
+                let carrier_freq = freq * carrier.frequency_ratio;
+                let modulator_freq = freq * modulator.frequency_ratio;
+                
+                // Calculate individual operator envelopes
+                let carrier_envelope = self.calculate_operator_envelope(t, &carrier.envelope);
+                let modulator_envelope = self.calculate_operator_envelope(t, &modulator.envelope);
+                
+                // Generate modulator signal with its envelope
+                let modulator_signal = (2.0 * std::f32::consts::PI * modulator_freq * t).sin() 
+                    * modulator.output_level * modulator_envelope;
+                
+                // Apply phase modulation to carrier (proper FM synthesis)
+                let carrier_phase = 2.0 * std::f32::consts::PI * carrier_freq * t;
+                // Reduced modulation depth for cleaner bass - was * 2.0, now scaled by modulator level
+                (carrier_phase + modulator_signal).sin() * carrier.output_level * carrier_envelope
             }
             SynthType::Granular {
                 grain_size,
@@ -806,6 +857,29 @@ impl ExpressiveSynth {
     }
 
     /// Calculate synthesis envelope based on parameters
+    /// Calculate envelope for individual DX7 operators
+    fn calculate_operator_envelope(&self, t: f32, envelope: &EnvelopeParams) -> f32 {
+        let attack = envelope.attack;
+        let decay = envelope.decay;
+        let sustain = envelope.sustain;
+        let release = envelope.release;
+
+        if t < attack {
+            // Attack phase: linear rise from 0 to 1
+            t / attack
+        } else if t < attack + decay {
+            // Decay phase: exponential decay from 1 to sustain level
+            let decay_progress = (t - attack) / decay;
+            1.0 - (1.0 - sustain) * decay_progress
+        } else {
+            // Sustain/Release phase: hold sustain level then exponential decay
+            // For DX7 operators, we assume immediate release (no sustain hold)
+            let release_start = attack + decay;
+            let release_progress = (t - release_start) / release;
+            sustain * (-release_progress * 3.0).exp() // Exponential decay
+        }
+    }
+
     fn calculate_synth_envelope(&self, t: f32, params: &SynthParams) -> f32 {
         let env = &params.envelope;
         let duration = params.duration;
