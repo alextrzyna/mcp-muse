@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use rand::thread_rng;
+use rand::rng;
 use rand::prelude::IndexedRandom;
 use crate::expressive::{SynthParams, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType};
 
@@ -85,6 +85,7 @@ impl PresetLibrary {
     }
 
     /// Search presets by tags
+    #[allow(dead_code)]
     pub fn search_by_tags(&self, tags: &[String]) -> Vec<&ClassicSynthPreset> {
         let mut results = Vec::new();
         
@@ -105,7 +106,7 @@ impl PresetLibrary {
 
     /// Get a random preset, optionally filtered by category
     pub fn get_random_preset(&self, category: Option<PresetCategory>) -> Option<&ClassicSynthPreset> {
-        let mut rng = thread_rng();
+        let mut rng = rng();
 
         if let Some(cat) = category {
             let presets = self.get_by_category(cat);
@@ -117,11 +118,13 @@ impl PresetLibrary {
     }
 
     /// List all available preset names
+    #[allow(dead_code)]
     pub fn list_preset_names(&self) -> Vec<String> {
         self.presets.keys().cloned().collect()
     }
 
     /// List all preset names in a category
+    #[allow(dead_code)]
     pub fn list_category_presets(&self, category: PresetCategory) -> Vec<String> {
         self.categories.get(&category).cloned().unwrap_or_default()
     }

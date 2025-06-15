@@ -1,5 +1,5 @@
 use crate::expressive::presets::{ClassicSynthPreset, PresetCategory, PresetVariation, PresetLibrary};
-use crate::expressive::{SynthParams, SynthType, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType};
+use crate::expressive::{SynthParams, SynthType, FilterType};
 use std::collections::HashMap;
 
 impl PresetLibrary {

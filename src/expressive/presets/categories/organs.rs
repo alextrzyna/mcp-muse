@@ -1,6 +1,4 @@
-use crate::expressive::presets::{ClassicSynthPreset, PresetCategory, PresetLibrary};
-use crate::expressive::{SynthParams, SynthType};
-use std::collections::HashMap;
+use crate::expressive::presets::PresetLibrary;
 
 impl PresetLibrary {
     /// Load organ presets - placeholder implementation

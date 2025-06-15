@@ -1,4 +1,4 @@
-use crate::expressive::{ExpressiveSynth, R2D2Emotion, R2D2Expression, R2D2Voice};
+use crate::expressive::{ExpressiveSynth, R2D2Emotion, R2D2Expression, R2D2Voice, PresetLibrary};
 use crate::midi::parser::MidiNote;
 use crate::midi::SimpleSequence;
 use oxisynth::{MidiEvent, SoundFont, Synth};
@@ -12,6 +12,7 @@ use std::path::PathBuf;
 pub struct MidiPlayer {
     _stream: OutputStream,
     sink: Sink,
+    preset_library: PresetLibrary,
 }
 
 impl MidiPlayer {
@@ -22,7 +23,7 @@ impl MidiPlayer {
         let sink = Sink::try_new(&stream_handle)
             .map_err(|e| format!("Failed to create audio sink: {}", e))?;
 
-        Ok(MidiPlayer { _stream, sink })
+        Ok(MidiPlayer { _stream, sink, preset_library: PresetLibrary::new() })
     }
 
     /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
@@ -257,9 +258,130 @@ impl MidiPlayer {
         Ok(())
     }
 
+    /// Apply preset configuration to a SimpleNote
+    fn apply_preset_to_note(&self, note: &mut crate::midi::SimpleNote) -> Result<(), String> {
+        // Skip if no preset parameters are specified
+        if note.preset_name.is_none() && note.preset_category.is_none() && !note.preset_random.unwrap_or(false) {
+            return Ok(());
+        }
 
+        // Load preset based on parameters
+        let preset = if let Some(preset_name) = &note.preset_name {
+            // Load specific preset by name
+            self.preset_library.load_preset(preset_name)
+                .ok_or_else(|| format!("Preset '{}' not found", preset_name))?
+        } else if let Some(category_str) = &note.preset_category {
+            // Load random preset from category
+            let category = match category_str.as_str() {
+                "bass" => crate::expressive::PresetCategory::Bass,
+                "pad" => crate::expressive::PresetCategory::Pad,
+                "lead" => crate::expressive::PresetCategory::Lead,
+                "keys" => crate::expressive::PresetCategory::Keys,
+                "organ" => crate::expressive::PresetCategory::Organ,
+                "arp" => crate::expressive::PresetCategory::Arp,
+                "drums" => crate::expressive::PresetCategory::Drums,
+                "effects" => crate::expressive::PresetCategory::Effects,
+                _ => return Err(format!("Unknown preset category: {}", category_str)),
+            };
+            
+            self.preset_library.get_random_preset(Some(category))
+                .ok_or_else(|| format!("No presets found in category '{}'", category_str))?
+        } else if note.preset_random.unwrap_or(false) {
+            // Load completely random preset
+            self.preset_library.get_random_preset(None)
+                .ok_or("No presets available for random selection")?
+        } else {
+            return Ok(()); // No valid preset selection
+        };
 
+        // Apply preset variation if specified
+        let synth_params = if let Some(variation_name) = &note.preset_variation {
+            self.preset_library.apply_variation(&preset.name, variation_name)
+                .unwrap_or_else(|| preset.synth_params.clone())
+        } else {
+            preset.synth_params.clone()
+        };
 
+        // Apply preset parameters to the note (convert from SynthParams to SimpleNote fields)
+        note.synth_type = Some(match &synth_params.synth_type {
+            crate::expressive::SynthType::Sine => "sine",
+            crate::expressive::SynthType::Square { .. } => "square",
+            crate::expressive::SynthType::Sawtooth => "sawtooth",
+            crate::expressive::SynthType::Triangle => "triangle",
+            crate::expressive::SynthType::Noise { .. } => "noise",
+            crate::expressive::SynthType::FM { .. } => "fm",
+            crate::expressive::SynthType::Granular { .. } => "granular",
+            crate::expressive::SynthType::Wavetable { .. } => "wavetable",
+            crate::expressive::SynthType::Kick { .. } => "kick",
+            crate::expressive::SynthType::Snare { .. } => "snare",
+            crate::expressive::SynthType::HiHat { .. } => "hihat",
+            crate::expressive::SynthType::Cymbal { .. } => "cymbal",
+            crate::expressive::SynthType::Swoosh { .. } => "swoosh",
+            crate::expressive::SynthType::Zap { .. } => "zap",
+            crate::expressive::SynthType::Chime { .. } => "chime",
+            crate::expressive::SynthType::Burst { .. } => "burst",
+            crate::expressive::SynthType::Pad { .. } => "pad",
+            crate::expressive::SynthType::Texture { .. } => "texture",
+            crate::expressive::SynthType::Drone { .. } => "drone",
+        }.to_string());
+
+        // Apply envelope parameters
+        note.synth_attack = Some(synth_params.envelope.attack);
+        note.synth_decay = Some(synth_params.envelope.decay);
+        note.synth_sustain = Some(synth_params.envelope.sustain);
+        note.synth_release = Some(synth_params.envelope.release);
+
+        // Apply amplitude
+        note.synth_amplitude = Some(synth_params.amplitude);
+
+        // Apply filter parameters if present
+        if let Some(filter) = &synth_params.filter {
+            note.synth_filter_type = Some(match filter.filter_type {
+                crate::expressive::FilterType::LowPass => "lowpass",
+                crate::expressive::FilterType::HighPass => "highpass",
+                crate::expressive::FilterType::BandPass => "bandpass",
+            }.to_string());
+            note.synth_filter_cutoff = Some(filter.cutoff);
+            note.synth_filter_resonance = Some(filter.resonance);
+        }
+
+        // Apply effects
+        for effect in &synth_params.effects {
+            match &effect.effect_type {
+                crate::expressive::EffectType::Reverb => {
+                    note.synth_reverb = Some(effect.intensity);
+                }
+                crate::expressive::EffectType::Chorus => {
+                    note.synth_chorus = Some(effect.intensity);
+                }
+                crate::expressive::EffectType::Delay { delay_time } => {
+                    note.synth_delay = Some(effect.intensity);
+                    note.synth_delay_time = Some(*delay_time);
+                }
+            }
+        }
+
+        // Apply synthesis-specific parameters based on synth type
+        match &synth_params.synth_type {
+            crate::expressive::SynthType::Square { pulse_width } => {
+                note.synth_pulse_width = Some(*pulse_width);
+            }
+            crate::expressive::SynthType::FM { modulator_freq, modulation_index } => {
+                note.synth_modulator_freq = Some(*modulator_freq);
+                note.synth_modulation_index = Some(*modulation_index);
+            }
+            crate::expressive::SynthType::Granular { grain_size, .. } => {
+                note.synth_grain_size = Some(*grain_size);
+            }
+            crate::expressive::SynthType::Texture { roughness, .. } => {
+                note.synth_texture_roughness = Some(*roughness);
+            }
+            _ => {} // Other synth types don't have specific parameters to set
+        }
+
+        tracing::info!("Applied preset '{}' to note", preset.name);
+        Ok(())
+    }
 
     /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes
     pub fn play_enhanced_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
@@ -270,12 +392,23 @@ impl MidiPlayer {
             return Ok(());
         }
 
+        // Process each note and apply presets if specified
+        let mut processed_notes = Vec::new();
+        for mut note in sequence.notes {
+            // Apply preset configuration if present
+            if let Err(e) = self.apply_preset_to_note(&mut note) {
+                tracing::warn!("Failed to apply preset to note: {}", e);
+                // Continue with the note without preset - don't fail completely
+            }
+            processed_notes.push(note);
+        }
+
         // Separate MIDI, R2D2, and synthesis notes
         let mut midi_notes = Vec::new();
         let mut r2d2_events = Vec::new();
         let mut synthesis_events = Vec::new();
 
-        for note in sequence.notes {
+        for note in processed_notes {
             if note.note_type == "r2d2" {
                 // Handle R2D2 notes (existing logic)
                 if let Err(e) = note.validate_r2d2() {

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fundsp::hacker::*;
 use rand::Rng;
 
 /// FunDSP-based synthesizer for high-quality audio synthesis
