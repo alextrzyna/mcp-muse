@@ -192,7 +192,9 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 💡 **R2D2 & SYNTHESIS INTEGRATION TIPS:**
 • Set note_type=\"r2d2\" to create robotic expressions with 9 emotions
 • Use synth_type for custom synthesis (19 types: sine, square, fm, granular, kick, snare, zap, pad, etc.)
-• r2d2_emotion is REQUIRED for R2D2 notes (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)
+• **REQUIRED for R2D2 notes**: r2d2_emotion (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)
+• **REQUIRED for R2D2 notes**: r2d2_intensity (0.0-1.0, emotional strength)
+• **REQUIRED for R2D2 notes**: r2d2_complexity (1-5, phrase complexity in syllables)
 • Mix freely with MIDI notes for rich musical storytelling
 • Perfect timing synchronization between all three audio systems
 • Use for celebrations, reactions, confirmations, and emotional atmosphere",
@@ -287,18 +289,18 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                 },
                                 "r2d2_emotion": {
                                     "type": "string",
-                                    "description": "🤖 R2D2 emotion when note_type='r2d2': Choose from 9 distinct emotional expressions",
+                                    "description": "🤖 R2D2 emotion when note_type='r2d2': Choose from 9 distinct emotional expressions. **REQUIRED when note_type='r2d2'**",
                                     "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]
                                 },
                                 "r2d2_intensity": {
                                     "type": "number",
-                                    "description": "🔥 R2D2 emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic",
+                                    "description": "🔥 R2D2 emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic. **REQUIRED when note_type='r2d2'**",
                                     "minimum": 0.0,
                                     "maximum": 1.0
                                 },
                                 "r2d2_complexity": {
                                     "type": "integer",
-                                    "description": "🗣️ R2D2 phrase complexity (1-5 syllables): 1=simple beep, 3=conversational, 5=complex phrase",
+                                    "description": "🗣️ R2D2 phrase complexity (1-5 syllables): 1=simple beep, 3=conversational, 5=complex phrase. **REQUIRED when note_type='r2d2'**",
                                     "minimum": 1,
                                     "maximum": 5
                                 },
