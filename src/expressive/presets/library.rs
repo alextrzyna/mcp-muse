@@ -1,8 +1,10 @@
+use crate::expressive::{
+    EffectParams, EffectType, EnvelopeParams, FilterParams, FilterType, SynthParams,
+};
+use rand::prelude::IndexedRandom;
+use rand::rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use rand::rng;
-use rand::prelude::IndexedRandom;
-use crate::expressive::{SynthParams, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType};
 
 /// Classic synthesizer preset inspired by vintage hardware
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,24 +90,30 @@ impl PresetLibrary {
     #[allow(dead_code)]
     pub fn search_by_tags(&self, tags: &[String]) -> Vec<&ClassicSynthPreset> {
         let mut results = Vec::new();
-        
+
         for tag in tags {
             if let Some(preset_names) = self.tags.get(tag) {
                 for name in preset_names {
                     if let Some(preset) = self.presets.get(name) {
-                        if !results.iter().any(|p: &&ClassicSynthPreset| p.name == preset.name) {
+                        if !results
+                            .iter()
+                            .any(|p: &&ClassicSynthPreset| p.name == preset.name)
+                        {
                             results.push(preset);
                         }
                     }
                 }
             }
         }
-        
+
         results
     }
 
     /// Get a random preset, optionally filtered by category
-    pub fn get_random_preset(&self, category: Option<PresetCategory>) -> Option<&ClassicSynthPreset> {
+    pub fn get_random_preset(
+        &self,
+        category: Option<PresetCategory>,
+    ) -> Option<&ClassicSynthPreset> {
         let mut rng = rng();
 
         if let Some(cat) = category {
@@ -134,7 +142,7 @@ impl PresetLibrary {
         if let Some(preset) = self.presets.get(preset_name) {
             if let Some(variation) = preset.variations.get(variation_name) {
                 let mut params = preset.synth_params.clone();
-                
+
                 // Apply parameter overrides
                 for (param_name, value) in &variation.parameter_overrides {
                     match param_name.as_str() {
@@ -156,7 +164,7 @@ impl PresetLibrary {
                         _ => {} // Ignore unknown parameters
                     }
                 }
-                
+
                 return Some(params);
             }
         }
@@ -175,26 +183,35 @@ impl PresetLibrary {
         // Add to category index
         self.categories
             .entry(category)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(name.clone());
 
         // Add to tag index
         for tag in tags {
             self.tags
                 .entry(tag)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(name.clone());
         }
     }
 
     /// Helper to create common envelope parameters
     pub fn create_envelope(attack: f32, decay: f32, sustain: f32, release: f32) -> EnvelopeParams {
-        EnvelopeParams { attack, decay, sustain, release }
+        EnvelopeParams {
+            attack,
+            decay,
+            sustain,
+            release,
+        }
     }
 
     /// Helper to create common filter parameters
     pub fn create_filter(cutoff: f32, resonance: f32, filter_type: FilterType) -> FilterParams {
-        FilterParams { cutoff, resonance, filter_type }
+        FilterParams {
+            cutoff,
+            resonance,
+            filter_type,
+        }
     }
 
     /// Helper to create common effect parameters
@@ -211,4 +228,4 @@ impl PresetLibrary {
             intensity,
         }
     }
-} 
+}

@@ -48,7 +48,7 @@ struct Args {
     /// Run setup for MCP hosts
     #[arg(long)]
     setup: bool,
-    
+
     /// Test preset integration
     #[arg(long)]
     test_presets: bool,
@@ -79,8 +79,8 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎹 Testing Classic Synthesizer Preset Integration!");
     println!("This will test the complete audio pipeline with presets...\n");
 
-    let player = midi::MidiPlayer::new()
-        .map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 1: Specific preset by name
     println!("🎵 Test 1: Playing Minimoog Bass preset");
@@ -116,18 +116,16 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
     // Test 2: Random preset from bass category
     println!("🎵 Test 2: Playing random bass preset");
     let random_bass_sequence = SimpleSequence {
-        notes: vec![
-            SimpleNote {
-                preset_category: Some("bass".to_string()),
-                note: Some(40), // E2
-                velocity: Some(110),
-                start_time: 0.0,
-                duration: 1.5,
-                channel: 0,
-                note_type: "midi".to_string(),
-                ..Default::default()
-            },
-        ],
+        notes: vec![SimpleNote {
+            preset_category: Some("bass".to_string()),
+            note: Some(40), // E2
+            velocity: Some(110),
+            start_time: 0.0,
+            duration: 1.5,
+            channel: 0,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
         tempo: 120,
     };
 
@@ -137,19 +135,17 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
     // Test 3: Preset with variation
     println!("🎵 Test 3: Playing TB-303 Acid preset with squelchy variation");
     let acid_sequence = SimpleSequence {
-        notes: vec![
-            SimpleNote {
-                preset_name: Some("TB-303 Acid".to_string()),
-                preset_variation: Some("squelchy".to_string()),
-                note: Some(45), // A2
-                velocity: Some(127),
-                start_time: 0.0,
-                duration: 2.0,
-                channel: 0,
-                note_type: "midi".to_string(),
-                ..Default::default()
-            },
-        ],
+        notes: vec![SimpleNote {
+            preset_name: Some("TB-303 Acid".to_string()),
+            preset_variation: Some("squelchy".to_string()),
+            note: Some(45), // A2
+            velocity: Some(127),
+            start_time: 0.0,
+            duration: 2.0,
+            channel: 0,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
         tempo: 120,
     };
 

@@ -6,4 +6,4 @@ impl PresetLibrary {
         // TODO: Implement arp/sequence presets
         // This is a placeholder to avoid compilation errors
     }
-} 
+}

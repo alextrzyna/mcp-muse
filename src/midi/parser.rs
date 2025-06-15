@@ -19,7 +19,6 @@ pub struct MidiNote {
     pub sustain: Option<u8>,
 }
 
-
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct ParsedMidi {

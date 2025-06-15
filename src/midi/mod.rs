@@ -82,7 +82,7 @@ pub struct SimpleNote {
     pub r2d2_context: Option<String>,
 
     // NEW: Synthesis parameters (optional)
-    /// Synthesis type: "sine", "square", "sawtooth", "triangle", "noise", "fm", "granular", "wavetable", 
+    /// Synthesis type: "sine", "square", "sawtooth", "triangle", "noise", "fm", "granular", "wavetable",
     /// "kick", "snare", "hihat", "cymbal", "swoosh", "zap", "chime", "burst", "pad", "texture", "drone"
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_type: Option<String>,
@@ -92,7 +92,7 @@ pub struct SimpleNote {
     /// Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_amplitude: Option<f32>,
-    
+
     // Synthesis envelope parameters
     /// Attack time in seconds (0.0-5.0, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
@@ -106,7 +106,7 @@ pub struct SimpleNote {
     /// Release time in seconds (0.0-10.0, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_release: Option<f32>,
-    
+
     // Synthesis filter parameters
     /// Filter type: "lowpass", "highpass", "bandpass" (optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
@@ -117,7 +117,7 @@ pub struct SimpleNote {
     /// Filter resonance (0.0-1.0, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_filter_resonance: Option<f32>,
-    
+
     // Synthesis effects parameters
     /// Reverb intensity (0.0-1.0, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
@@ -131,7 +131,7 @@ pub struct SimpleNote {
     /// Delay time in seconds (0.0-2.0, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub synth_delay_time: Option<f32>,
-    
+
     // Synthesis-specific parameters
     /// Pulse width for square wave (0.1-0.9, optional)
     #[serde(default, deserialize_with = "deserialize_null_default")]
@@ -448,8 +448,6 @@ impl SimpleNote {
         self.note_type == "r2d2"
     }
 
-
-
     /// Check if this note is a synthesis note
     pub fn is_synthesis(&self) -> bool {
         self.synth_type.is_some()
@@ -457,9 +455,9 @@ impl SimpleNote {
 
     /// Check if this note uses presets
     pub fn is_preset(&self) -> bool {
-        self.preset_name.is_some() || 
-        self.preset_category.is_some() || 
-        self.preset_random.unwrap_or(false)
+        self.preset_name.is_some()
+            || self.preset_category.is_some()
+            || self.preset_random.unwrap_or(false)
     }
 
     /// Validate R2D2 parameters if this is an R2D2 note
@@ -546,57 +544,92 @@ impl SimpleNote {
         }
 
         let synth_type = self.synth_type.as_ref().unwrap();
-        
+
         // Validate synthesis type
         let valid_types = [
-            "sine", "square", "sawtooth", "triangle", "noise",
-            "fm", "granular", "wavetable",
-            "kick", "snare", "hihat", "cymbal",
-            "swoosh", "zap", "chime", "burst",
-            "pad", "texture", "drone"
+            "sine",
+            "square",
+            "sawtooth",
+            "triangle",
+            "noise",
+            "fm",
+            "granular",
+            "wavetable",
+            "kick",
+            "snare",
+            "hihat",
+            "cymbal",
+            "swoosh",
+            "zap",
+            "chime",
+            "burst",
+            "pad",
+            "texture",
+            "drone",
         ];
-        
+
         if !valid_types.contains(&synth_type.as_str()) {
-            return Err(format!("Invalid synthesis type: {}. Must be one of: {}", 
-                             synth_type, valid_types.join(", ")));
+            return Err(format!(
+                "Invalid synthesis type: {}. Must be one of: {}",
+                synth_type,
+                valid_types.join(", ")
+            ));
         }
 
         // Validate frequency range if present
         if let Some(freq) = self.synth_frequency {
-            if freq < 20.0 || freq > 20000.0 {
-                return Err(format!("Synthesis frequency {} is out of range (20-20000 Hz)", freq));
+            if !(20.0..=20000.0).contains(&freq) {
+                return Err(format!(
+                    "Synthesis frequency {} is out of range (20-20000 Hz)",
+                    freq
+                ));
             }
         }
 
         // Validate amplitude if present
         if let Some(amp) = self.synth_amplitude {
-            if amp < 0.0 || amp > 1.0 {
-                return Err(format!("Synthesis amplitude {} is out of range (0.0-1.0)", amp));
+            if !(0.0..=1.0).contains(&amp) {
+                return Err(format!(
+                    "Synthesis amplitude {} is out of range (0.0-1.0)",
+                    amp
+                ));
             }
         }
 
         // Validate envelope parameters
         if let Some(attack) = self.synth_attack {
-            if attack < 0.0 || attack > 5.0 {
-                return Err(format!("Synthesis attack {} is out of range (0.0-5.0 seconds)", attack));
+            if !(0.0..=5.0).contains(&attack) {
+                return Err(format!(
+                    "Synthesis attack {} is out of range (0.0-5.0 seconds)",
+                    attack
+                ));
             }
         }
-        
+
         if let Some(decay) = self.synth_decay {
-            if decay < 0.0 || decay > 5.0 {
-                return Err(format!("Synthesis decay {} is out of range (0.0-5.0 seconds)", decay));
+            if !(0.0..=5.0).contains(&decay) {
+                return Err(format!(
+                    "Synthesis decay {} is out of range (0.0-5.0 seconds)",
+                    decay
+                ));
             }
         }
-        
+
         if let Some(sustain) = self.synth_sustain {
-            if sustain < 0.0 || sustain > 1.0 {
-                return Err(format!("Synthesis sustain {} is out of range (0.0-1.0)", sustain));
+            if !(0.0..=1.0).contains(&sustain) {
+                return Err(format!(
+                    "Synthesis sustain {} is out of range (0.0-1.0)",
+                    sustain
+                ));
             }
         }
-        
+
         if let Some(release) = self.synth_release {
-            if release < 0.0 || release > 10.0 {
-                return Err(format!("Synthesis release {} is out of range (0.0-10.0 seconds)", release));
+            if !(0.0..=10.0).contains(&release) {
+                return Err(format!(
+                    "Synthesis release {} is out of range (0.0-10.0 seconds)",
+                    release
+                ));
             }
         }
 
@@ -604,76 +637,112 @@ impl SimpleNote {
         if let Some(filter_type) = &self.synth_filter_type {
             let valid_filter_types = ["lowpass", "highpass", "bandpass"];
             if !valid_filter_types.contains(&filter_type.as_str()) {
-                return Err(format!("Invalid filter type: {}. Must be one of: {}", 
-                                 filter_type, valid_filter_types.join(", ")));
+                return Err(format!(
+                    "Invalid filter type: {}. Must be one of: {}",
+                    filter_type,
+                    valid_filter_types.join(", ")
+                ));
             }
         }
-        
+
         if let Some(cutoff) = self.synth_filter_cutoff {
-            if cutoff < 20.0 || cutoff > 20000.0 {
-                return Err(format!("Filter cutoff {} is out of range (20-20000 Hz)", cutoff));
+            if !(20.0..=20000.0).contains(&cutoff) {
+                return Err(format!(
+                    "Filter cutoff {} is out of range (20-20000 Hz)",
+                    cutoff
+                ));
             }
         }
-        
+
         if let Some(resonance) = self.synth_filter_resonance {
-            if resonance < 0.0 || resonance > 1.0 {
-                return Err(format!("Filter resonance {} is out of range (0.0-1.0)", resonance));
+            if !(0.0..=1.0).contains(&resonance) {
+                return Err(format!(
+                    "Filter resonance {} is out of range (0.0-1.0)",
+                    resonance
+                ));
             }
         }
 
         // Validate effect intensities
         if let Some(reverb) = self.synth_reverb {
-            if reverb < 0.0 || reverb > 1.0 {
-                return Err(format!("Synthesis reverb {} is out of range (0.0-1.0)", reverb));
+            if !(0.0..=1.0).contains(&reverb) {
+                return Err(format!(
+                    "Synthesis reverb {} is out of range (0.0-1.0)",
+                    reverb
+                ));
             }
         }
-        
+
         if let Some(chorus) = self.synth_chorus {
-            if chorus < 0.0 || chorus > 1.0 {
-                return Err(format!("Synthesis chorus {} is out of range (0.0-1.0)", chorus));
+            if !(0.0..=1.0).contains(&chorus) {
+                return Err(format!(
+                    "Synthesis chorus {} is out of range (0.0-1.0)",
+                    chorus
+                ));
             }
         }
-        
+
         if let Some(delay) = self.synth_delay {
-            if delay < 0.0 || delay > 1.0 {
-                return Err(format!("Synthesis delay {} is out of range (0.0-1.0)", delay));
+            if !(0.0..=1.0).contains(&delay) {
+                return Err(format!(
+                    "Synthesis delay {} is out of range (0.0-1.0)",
+                    delay
+                ));
             }
         }
-        
+
         if let Some(delay_time) = self.synth_delay_time {
-            if delay_time < 0.0 || delay_time > 2.0 {
-                return Err(format!("Synthesis delay time {} is out of range (0.0-2.0 seconds)", delay_time));
+            if !(0.0..=2.0).contains(&delay_time) {
+                return Err(format!(
+                    "Synthesis delay time {} is out of range (0.0-2.0 seconds)",
+                    delay_time
+                ));
             }
         }
 
         // Validate synthesis-specific parameters
         if let Some(pulse_width) = self.synth_pulse_width {
-            if pulse_width < 0.1 || pulse_width > 0.9 {
-                return Err(format!("Pulse width {} is out of range (0.1-0.9)", pulse_width));
+            if !(0.1..=0.9).contains(&pulse_width) {
+                return Err(format!(
+                    "Pulse width {} is out of range (0.1-0.9)",
+                    pulse_width
+                ));
             }
         }
-        
+
         if let Some(mod_freq) = self.synth_modulator_freq {
-            if mod_freq < 0.1 || mod_freq > 1000.0 {
-                return Err(format!("Modulator frequency {} is out of range (0.1-1000.0 Hz)", mod_freq));
+            if !(0.1..=1000.0).contains(&mod_freq) {
+                return Err(format!(
+                    "Modulator frequency {} is out of range (0.1-1000.0 Hz)",
+                    mod_freq
+                ));
             }
         }
-        
+
         if let Some(mod_index) = self.synth_modulation_index {
-            if mod_index < 0.0 || mod_index > 10.0 {
-                return Err(format!("Modulation index {} is out of range (0.0-10.0)", mod_index));
+            if !(0.0..=10.0).contains(&mod_index) {
+                return Err(format!(
+                    "Modulation index {} is out of range (0.0-10.0)",
+                    mod_index
+                ));
             }
         }
-        
+
         if let Some(grain_size) = self.synth_grain_size {
-            if grain_size < 0.01 || grain_size > 0.5 {
-                return Err(format!("Grain size {} is out of range (0.01-0.5 seconds)", grain_size));
+            if !(0.01..=0.5).contains(&grain_size) {
+                return Err(format!(
+                    "Grain size {} is out of range (0.01-0.5 seconds)",
+                    grain_size
+                ));
             }
         }
-        
+
         if let Some(roughness) = self.synth_texture_roughness {
-            if roughness < 0.0 || roughness > 1.0 {
-                return Err(format!("Texture roughness {} is out of range (0.0-1.0)", roughness));
+            if !(0.0..=1.0).contains(&roughness) {
+                return Err(format!(
+                    "Texture roughness {} is out of range (0.0-1.0)",
+                    roughness
+                ));
             }
         }
 
@@ -692,7 +761,9 @@ impl SimpleNote {
         let has_random = self.preset_random.unwrap_or(false);
 
         if has_name && has_random {
-            return Err("Cannot use both 'preset_name' and 'preset_random' - choose one".to_string());
+            return Err(
+                "Cannot use both 'preset_name' and 'preset_random' - choose one".to_string(),
+            );
         }
 
         if has_category && has_name {
@@ -700,7 +771,9 @@ impl SimpleNote {
         }
 
         if has_random && !has_category {
-            return Err("When using 'preset_random', you must specify 'preset_category'".to_string());
+            return Err(
+                "When using 'preset_random', you must specify 'preset_category'".to_string(),
+            );
         }
 
         if !has_name && !has_category && !has_random {
@@ -709,7 +782,9 @@ impl SimpleNote {
 
         // Validate category if provided
         if let Some(category) = &self.preset_category {
-            let valid_categories = ["bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects"];
+            let valid_categories = [
+                "bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects",
+            ];
             if !valid_categories.contains(&category.to_lowercase().as_str()) {
                 return Err(format!(
                     "Invalid preset category '{}'. Valid categories: {:?}",

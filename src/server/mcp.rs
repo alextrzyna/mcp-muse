@@ -579,7 +579,6 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
     }
 }
 
-
 fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
     tracing::info!(
         "handle_play_notes_tool called with arguments: {:?}",
@@ -638,7 +637,7 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
                 }),
             };
         }
-        
+
         if let Err(e) = note.validate_synthesis() {
             return JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
@@ -716,7 +715,7 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
             (true, true, false, true) => "MIDI + R2D2 + Presets",
             (true, false, true, true) => "MIDI + Synthesis + Presets",
             (false, true, true, true) => "R2D2 + Synthesis + Presets",
-            (true, false, true, false) => "MIDI + Synthesis", 
+            (true, false, true, false) => "MIDI + Synthesis",
             (false, true, true, false) => "R2D2 + Synthesis",
             (true, true, false, false) => "MIDI + R2D2",
             (true, false, false, true) => "MIDI + Presets",
@@ -786,8 +785,6 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
         }
     }
 }
-
-
 
 pub fn run_stdio_server() {
     tracing::info!("MCP server starting");

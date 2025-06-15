@@ -1,4 +1,4 @@
-use crate::expressive::{ExpressiveSynth, R2D2Emotion, R2D2Expression, R2D2Voice, PresetLibrary};
+use crate::expressive::{ExpressiveSynth, PresetLibrary, R2D2Emotion, R2D2Expression, R2D2Voice};
 use crate::midi::parser::MidiNote;
 use crate::midi::SimpleSequence;
 use oxisynth::{MidiEvent, SoundFont, Synth};
@@ -23,7 +23,11 @@ impl MidiPlayer {
         let sink = Sink::try_new(&stream_handle)
             .map_err(|e| format!("Failed to create audio sink: {}", e))?;
 
-        Ok(MidiPlayer { _stream, sink, preset_library: PresetLibrary::new() })
+        Ok(MidiPlayer {
+            _stream,
+            sink,
+            preset_library: PresetLibrary::new(),
+        })
     }
 
     /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
@@ -110,7 +114,11 @@ impl MidiPlayer {
         let notes: Vec<MidiNote> = sequence
             .notes
             .into_iter()
-            .filter(|simple_note| simple_note.note_type == "midi" && simple_note.note.is_some() && simple_note.velocity.is_some())
+            .filter(|simple_note| {
+                simple_note.note_type == "midi"
+                    && simple_note.note.is_some()
+                    && simple_note.velocity.is_some()
+            })
             .map(|simple_note| MidiNote {
                 note: simple_note.note.unwrap(), // Safe because we filtered for Some()
                 velocity: simple_note.velocity.unwrap(), // Safe because we filtered for Some()
@@ -197,7 +205,11 @@ impl MidiPlayer {
         let notes: Vec<MidiNote> = sequence
             .notes
             .into_iter()
-            .filter(|simple_note| simple_note.note_type == "midi" && simple_note.note.is_some() && simple_note.velocity.is_some())
+            .filter(|simple_note| {
+                simple_note.note_type == "midi"
+                    && simple_note.note.is_some()
+                    && simple_note.velocity.is_some()
+            })
             .map(|simple_note| MidiNote {
                 note: simple_note.note.unwrap(), // Safe because we filtered for Some()
                 velocity: simple_note.velocity.unwrap(), // Safe because we filtered for Some()
@@ -261,14 +273,18 @@ impl MidiPlayer {
     /// Apply preset configuration to a SimpleNote
     fn apply_preset_to_note(&self, note: &mut crate::midi::SimpleNote) -> Result<(), String> {
         // Skip if no preset parameters are specified
-        if note.preset_name.is_none() && note.preset_category.is_none() && !note.preset_random.unwrap_or(false) {
+        if note.preset_name.is_none()
+            && note.preset_category.is_none()
+            && !note.preset_random.unwrap_or(false)
+        {
             return Ok(());
         }
 
         // Load preset based on parameters
         let preset = if let Some(preset_name) = &note.preset_name {
             // Load specific preset by name
-            self.preset_library.load_preset(preset_name)
+            self.preset_library
+                .load_preset(preset_name)
                 .ok_or_else(|| format!("Preset '{}' not found", preset_name))?
         } else if let Some(category_str) = &note.preset_category {
             // Load random preset from category
@@ -283,12 +299,14 @@ impl MidiPlayer {
                 "effects" => crate::expressive::PresetCategory::Effects,
                 _ => return Err(format!("Unknown preset category: {}", category_str)),
             };
-            
-            self.preset_library.get_random_preset(Some(category))
+
+            self.preset_library
+                .get_random_preset(Some(category))
                 .ok_or_else(|| format!("No presets found in category '{}'", category_str))?
         } else if note.preset_random.unwrap_or(false) {
             // Load completely random preset
-            self.preset_library.get_random_preset(None)
+            self.preset_library
+                .get_random_preset(None)
                 .ok_or("No presets available for random selection")?
         } else {
             return Ok(()); // No valid preset selection
@@ -296,34 +314,38 @@ impl MidiPlayer {
 
         // Apply preset variation if specified
         let synth_params = if let Some(variation_name) = &note.preset_variation {
-            self.preset_library.apply_variation(&preset.name, variation_name)
+            self.preset_library
+                .apply_variation(&preset.name, variation_name)
                 .unwrap_or_else(|| preset.synth_params.clone())
         } else {
             preset.synth_params.clone()
         };
 
         // Apply preset parameters to the note (convert from SynthParams to SimpleNote fields)
-        note.synth_type = Some(match &synth_params.synth_type {
-            crate::expressive::SynthType::Sine => "sine",
-            crate::expressive::SynthType::Square { .. } => "square",
-            crate::expressive::SynthType::Sawtooth => "sawtooth",
-            crate::expressive::SynthType::Triangle => "triangle",
-            crate::expressive::SynthType::Noise { .. } => "noise",
-            crate::expressive::SynthType::FM { .. } => "fm",
-            crate::expressive::SynthType::Granular { .. } => "granular",
-            crate::expressive::SynthType::Wavetable { .. } => "wavetable",
-            crate::expressive::SynthType::Kick { .. } => "kick",
-            crate::expressive::SynthType::Snare { .. } => "snare",
-            crate::expressive::SynthType::HiHat { .. } => "hihat",
-            crate::expressive::SynthType::Cymbal { .. } => "cymbal",
-            crate::expressive::SynthType::Swoosh { .. } => "swoosh",
-            crate::expressive::SynthType::Zap { .. } => "zap",
-            crate::expressive::SynthType::Chime { .. } => "chime",
-            crate::expressive::SynthType::Burst { .. } => "burst",
-            crate::expressive::SynthType::Pad { .. } => "pad",
-            crate::expressive::SynthType::Texture { .. } => "texture",
-            crate::expressive::SynthType::Drone { .. } => "drone",
-        }.to_string());
+        note.synth_type = Some(
+            match &synth_params.synth_type {
+                crate::expressive::SynthType::Sine => "sine",
+                crate::expressive::SynthType::Square { .. } => "square",
+                crate::expressive::SynthType::Sawtooth => "sawtooth",
+                crate::expressive::SynthType::Triangle => "triangle",
+                crate::expressive::SynthType::Noise { .. } => "noise",
+                crate::expressive::SynthType::FM { .. } => "fm",
+                crate::expressive::SynthType::Granular { .. } => "granular",
+                crate::expressive::SynthType::Wavetable { .. } => "wavetable",
+                crate::expressive::SynthType::Kick { .. } => "kick",
+                crate::expressive::SynthType::Snare { .. } => "snare",
+                crate::expressive::SynthType::HiHat { .. } => "hihat",
+                crate::expressive::SynthType::Cymbal { .. } => "cymbal",
+                crate::expressive::SynthType::Swoosh { .. } => "swoosh",
+                crate::expressive::SynthType::Zap { .. } => "zap",
+                crate::expressive::SynthType::Chime { .. } => "chime",
+                crate::expressive::SynthType::Burst { .. } => "burst",
+                crate::expressive::SynthType::Pad { .. } => "pad",
+                crate::expressive::SynthType::Texture { .. } => "texture",
+                crate::expressive::SynthType::Drone { .. } => "drone",
+            }
+            .to_string(),
+        );
 
         // Apply envelope parameters
         note.synth_attack = Some(synth_params.envelope.attack);
@@ -336,11 +358,14 @@ impl MidiPlayer {
 
         // Apply filter parameters if present
         if let Some(filter) = &synth_params.filter {
-            note.synth_filter_type = Some(match filter.filter_type {
-                crate::expressive::FilterType::LowPass => "lowpass",
-                crate::expressive::FilterType::HighPass => "highpass",
-                crate::expressive::FilterType::BandPass => "bandpass",
-            }.to_string());
+            note.synth_filter_type = Some(
+                match filter.filter_type {
+                    crate::expressive::FilterType::LowPass => "lowpass",
+                    crate::expressive::FilterType::HighPass => "highpass",
+                    crate::expressive::FilterType::BandPass => "bandpass",
+                }
+                .to_string(),
+            );
             note.synth_filter_cutoff = Some(filter.cutoff);
             note.synth_filter_resonance = Some(filter.resonance);
         }
@@ -366,7 +391,10 @@ impl MidiPlayer {
             crate::expressive::SynthType::Square { pulse_width } => {
                 note.synth_pulse_width = Some(*pulse_width);
             }
-            crate::expressive::SynthType::FM { modulator_freq, modulation_index } => {
+            crate::expressive::SynthType::FM {
+                modulator_freq,
+                modulation_index,
+            } => {
                 note.synth_modulator_freq = Some(*modulator_freq);
                 note.synth_modulation_index = Some(*modulation_index);
             }
@@ -385,7 +413,10 @@ impl MidiPlayer {
 
     /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes
     pub fn play_enhanced_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
-        tracing::info!("Playing enhanced mixed sequence with {} notes", sequence.notes.len());
+        tracing::info!(
+            "Playing enhanced mixed sequence with {} notes",
+            sequence.notes.len()
+        );
 
         if sequence.notes.is_empty() {
             tracing::warn!("No notes to play - sequence is empty");
@@ -415,7 +446,10 @@ impl MidiPlayer {
                     return Err(format!("Invalid R2D2 note: {}", e));
                 }
 
-                let emotion_str = note.r2d2_emotion.as_ref().ok_or("R2D2 emotion is required")?;
+                let emotion_str = note
+                    .r2d2_emotion
+                    .as_ref()
+                    .ok_or("R2D2 emotion is required")?;
                 let emotion = match emotion_str.as_str() {
                     "Happy" => R2D2Emotion::Happy,
                     "Sad" => R2D2Emotion::Sad,
@@ -459,7 +493,7 @@ impl MidiPlayer {
                 // Convert SimpleNote to SynthEvent
                 synthesis_events.push(SynthEvent {
                     start_time: note.start_time,
-                    note: note,
+                    note,
                 });
             } else {
                 // Convert to MidiNote - only process if note and velocity exist
@@ -509,9 +543,7 @@ impl MidiPlayer {
         let synthesis_end_time = if !synthesis_events.is_empty() {
             synthesis_events
                 .iter()
-                .map(|event| {
-                    Duration::from_secs_f64(event.start_time + event.note.duration)
-                })
+                .map(|event| Duration::from_secs_f64(event.start_time + event.note.duration))
                 .max()
                 .unwrap_or(Duration::from_secs(1))
         } else {
@@ -531,8 +563,9 @@ impl MidiPlayer {
         );
 
         // Create enhanced hybrid audio source
-        let enhanced_source = EnhancedHybridAudioSource::new(midi_notes, r2d2_events, synthesis_events, total_time)
-            .map_err(|e| format!("Failed to create enhanced hybrid audio source: {}", e))?;
+        let enhanced_source =
+            EnhancedHybridAudioSource::new(midi_notes, r2d2_events, synthesis_events, total_time)
+                .map_err(|e| format!("Failed to create enhanced hybrid audio source: {}", e))?;
 
         tracing::info!("Created enhanced hybrid audio source, starting playback");
         self.sink.append(enhanced_source);
@@ -1019,7 +1052,7 @@ struct EnhancedHybridAudioSource {
 
     // R2D2 synthesis
     r2d2_events: Vec<R2D2PrecomputedEvent>,
-    
+
     // Synthesis events
     synthesis_events: Vec<SynthPrecomputedEvent>,
 
@@ -1093,12 +1126,13 @@ impl EnhancedHybridAudioSource {
 
             for event in synthesis_events {
                 let start_sample = (event.start_time * sample_rate as f64) as u32;
-                
+
                 // Convert SimpleNote to SynthParams
                 let synth_params = Self::convert_simple_note_to_synth_params(&event.note)?;
-                
+
                 // Generate synthesis samples
-                let samples = expressive_synth.generate_synthesized_samples(&synth_params)
+                let samples = expressive_synth
+                    .generate_synthesized_samples(&synth_params)
                     .map_err(|e| format!("Failed to generate synthesis samples: {}", e))?;
 
                 precomputed_synthesis_events.push(SynthPrecomputedEvent {
@@ -1121,46 +1155,56 @@ impl EnhancedHybridAudioSource {
     }
 
     /// Convert SimpleNote to SynthParams for the ExpressiveSynth
-    fn convert_simple_note_to_synth_params(note: &crate::midi::SimpleNote) -> Result<crate::expressive::SynthParams, String> {
-        use crate::expressive::{SynthParams, SynthType, EnvelopeParams, FilterParams, FilterType, EffectParams, EffectType, NoiseColor};
+    fn convert_simple_note_to_synth_params(
+        note: &crate::midi::SimpleNote,
+    ) -> Result<crate::expressive::SynthParams, String> {
+        use crate::expressive::{
+            EffectParams, EffectType, EnvelopeParams, FilterParams, FilterType, NoiseColor,
+            SynthParams, SynthType,
+        };
 
-        let synth_type_str = note.synth_type.as_ref().ok_or("Synthesis type is required")?;
-        
+        let synth_type_str = note
+            .synth_type
+            .as_ref()
+            .ok_or("Synthesis type is required")?;
+
         // Parse synthesis type
         let synth_type = match synth_type_str.as_str() {
             "sine" => SynthType::Sine,
-            "square" => SynthType::Square { 
-                pulse_width: note.synth_pulse_width.unwrap_or(0.5) 
+            "square" => SynthType::Square {
+                pulse_width: note.synth_pulse_width.unwrap_or(0.5),
             },
             "sawtooth" => SynthType::Sawtooth,
             "triangle" => SynthType::Triangle,
-            "noise" => SynthType::Noise { color: NoiseColor::White },
-            "fm" => SynthType::FM { 
+            "noise" => SynthType::Noise {
+                color: NoiseColor::White,
+            },
+            "fm" => SynthType::FM {
                 modulator_freq: note.synth_modulator_freq.unwrap_or(440.0),
                 modulation_index: note.synth_modulation_index.unwrap_or(1.0),
             },
-            "granular" => SynthType::Granular { 
+            "granular" => SynthType::Granular {
                 grain_size: note.synth_grain_size.unwrap_or(0.1),
                 overlap: 0.5,
                 density: 1.0,
             },
-            "wavetable" => SynthType::Wavetable { 
+            "wavetable" => SynthType::Wavetable {
                 position: 0.0,
                 morph_speed: 1.0,
             },
-            "kick" => SynthType::Kick { 
+            "kick" => SynthType::Kick {
                 punch: 0.8,
                 sustain: 0.3,
                 click_freq: 8000.0,
                 body_freq: 60.0,
             },
-            "snare" => SynthType::Snare { 
+            "snare" => SynthType::Snare {
                 snap: 0.7,
                 buzz: 0.6,
                 tone_freq: 200.0,
                 noise_amount: 0.8,
             },
-            "hihat" => SynthType::HiHat { 
+            "hihat" => SynthType::HiHat {
                 metallic: 0.8,
                 decay: 0.15,
                 brightness: 0.9,
@@ -1170,17 +1214,17 @@ impl EnhancedHybridAudioSource {
                 metallic: 0.9,
                 strike_intensity: 0.8,
             },
-            "swoosh" => SynthType::Swoosh { 
+            "swoosh" => SynthType::Swoosh {
                 direction: 0.0,
                 intensity: 0.7,
                 frequency_sweep: (200.0, 2000.0),
             },
-            "zap" => SynthType::Zap { 
+            "zap" => SynthType::Zap {
                 energy: 0.8,
                 decay: 0.3,
                 harmonic_content: 0.7,
             },
-            "chime" => SynthType::Chime { 
+            "chime" => SynthType::Chime {
                 fundamental: note.synth_frequency.unwrap_or(440.0),
                 harmonic_count: 5,
                 decay: 0.5,
@@ -1192,13 +1236,13 @@ impl EnhancedHybridAudioSource {
                 intensity: 0.8,
                 shape: 0.5,
             },
-            "pad" => SynthType::Pad { 
+            "pad" => SynthType::Pad {
                 warmth: 0.7,
                 movement: 0.3,
                 space: 0.6,
                 harmonic_evolution: 0.4,
             },
-            "texture" => SynthType::Texture { 
+            "texture" => SynthType::Texture {
                 roughness: note.synth_texture_roughness.unwrap_or(0.5),
                 evolution: 0.3,
                 spectral_tilt: 0.0,
@@ -1251,7 +1295,7 @@ impl EnhancedHybridAudioSource {
 
         // Create effects
         let mut effects = Vec::new();
-        
+
         if let Some(reverb) = note.synth_reverb {
             if reverb > 0.0 {
                 effects.push(EffectParams {
@@ -1260,7 +1304,7 @@ impl EnhancedHybridAudioSource {
                 });
             }
         }
-        
+
         if let Some(chorus) = note.synth_chorus {
             if chorus > 0.0 {
                 effects.push(EffectParams {
@@ -1269,7 +1313,7 @@ impl EnhancedHybridAudioSource {
                 });
             }
         }
-        
+
         if let Some(delay) = note.synth_delay {
             if delay > 0.0 {
                 let delay_time = note.synth_delay_time.unwrap_or(0.25);

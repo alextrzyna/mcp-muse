@@ -114,13 +114,28 @@ fn test_mcp_tools_list() {
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
     assert!(tool_names.contains(&"play_notes"));
-    
+
     // Verify the play_notes tool supports all the functionality
-    let play_notes_tool = tools.iter().find(|tool| tool["name"] == "play_notes").unwrap();
-    assert!(play_notes_tool["description"].as_str().unwrap().contains("UNIVERSAL AUDIO ENGINE"));
-    assert!(play_notes_tool["description"].as_str().unwrap().contains("MIDI music"));
-    assert!(play_notes_tool["description"].as_str().unwrap().contains("R2D2 expressions"));
-    assert!(play_notes_tool["description"].as_str().unwrap().contains("custom synthesis"));
+    let play_notes_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "play_notes")
+        .unwrap();
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("UNIVERSAL AUDIO ENGINE"));
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("MIDI music"));
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("R2D2 expressions"));
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("custom synthesis"));
 
     // Verify structure of both tools
     for tool in tools {
