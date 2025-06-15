@@ -1,5 +1,4 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+// BASE64 imports removed - no longer needed after consolidation
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -107,16 +106,36 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 3);
+    assert_eq!(tools.len(), 1);
 
-    // Check that all three tools are present
+    // Check that the consolidated play_notes tool is present
     let tool_names: Vec<&str> = tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert!(tool_names.contains(&"play_midi"));
     assert!(tool_names.contains(&"play_notes"));
-    assert!(tool_names.contains(&"play_r2d2_expression"));
+
+    // Verify the play_notes tool supports all the functionality
+    let play_notes_tool = tools
+        .iter()
+        .find(|tool| tool["name"] == "play_notes")
+        .unwrap();
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("UNIVERSAL AUDIO ENGINE"));
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("MIDI music"));
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("R2D2 expressions"));
+    assert!(play_notes_tool["description"]
+        .as_str()
+        .unwrap()
+        .contains("custom synthesis"));
 
     // Verify structure of both tools
     for tool in tools {
@@ -129,7 +148,7 @@ fn test_mcp_tools_list() {
 
 #[test]
 #[allow(clippy::zombie_processes)]
-fn test_play_midi_tool_with_invalid_base64() {
+fn test_play_notes_tool_with_invalid_arguments() {
     let mut child = Command::new("cargo")
         .args(["run", "--"])
         .stdin(Stdio::piped())
@@ -160,15 +179,15 @@ fn test_play_midi_tool_with_invalid_base64() {
         .read_line(&mut response_line)
         .expect("Failed to read init response");
 
-    // Send play_midi with invalid base64
+    // Send play_notes with invalid arguments (empty notes array)
     let play_request = json!({
         "jsonrpc": "2.0",
         "id": 2,
         "method": "tools/call",
         "params": {
-            "name": "play_midi",
+            "name": "play_notes",
             "arguments": {
-                "midi_data": "invalid_base64!"
+                "notes": []
             }
         }
     });
@@ -194,27 +213,18 @@ fn test_play_midi_tool_with_invalid_base64() {
 
 #[test]
 #[allow(clippy::zombie_processes)]
-fn test_play_midi_tool_with_valid_midi() {
-    // Create a simple valid MIDI file
-    let mut midi_bytes = Vec::new();
-
-    // MIDI header
-    midi_bytes.extend_from_slice(&[
-        0x4D, 0x54, 0x68, 0x64, // "MThd"
-        0x00, 0x00, 0x00, 0x06, // Header length (6 bytes)
-        0x00, 0x00, // Format type 0
-        0x00, 0x01, // Number of tracks (1)
-        0x00, 0x60, // Ticks per quarter note (96)
+fn test_play_notes_tool_with_valid_notes() {
+    // Create a simple valid note sequence
+    let notes = json!([
+        {
+            "note": 60,
+            "velocity": 80,
+            "start_time": 0.0,
+            "duration": 1.0,
+            "channel": 0,
+            "instrument": 0
+        }
     ]);
-
-    // Track
-    midi_bytes.extend_from_slice(&[
-        0x4D, 0x54, 0x72, 0x6B, // "MTrk"
-        0x00, 0x00, 0x00, 0x04, // Track length (4 bytes)
-        0x00, 0xFF, 0x2F, 0x00, // End of track
-    ]);
-
-    let midi_b64 = BASE64.encode(&midi_bytes);
 
     let mut child = Command::new("cargo")
         .args(["run", "--"])
@@ -246,15 +256,15 @@ fn test_play_midi_tool_with_valid_midi() {
         .read_line(&mut response_line)
         .expect("Failed to read init response");
 
-    // Send play_midi with valid MIDI
+    // Send play_notes with valid notes
     let play_request = json!({
         "jsonrpc": "2.0",
         "id": 2,
         "method": "tools/call",
         "params": {
-            "name": "play_midi",
+            "name": "play_notes",
             "arguments": {
-                "midi_data": midi_b64
+                "notes": notes
             }
         }
     });

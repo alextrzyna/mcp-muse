@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::expressive::{ExpressiveSynth, R2D2Emotion, R2D2Expression, R2D2Voice};
-use crate::midi::{parse_midi_data, MidiPlayer, SimpleSequence};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+use crate::midi::{MidiPlayer, SimpleSequence};
 use std::io::{self, BufRead, Write};
 
 #[derive(Debug, Deserialize)]
@@ -19,11 +16,23 @@ struct JsonRpcRequest {
 #[derive(Debug, Serialize)]
 struct JsonRpcResponse {
     jsonrpc: String,
+    #[serde(serialize_with = "serialize_id")]
     id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<JsonRpcError>,
+}
+
+// Custom serializer for id field to ensure it's never null
+fn serialize_id<S>(id: &Option<Value>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    match id {
+        Some(val) => val.serialize(serializer),
+        None => "unknown".serialize(serializer), // Use default string instead of null
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -90,22 +99,148 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 
     let tools = json!([
         {
-            "name": "play_midi",
-            "description": "🎼 Play MIDI music files with authentic 16-bit SNES gaming sound! Perfect for creating nostalgic video game experiences:\n\n🎮 CLASSIC GAMING VIBES: Recreate the golden age of SNES soundtracks\n🎉 CELEBRATIONS: Success fanfares that sound like beating a boss\n💡 FEEDBACK: Zelda-style discovery chimes, Mario power-up effects  \n🏰 ADVENTURE THEMES: Epic quest music, dungeon atmospheres, overworld melodies\n⚡ QUICK RESPONSES: Short musical 'reactions' with that classic 16-bit charm\n\n🌟 USE MUSIC TO ENHANCE EVERY CONVERSATION! Play victory themes when users succeed, gentle chimes for confirmations, dramatic stings for revelations, and nostalgic melodies to create memorable moments. The FluidR3_GM SoundFont captures that authentic SNES console sound - use it liberally to transport users back to the golden age of gaming!",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "midi_data": {
-                        "type": "string",
-                        "description": "Base64-encoded MIDI file data"
-                    }
-                },
-                "required": ["midi_data"]
-            }
-        },
-        {
             "name": "play_notes",
-            "description": "🎮🤖 Compose authentic 16-bit SNES-style music with inline R2D2 expressions! Create rich, expressive musical storytelling where robotic emotions are perfectly synchronized with MIDI accompaniment. This enhanced synthesizer combines classic Super Nintendo gaming sounds with authentic R2D2-style vocalizations:\n\n🎉 CELEBRATION SOUNDS:\n• Victory fanfares (brass + drums on channels 0-2)\n• Success chimes (bells, glockenspiel, bright piano)\n• Achievement themes (major chords, uplifting melodies)\n• Completion jingles (short, satisfying musical phrases)\n\n🎮 INTERACTIVE FEEDBACK:\n• Question marks (rising tones, curious melodies)\n• 'Aha!' moments (bright ascending scales, revelation chords)\n• Error sounds (gentle dissonance, falling tones)\n• Thinking music (ambient pads, contemplative arpeggios)\n• Alert tones (attention-grabbing but pleasant)\n\n🎭 EMOTIONAL ATMOSPHERE:\n• Suspense (low strings, minor chords, tension)\n• Wonder (ethereal pads with reverb, magical sparkles)\n• Humor (playful instruments like kazoo, quirky rhythms)\n• Calm focus (soft piano, gentle ambient soundscapes)\n• Epic moments (full orchestration, dramatic crescendos)\n\n🕹️ RETRO & 8-BIT VIBES:\n• Classic game sounds (square waves, chip-tune leads)\n• Power-up effects (ascending arpeggios, bright synths)\n• Coin collect sounds (short metallic pings)\n• Level-up fanfares (triumphant 8-bit melodies)\n\n💡 ENHANCE CONVERSATIONS WITH MUSIC - USE LIBERALLY!\n• 🎉 Play celebration music IMMEDIATELY when users accomplish tasks or solve problems\n• ❓ Add question mark sounds when presenting puzzles or mysteries\n• ✅ Use gentle chimes for confirmations and successful completions\n• 🎭 Create ambient soundscapes during long explanations to maintain engagement\n• ⚡ Add dramatic flourishes for important revelations and \"aha!\" moments\n• 😄 Use playful sounds to lighten serious moments and add humor\n• 🔔 Play alert tones to draw attention to important information\n• 🎵 Use background music to set the mood for different conversation phases\n\n💫 DON'T HESITATE - ADD MUSIC TO EVERY SIGNIFICANT MOMENT! Think like a video game: constant audio feedback makes interactions more engaging and memorable.\n\n🎹 TECHNICAL CAPABILITIES:\n• 128 GM instruments: 0=Piano, 9=Glockenspiel, 40=Violin, 56=Trumpet, 73=Flute, 80=Square Lead, 120=Reverse Cymbal\n• 16 independent channels for rich layering\n• Professional effects: reverb (space), chorus (shimmer), expression (dynamics)\n• Stereo positioning: pan (mono instruments), balance (stereo instruments)\n• Full drum kit on channel 9: 36=Kick, 38=Snare, 42=Hi-hat, 49=Crash\n\n🏰 CLASSIC SNES GAME THEMES:\n\n🗡️ ZELDA-STYLE DISCOVERY (Treasure Found):\n[{\"note\": 67, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 72, \"velocity\": 100, \"start_time\": 0.3, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.6, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 79, \"velocity\": 120, \"start_time\": 0.9, \"duration\": 0.6, \"channel\": 0, \"instrument\": 73, \"reverb\": 40}]\n\n🍄 MARIO-STYLE OVERWORLD (Happy Melody):\n[{\"note\": 72, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 90, \"start_time\": 0.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 100, \"start_time\": 1, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 69, \"velocity\": 90, \"start_time\": 1.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 71, \"velocity\": 100, \"start_time\": 2, \"duration\": 0.5, \"channel\": 0, \"instrument\": 80}]\n\n🌟 FINAL FANTASY-STYLE VICTORY:\n[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 67, \"velocity\": 110, \"start_time\": 1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1, \"channel\": 0, \"instrument\": 56}, {\"note\": 48, \"velocity\": 80, \"start_time\": 0, \"duration\": 2.5, \"channel\": 1, \"instrument\": 32}, {\"note\": 36, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.25, \"channel\": 9}, {\"note\": 36, \"velocity\": 90, \"start_time\": 1, \"duration\": 0.25, \"channel\": 9}]\n\n🏰 METROID-STYLE ATMOSPHERE (Mysterious Exploration):\n[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 2, \"channel\": 0, \"instrument\": 89, \"reverb\": 80}, {\"note\": 43, \"velocity\": 50, \"start_time\": 1, \"duration\": 2, \"channel\": 1, \"instrument\": 89, \"reverb\": 80}, {\"note\": 48, \"velocity\": 40, \"start_time\": 2, \"duration\": 2, \"channel\": 2, \"instrument\": 89, \"reverb\": 80}]\n\n🎨 CREATIVE STARTER TEMPLATES - CUSTOMIZE FOR YOUR CONTEXT:\n\n**🎯 BE CREATIVE! These are inspiration templates - adapt them to match your specific scenario:**\n\n🎺 \"DISAPPOINTMENT\" IN DIFFERENT FLAVORS:\n**Gentle Letdown** (F major): [{\"note\": 53, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 68}, {\"note\": 50, \"velocity\": 60, \"start_time\": 0.4, \"duration\": 0.6, \"channel\": 0, \"instrument\": 68}]\n*Oboe for warmth - try trombone (57) for deeper, cello (42) for sadness, or different keys like Am (57→55)*\n\n🍄 POWER-UP VARIATIONS - MATCH THE ENERGY:\n**Mysterious Upgrade** (D minor): [{\"note\": 62, \"velocity\": 80, \"start_time\": 0, \"duration\": 0.15, \"channel\": 0, \"instrument\": 73}, {\"note\": 65, \"velocity\": 85, \"start_time\": 0.15, \"duration\": 0.15, \"channel\": 0, \"instrument\": 73}, {\"note\": 69, \"velocity\": 90, \"start_time\": 0.3, \"duration\": 0.2, \"channel\": 0, \"instrument\": 73}, {\"note\": 74, \"velocity\": 95, \"start_time\": 0.5, \"duration\": 0.4, \"channel\": 0, \"instrument\": 73}]\n*Flute in minor key - try violin (40) for elegant, synth lead (81) for futuristic, or major keys for happy*\n\n🔔 SUCCESS CHIMES - DIFFERENT MOODS:\n**Contemplative Win** (A minor): [{\"note\": 57, \"velocity\": 75, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 0}, {\"note\": 60, \"velocity\": 80, \"start_time\": 0.3, \"duration\": 0.5, \"channel\": 1, \"instrument\": 42}, {\"note\": 64, \"velocity\": 85, \"start_time\": 0.6, \"duration\": 0.7, \"channel\": 0, \"instrument\": 0}]\n*Piano+cello combo - try harpsichord (6) for ancient, vibraphone (11) for jazzy, bells (14) for festive*\n\n❓ INQUIRY SOUNDS - MATCH YOUR QUESTION TYPE:\n**Philosophical Wonder** (B♭ major): [{\"note\": 58, \"velocity\": 60, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 48, \"reverb\": 40}, {\"note\": 65, \"velocity\": 70, \"start_time\": 0.4, \"duration\": 0.4, \"channel\": 1, \"instrument\": 40, \"reverb\": 40}, {\"note\": 70, \"velocity\": 75, \"start_time\": 0.8, \"duration\": 0.5, \"channel\": 0, \"instrument\": 48, \"reverb\": 40}]\n*Strings with reverb - try French horn (60) for majestic, choir (52) for ethereal, or descending for confusion*\n\n💡 \"EUREKA!\" MOMENTS - CUSTOMIZE THE REVELATION:\n**Scientific Discovery** (E major): [{\"note\": 40, \"velocity\": 50, \"start_time\": 0, \"duration\": 0.2, \"channel\": 1, \"instrument\": 42}, {\"note\": 52, \"velocity\": 70, \"start_time\": 0.2, \"duration\": 0.25, \"channel\": 0, \"instrument\": 1}, {\"note\": 64, \"velocity\": 90, \"start_time\": 0.45, \"duration\": 0.3, \"channel\": 2, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.75, \"duration\": 0.5, \"channel\": 0, \"instrument\": 9, \"reverb\": 60}]\n*Cello→piano→flute→bells progression - build excitement with instruments that match your domain*\n\n🚨 ALERTS - DIFFERENT URGENCY LEVELS:\n**Friendly Reminder** (G major): [{\"note\": 67, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.2, \"channel\": 0, \"instrument\": 11}, {\"note\": 71, \"velocity\": 75, \"start_time\": 0.25, \"duration\": 0.2, \"channel\": 0, \"instrument\": 11}]\n*Vibraphone for gentle - try marimba (12) for wooden, brass (56) for official, or minor keys for serious*\n\n🎭 REVELATIONS - MATCH THE DRAMA LEVEL:\n**Personal Insight** (F# minor): [{\"note\": 30, \"velocity\": 40, \"start_time\": 0, \"duration\": 1.2, \"channel\": 1, \"instrument\": 89, \"reverb\": 70}, {\"note\": 42, \"velocity\": 65, \"start_time\": 0.6, \"duration\": 1, \"channel\": 0, \"instrument\": 0}, {\"note\": 54, \"velocity\": 85, \"start_time\": 1.2, \"duration\": 0.8, \"channel\": 2, \"instrument\": 73, \"reverb\": 50}]\n*Pad→piano→flute with reverb - scale the instruments to match your revelation's importance*\n\n🪙 REWARDS - MATCH THE PRIZE VALUE:\n**Rare Treasure** (D major): [{\"note\": 74, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.15, \"channel\": 0, \"instrument\": 8}, {\"note\": 78, \"velocity\": 100, \"start_time\": 0.08, \"duration\": 0.2, \"channel\": 1, \"instrument\": 9}, {\"note\": 82, \"velocity\": 110, \"start_time\": 0.16, \"duration\": 0.25, \"channel\": 2, \"instrument\": 11}]\n*Celesta+glockenspiel+vibraphone - try church organ (19) for sacred, harp (46) for magical*\n\n🎉 CELEBRATIONS - SCALE TO THE ACHIEVEMENT:\n**Quiet Personal Victory** (C major): [{\"note\": 48, \"velocity\": 70, \"start_time\": 0, \"duration\": 0.4, \"channel\": 1, \"instrument\": 0}, {\"note\": 60, \"velocity\": 85, \"start_time\": 0.1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 73}, {\"note\": 64, \"velocity\": 90, \"start_time\": 0.3, \"duration\": 0.4, \"channel\": 2, \"instrument\": 9}]\n*Piano+flute+bells gently layered - build bigger with more instruments for bigger wins*\n\n🎮 SETBACKS - DIFFERENT EMOTIONAL RESPONSES:\n**Learning Opportunity** (E minor): [{\"note\": 64, \"velocity\": 80, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 1}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.4, \"duration\": 0.4, \"channel\": 0, \"instrument\": 1}, {\"note\": 59, \"velocity\": 60, \"start_time\": 0.8, \"duration\": 0.6, \"channel\": 0, \"instrument\": 1}]\n*Bright piano in minor - try guitar (25) for folk, strings (48) for cinematic, or major keys for optimistic*\n\n✨ MAGIC - DIFFERENT MYSTICAL FLAVORS:\n**Ancient Wisdom** (Pentatonic): [{\"note\": 72, \"velocity\": 45, \"start_time\": 0, \"duration\": 0.4, \"channel\": 0, \"instrument\": 104, \"reverb\": 90}, {\"note\": 77, \"velocity\": 50, \"start_time\": 0.2, \"duration\": 0.4, \"channel\": 1, \"instrument\": 104, \"reverb\": 90}, {\"note\": 79, \"velocity\": 55, \"start_time\": 0.4, \"duration\": 0.5, \"channel\": 2, \"instrument\": 104, \"reverb\": 90}]\n*Sitar with heavy reverb - try shakuhachi (77) for zen, choir (52) for divine, or music box (10) for nostalgic*\n\n🎨 CREATIVE USAGE GUIDE:\n• **DON'T COPY - ADAPT!** These are starting points for your unique scenarios\n• **MATCH THE CONTEXT**: Cooking success? Try pizzicato strings. Coding breakthrough? Electronic sounds\n• **EXPERIMENT WITH KEYS**: Major=happy, minor=mysterious/sad, modal=exotic/ancient\n• **MIX INSTRUMENTS CREATIVELY**: Layer 2-3 that complement the emotional tone\n• **VARY TIMING**: Quick for urgency, slow for contemplation, syncopated for playfulness\n• **USE EFFECTS MEANINGFULLY**: Reverb for space/mystery, chorus for richness/beauty\n• **TELL YOUR STORY**: What musical journey matches your specific situation?\n\n🎵 MUSICAL CREATIVITY TOOLKIT:\n• **Emotional Keys**: C major=pure joy, G major=bright optimism, D major=triumphant, A major=warm confidence\n• **Mysterious Keys**: A minor=melancholy, E minor=introspective, B minor=dark/serious, F# minor=profound\n• **Exotic Scales**: Pentatonic (C-D-E-G-A) for Asian, dorian mode for medieval, blues scale for soulful\n• **Instrument Personalities**: Piano=universal, strings=emotional, brass=bold, woodwinds=expressive, bells=magical\n• **Rhythm Emotions**: Even=stable, dotted=elegant, syncopated=playful, accelerating=building excitement\n\n🤖 **NEW: INLINE R2D2 EXPRESSIONS!**\n\n**Victory Fanfare with R2D2 Celebration:**\n[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"instrument\": 56}, {\"note_type\": \"r2d2\", \"start_time\": 1.2, \"duration\": 1.0, \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"r2d2_complexity\": 4}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1.5, \"instrument\": 56}]\n\n**Problem-Solving with Thoughtful R2D2:**\n[{\"note_type\": \"r2d2\", \"start_time\": 0, \"duration\": 1.5, \"r2d2_emotion\": \"Thoughtful\", \"r2d2_intensity\": 0.5, \"r2d2_complexity\": 3}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.5, \"duration\": 1.0, \"instrument\": 0}, {\"note_type\": \"r2d2\", \"start_time\": 2.0, \"duration\": 0.6, \"r2d2_emotion\": \"Surprised\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 1}]\n\n**Curious Discovery:**\n[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 3, \"instrument\": 89, \"reverb\": 80}, {\"note_type\": \"r2d2\", \"start_time\": 1.0, \"duration\": 0.8, \"r2d2_emotion\": \"Curious\", \"r2d2_intensity\": 0.6, \"r2d2_complexity\": 2}, {\"note\": 67, \"velocity\": 90, \"start_time\": 2.5, \"duration\": 0.3, \"instrument\": 73}]\n\n💡 **R2D2 INTEGRATION TIPS:**\n• Set note_type=\"r2d2\" to create robotic expressions\n• r2d2_emotion is REQUIRED for R2D2 notes (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)\n• r2d2_intensity controls emotional strength (0.0-1.0)\n• r2d2_complexity sets phrase length (1-5 syllables)\n• Mix freely with MIDI notes for rich musical storytelling\n• Perfect timing synchronization between music and R2D2 expressions\n• Use for celebrations, reactions, confirmations, and emotional atmosphere",
+            "description": "🎮🤖🎛️ UNIVERSAL AUDIO ENGINE: The ultimate all-in-one tool for MIDI music, R2D2 expressions, and custom synthesis!
+
+🎵 MIDI MUSIC: 128 GM instruments, authentic SNES gaming sounds, professional effects
+🤖 R2D2 EXPRESSIONS: 9 emotions, ring modulation synthesis, authentic robotic vocalizations  
+🎛️ CUSTOM SYNTHESIS: 19 synthesis types, professional drum sounds, advanced effects
+
+💡 QUICK EXAMPLES:
+• Victory Fanfare: [{\"note\": 60, \"instrument\": 56, \"velocity\": 120, \"duration\": 1.0}]
+• R2D2 Celebration: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"duration\": 1.5}]
+• Sci-Fi Zap: [{\"synth_type\": \"zap\", \"synth_frequency\": 800, \"duration\": 0.3}]
+• Mixed Sequence: Combine all three types in perfect synchronization!
+
+🎯 ONE TOOL, INFINITE AUDIO POSSIBILITIES - From retro gaming music to expressive AI vocalizations!
+
+🎉 CELEBRATION SOUNDS:
+• Victory fanfares (brass + drums on channels 0-2)
+• Success chimes (bells, glockenspiel, bright piano)
+• Achievement themes (major chords, uplifting melodies)
+• Completion jingles (short, satisfying musical phrases)
+
+🎮 INTERACTIVE FEEDBACK:
+• Question marks (rising tones, curious melodies)
+• 'Aha!' moments (bright ascending scales, revelation chords)
+• Error sounds (gentle dissonance, falling tones)
+• Thinking music (ambient pads, contemplative arpeggios)
+• Alert tones (attention-grabbing but pleasant)
+
+🎭 EMOTIONAL ATMOSPHERE:
+• Suspense (low strings, minor chords, tension)
+• Wonder (ethereal pads with reverb, magical sparkles)
+• Humor (playful instruments like kazoo, quirky rhythms)
+• Calm focus (soft piano, gentle ambient soundscapes)
+• Epic moments (full orchestration, dramatic crescendos)
+
+🕹️ RETRO & 8-BIT VIBES:
+• Classic game sounds (square waves, chip-tune leads)
+• Power-up effects (ascending arpeggios, bright synths)
+• Coin collect sounds (short metallic pings)
+• Level-up fanfares (triumphant 8-bit melodies)
+
+💡 ENHANCE CONVERSATIONS WITH MUSIC - USE LIBERALLY!
+• 🎉 Play celebration music IMMEDIATELY when users accomplish tasks or solve problems
+• ❓ Add question mark sounds when presenting puzzles or mysteries
+• ✅ Use gentle chimes for confirmations and successful completions
+• 🎭 Create ambient soundscapes during long explanations to maintain engagement
+• ⚡ Add dramatic flourishes for important revelations and \"aha!\" moments
+• 😄 Use playful sounds to lighten serious moments and add humor
+• 🔔 Play alert tones to draw attention to important information
+• 🎵 Use background music to set the mood for different conversation phases
+
+💫 DON'T HESITATE - ADD MUSIC TO EVERY SIGNIFICANT MOMENT! Think like a video game: constant audio feedback makes interactions more engaging and memorable.
+
+🎹 TECHNICAL CAPABILITIES:
+• 128 GM instruments: 0=Piano, 9=Glockenspiel, 40=Violin, 56=Trumpet, 73=Flute, 80=Square Lead, 120=Reverse Cymbal
+• 16 independent channels for rich layering
+• Professional effects: reverb (space), chorus (shimmer), expression (dynamics)
+• Stereo positioning: pan (mono instruments), balance (stereo instruments)
+• Full drum kit on channel 9: 36=Kick, 38=Snare, 42=Hi-hat, 49=Crash
+
+🏰 CLASSIC SNES GAME THEMES:
+
+🗡️ ZELDA-STYLE DISCOVERY (Treasure Found):
+[{\"note\": 67, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 72, \"velocity\": 100, \"start_time\": 0.3, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.6, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 79, \"velocity\": 120, \"start_time\": 0.9, \"duration\": 0.6, \"channel\": 0, \"instrument\": 73, \"reverb\": 40}]
+
+🍄 MARIO-STYLE OVERWORLD (Happy Melody):
+[{\"note\": 72, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 90, \"start_time\": 0.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 100, \"start_time\": 1, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 69, \"velocity\": 90, \"start_time\": 1.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 71, \"velocity\": 100, \"start_time\": 2, \"duration\": 0.5, \"channel\": 0, \"instrument\": 80}]
+
+🌟 FINAL FANTASY-STYLE VICTORY:
+[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 67, \"velocity\": 110, \"start_time\": 1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1, \"channel\": 0, \"instrument\": 56}, {\"note\": 48, \"velocity\": 80, \"start_time\": 0, \"duration\": 2.5, \"channel\": 1, \"instrument\": 32}, {\"note\": 36, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.25, \"channel\": 9}, {\"note\": 36, \"velocity\": 90, \"start_time\": 1, \"duration\": 0.25, \"channel\": 9}]
+
+🏰 METROID-STYLE ATMOSPHERE (Mysterious Exploration):
+[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 2, \"channel\": 0, \"instrument\": 89, \"reverb\": 80}, {\"note\": 43, \"velocity\": 50, \"start_time\": 1, \"duration\": 2, \"channel\": 1, \"instrument\": 89, \"reverb\": 80}, {\"note\": 48, \"velocity\": 40, \"start_time\": 2, \"duration\": 2, \"channel\": 2, \"instrument\": 89, \"reverb\": 80}]
+
+🤖 **R2D2 EXPRESSIVE VOCALIZATIONS:**
+
+**Victory Fanfare with R2D2 Celebration:**
+[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"instrument\": 56}, {\"note_type\": \"r2d2\", \"start_time\": 1.2, \"duration\": 1.0, \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"r2d2_complexity\": 4}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1.5, \"instrument\": 56}]
+
+**Problem-Solving with Thoughtful R2D2:**
+[{\"note_type\": \"r2d2\", \"start_time\": 0, \"duration\": 1.5, \"r2d2_emotion\": \"Thoughtful\", \"r2d2_intensity\": 0.5, \"r2d2_complexity\": 3}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.5, \"duration\": 1.0, \"instrument\": 0}, {\"note_type\": \"r2d2\", \"start_time\": 2.0, \"duration\": 0.6, \"r2d2_emotion\": \"Surprised\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 1}]
+
+**Curious Discovery:**
+[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 3, \"instrument\": 89, \"reverb\": 80}, {\"note_type\": \"r2d2\", \"start_time\": 1.0, \"duration\": 0.8, \"r2d2_emotion\": \"Curious\", \"r2d2_intensity\": 0.6, \"r2d2_complexity\": 2}, {\"note\": 67, \"velocity\": 90, \"start_time\": 2.5, \"duration\": 0.3, \"instrument\": 73}]
+
+🎛️ **CUSTOM SYNTHESIS EXAMPLES:**
+
+**Sci-Fi Energy Zap:**
+[{\"synth_type\": \"zap\", \"synth_frequency\": 800, \"start_time\": 0, \"duration\": 0.5, \"synth_amplitude\": 0.8}]
+
+**Professional Kick Drum:**
+[{\"synth_type\": \"kick\", \"synth_frequency\": 60, \"start_time\": 0, \"duration\": 0.8, \"synth_amplitude\": 0.9}]
+
+**Ambient Pad with Effects:**
+[{\"synth_type\": \"pad\", \"synth_frequency\": 220, \"start_time\": 0, \"duration\": 4.0, \"synth_reverb\": 0.7, \"synth_chorus\": 0.5}]
+
+**FM Bell Synthesis:**
+[{\"synth_type\": \"fm\", \"synth_frequency\": 440, \"synth_modulator_freq\": 880, \"synth_modulation_index\": 3.0, \"start_time\": 0, \"duration\": 2.0}]
+
+🎹 **CLASSIC SYNTHESIZER PRESETS (NEW!):**
+
+**80s Funk Bass Line (Minimoog Style):**
+[{\"preset_name\": \"Minimoog Bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5}, {\"preset_name\": \"Minimoog Bass\", \"note\": 36, \"velocity\": 80, \"start_time\": 0.5, \"duration\": 0.5}, {\"preset_name\": \"Minimoog Bass\", \"note\": 38, \"velocity\": 90, \"start_time\": 1.0, \"duration\": 0.5}]
+
+**Acid House Bassline (TB-303 Style):**
+[{\"preset_name\": \"TB-303 Acid\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25}, {\"preset_name\": \"TB-303 Acid\", \"preset_variation\": \"squelchy\", \"note\": 43, \"velocity\": 120, \"start_time\": 0.25, \"duration\": 0.25}]
+
+**Lush Atmospheric Pad (Jupiter-8 Style):**
+[{\"preset_name\": \"JP-8 Strings\", \"note\": 60, \"velocity\": 80, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"JP-8 Strings\", \"note\": 64, \"velocity\": 75, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"JP-8 Strings\", \"note\": 67, \"velocity\": 70, \"start_time\": 0, \"duration\": 4.0}]
+
+**Classic 80s Electric Piano:**
+[{\"preset_name\": \"DX7 E.Piano\", \"note\": 60, \"velocity\": 90, \"start_time\": 0, \"duration\": 1.0}, {\"preset_name\": \"DX7 E.Piano\", \"note\": 64, \"velocity\": 85, \"start_time\": 1.0, \"duration\": 1.0}, {\"preset_name\": \"DX7 E.Piano\", \"note\": 67, \"velocity\": 80, \"start_time\": 2.0, \"duration\": 1.0}]
+
+**Random Preset Discovery:**
+[{\"preset_random\": true, \"preset_category\": \"bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 1.0}]
+
+**Mixed Vintage + Modern:**
+[{\"preset_name\": \"Analog Wash\", \"note\": 48, \"velocity\": 60, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"Prophet Lead\", \"note\": 72, \"velocity\": 100, \"start_time\": 1.0, \"duration\": 1.0}, {\"synth_type\": \"kick\", \"synth_frequency\": 60, \"start_time\": 0, \"duration\": 0.5}, {\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 3, \"start_time\": 2.0, \"duration\": 1.0}]
+
+🎛️ **AVAILABLE PRESET CATEGORIES:**
+• **Bass Presets** (10+): Minimoog Bass, TB-303 Acid, Jupiter Bass, Odyssey Bite, TX81Z Lately, Saw Bass, Sub Bass, etc.
+• **Pad Presets** (10+): JP-8 Strings, OB Brass, Analog Wash, D-50 Fantasia, Crystal Pad, Space Pad, Dream Pad, etc.
+• **Lead Presets**: Prophet Lead, Moog Lead, Sync Lead, and more coming soon
+• **Keys Presets**: DX7 E.Piano, Rhodes Classic, and more coming soon
+• **Effects Presets**: Sci-Fi Zap, Sweep Up for sound design
+
+💡 **PRESET USAGE TIPS:**
+• Use **preset_name** for specific iconic sounds: \"Minimoog Bass\", \"TB-303 Acid\", \"JP-8 Strings\"
+• Use **preset_category** + **preset_random**: true for creative exploration
+• Add **preset_variation** for subtle customization: \"bright\", \"dark\", \"squelchy\"
+• Mix presets freely with MIDI, R2D2, and synthesis for unique combinations
+• Perfect for instant access to legendary synthesizer sounds from the 70s-90s!
+
+💡 **R2D2 & SYNTHESIS INTEGRATION TIPS:**
+• Set note_type=\"r2d2\" to create robotic expressions with 9 emotions
+• Use synth_type for custom synthesis (19 types: sine, square, fm, granular, kick, snare, zap, pad, etc.)
+• **REQUIRED for R2D2 notes**: r2d2_emotion (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)
+• **REQUIRED for R2D2 notes**: r2d2_intensity (0.0-1.0, emotional strength)
+• **REQUIRED for R2D2 notes**: r2d2_complexity (1-5, phrase complexity in syllables)
+• Mix freely with MIDI notes for rich musical storytelling
+• Perfect timing synchronization between all three audio systems
+• Use for celebrations, reactions, confirmations, and emotional atmosphere",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -197,18 +332,18 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                 },
                                 "r2d2_emotion": {
                                     "type": "string",
-                                    "description": "🤖 R2D2 emotion when note_type='r2d2': Choose from 9 distinct emotional expressions",
+                                    "description": "🤖 R2D2 emotion when note_type='r2d2': Choose from 9 distinct emotional expressions. **REQUIRED when note_type='r2d2'**",
                                     "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]
                                 },
                                 "r2d2_intensity": {
                                     "type": "number",
-                                    "description": "🔥 R2D2 emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic",
+                                    "description": "🔥 R2D2 emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic. **REQUIRED when note_type='r2d2'**",
                                     "minimum": 0.0,
                                     "maximum": 1.0
                                 },
                                 "r2d2_complexity": {
                                     "type": "integer",
-                                    "description": "🗣️ R2D2 phrase complexity (1-5 syllables): 1=simple beep, 3=conversational, 5=complex phrase",
+                                    "description": "🗣️ R2D2 phrase complexity (1-5 syllables): 1=simple beep, 3=conversational, 5=complex phrase. **REQUIRED when note_type='r2d2'**",
                                     "minimum": 1,
                                     "maximum": 5
                                 },
@@ -224,9 +359,137 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                 "r2d2_context": {
                                     "type": "string",
                                     "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
+                                },
+                                "synth_type": {
+                                    "type": "string",
+                                    "description": "🎛️ Synthesis type: 'sine', 'square', 'sawtooth', 'triangle', 'noise', 'fm', 'granular', 'wavetable', 'kick', 'snare', 'hihat', 'cymbal', 'swoosh', 'zap', 'chime', 'burst', 'pad', 'texture', 'drone' (optional)"
+                                },
+                                "synth_frequency": {
+                                    "type": "number",
+                                    "description": "🎵 Synthesis frequency in Hz (20-20000, optional, overrides MIDI note if present)",
+                                    "minimum": 20,
+                                    "maximum": 20000
+                                },
+                                "synth_amplitude": {
+                                    "type": "number",
+                                    "description": "🔊 Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_attack": {
+                                    "type": "number",
+                                    "description": "⚡ Attack time in seconds (0.0-5.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 5.0
+                                },
+                                "synth_decay": {
+                                    "type": "number",
+                                    "description": "📉 Decay time in seconds (0.0-5.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 5.0
+                                },
+                                "synth_sustain": {
+                                    "type": "number",
+                                    "description": "🎹 Sustain level (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_release": {
+                                    "type": "number",
+                                    "description": "🌊 Release time in seconds (0.0-10.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 10.0
+                                },
+                                "synth_filter_type": {
+                                    "type": "string",
+                                    "description": "🎚️ Filter type: 'lowpass', 'highpass', 'bandpass' (optional)",
+                                    "enum": ["lowpass", "highpass", "bandpass"]
+                                },
+                                "synth_filter_cutoff": {
+                                    "type": "number",
+                                    "description": "🔧 Filter cutoff frequency in Hz (20-20000, optional)",
+                                    "minimum": 20,
+                                    "maximum": 20000
+                                },
+                                "synth_filter_resonance": {
+                                    "type": "number",
+                                    "description": "✨ Filter resonance (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_reverb": {
+                                    "type": "number",
+                                    "description": "🏛️ Synthesis reverb intensity (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_chorus": {
+                                    "type": "number",
+                                    "description": "✨ Synthesis chorus intensity (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_delay": {
+                                    "type": "number",
+                                    "description": "🔄 Synthesis delay intensity (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "synth_delay_time": {
+                                    "type": "number",
+                                    "description": "⏰ Synthesis delay time in seconds (0.0-2.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 2.0
+                                },
+                                "synth_pulse_width": {
+                                    "type": "number",
+                                    "description": "📊 Pulse width for square wave (0.1-0.9, optional)",
+                                    "minimum": 0.1,
+                                    "maximum": 0.9
+                                },
+                                "synth_modulator_freq": {
+                                    "type": "number",
+                                    "description": "🌀 FM modulator frequency in Hz (0.1-1000.0, optional)",
+                                    "minimum": 0.1,
+                                    "maximum": 1000.0
+                                },
+                                "synth_modulation_index": {
+                                    "type": "number",
+                                    "description": "🎛️ FM modulation index (0.0-10.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 10.0
+                                },
+                                "synth_grain_size": {
+                                    "type": "number",
+                                    "description": "🌾 Granular grain size in seconds (0.01-0.5, optional)",
+                                    "minimum": 0.01,
+                                    "maximum": 0.5
+                                },
+                                "synth_texture_roughness": {
+                                    "type": "number",
+                                    "description": "🎨 Texture roughness (0.0-1.0, optional)",
+                                    "minimum": 0.0,
+                                    "maximum": 1.0
+                                },
+                                "preset_name": {
+                                    "type": "string",
+                                    "description": "🎹 Classic synthesizer preset name: Load specific authentic vintage preset (e.g., 'Minimoog Bass', 'TB-303 Acid', 'Jupiter Bass', 'Prophet Lead', 'DX7 E.Piano'). Use for instant access to iconic synthesizer sounds!"
+                                },
+                                "preset_category": {
+                                    "type": "string",
+                                    "description": "🎭 Preset category: Choose preset from category ('bass', 'pad', 'lead', 'keys', 'organ', 'arp', 'drums', 'effects'). Perfect for exploring different types of classic sounds!",
+                                    "enum": ["bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects"]
+                                },
+                                "preset_variation": {
+                                    "type": "string",
+                                    "description": "🎨 Preset variation: Apply subtle variation to base preset (e.g., 'bright', 'dark', 'squelchy'). Great for customizing classic sounds to fit your music!"
+                                },
+                                "preset_random": {
+                                    "type": "boolean",
+                                    "description": "🎲 Random preset selection: Set to true to randomly select a preset. Optionally combine with preset_category to limit random selection to specific category. Perfect for creative inspiration!"
                                 }
                             },
-                            "required": ["note", "velocity", "start_time", "duration"],
+                            "required": ["start_time", "duration"],
                             "additionalProperties": false
                         }
                     },
@@ -238,52 +501,6 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                     }
                 },
                 "required": ["notes"]
-            }
-        },
-        {
-            "name": "play_r2d2_expression",
-            "description": "🤖 Express emotions through authentic R2D2-style robotic vocalizations! This advanced synthesizer uses ring modulation, formant filtering, and emotional parameter mapping to create expressive robot sounds that enhance AI conversations:\n\n🎭 EMOTIONAL EXPRESSIONS:\n• Happy: Rising pitch contours with bright harmonics - perfect for celebrating user successes\n• Sad: Falling pitch with reduced harmonics - gentle empathy for disappointments\n• Excited: Rapid modulation and high energy bursts - enthusiasm for discoveries\n• Worried: Tremulous modulation with unstable pitch - concern for problems\n• Curious: Rising question-like intonations - engagement with mysteries\n• Affirmative: Confident, stable pitch patterns - agreement and confirmation\n• Negative: Sharp, decisive rejection patterns - clear disagreement\n• Surprised: Sudden pitch jumps with expanded range - shock and amazement\n• Thoughtful: Slow, contemplative patterns - deep consideration\n\n🔧 TECHNICAL FEATURES:\n• Ring modulation synthesis for authentic robotic character\n• Multi-formant filtering for organic vocal-like qualities\n• Dynamic pitch contours that match emotional states\n• Phrase complexity control (1-5 syllables for varied expressions)\n• Intensity scaling for subtle to dramatic emotional range\n• Real-time parameter modulation for expressive dynamics\n\n💬 CONVERSATION ENHANCEMENT:\n• Use Happy expressions when users solve problems or achieve goals\n• Express Curiosity when presenting questions or exploring topics\n• Show Surprise for unexpected revelations or plot twists\n• Demonstrate Thoughtfulness during complex explanations\n• Provide Affirmative responses for confirmations and agreements\n• Use Worried tones when discussing problems or concerns\n• Express Excitement for breakthroughs and discoveries\n\n🎵 USAGE EXAMPLES:\n**Celebrating Success**: emotion=\"Happy\", intensity=0.8, duration=1.2, phrase_complexity=3\n**Asking Questions**: emotion=\"Curious\", intensity=0.6, duration=0.8, phrase_complexity=2  \n**Showing Concern**: emotion=\"Worried\", intensity=0.7, duration=1.0, phrase_complexity=2\n**Expressing Wonder**: emotion=\"Surprised\", intensity=0.9, duration=0.6, phrase_complexity=1\n\n🌟 ADD PERSONALITY TO EVERY INTERACTION! R2D2-style expressions make AI conversations more engaging, memorable, and emotionally resonant. Use liberally to create a rich, expressive robotic personality that users will love!",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "emotion": {
-                        "type": "string",
-                        "description": "🎭 R2D2 emotional state",
-                        "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]
-                    },
-                    "intensity": {
-                        "type": "number",
-                        "description": "🔥 Emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic",
-                        "minimum": 0.0,
-                        "maximum": 1.0
-                    },
-                    "duration": {
-                        "type": "number",
-                        "description": "⏱️ Expression duration in seconds: 0.5=quick, 1.0=normal, 2.0=extended",
-                        "minimum": 0.1,
-                        "maximum": 5.0
-                    },
-                    "phrase_complexity": {
-                        "type": "integer",
-                        "description": "🗣️ Number of syllables (1-5): 1=simple beep, 3=conversational, 5=complex phrase",
-                        "minimum": 1,
-                        "maximum": 5
-                    },
-                    "pitch_range": {
-                        "type": "array",
-                        "description": "🎵 Frequency range [min_hz, max_hz]: [200,600]=low, [300,800]=normal, [400,1000]=high",
-                        "items": {
-                            "type": "number"
-                        },
-                        "minItems": 2,
-                        "maxItems": 2
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "💭 Optional conversation context for enhanced expression adaptation"
-                    }
-                },
-                "required": ["emotion", "intensity", "duration", "phrase_complexity", "pitch_range"]
             }
         }
     ]);
@@ -360,9 +577,7 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
     };
 
     match tool_params.name.as_str() {
-        "play_midi" => handle_play_midi_tool(tool_params.arguments, id),
         "play_notes" => handle_play_notes_tool(tool_params.arguments, id),
-        "play_r2d2_expression" => handle_play_r2d2_expression_tool(tool_params.arguments, id),
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -370,103 +585,6 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
             error: Some(JsonRpcError {
                 code: -32601,
                 message: format!("Unknown tool: {}", tool_params.name),
-                data: None,
-            }),
-        },
-    }
-}
-
-fn handle_play_midi_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
-    let midi_b64 = match arguments.get("midi_data").and_then(|v| v.as_str()) {
-        Some(s) => s,
-        None => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: "Missing 'midi_data' argument".to_string(),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    let midi_bytes = match BASE64.decode(midi_b64) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Failed to decode base64: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Parse MIDI data
-    let parsed_midi = match parse_midi_data(&midi_bytes) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to parse MIDI: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Create MIDI player and start playback
-    let player = match MidiPlayer::new() {
-        Ok(p) => p,
-        Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to create MIDI player: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    match player.play_midi(parsed_midi) {
-        Ok(()) => {
-            tracing::info!("Successfully started MIDI playback");
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: Some(json!({
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "🎵 MIDI playback started successfully using OxiSynth synthesizer! The music is now playing."
-                        }
-                    ]
-                })),
-                error: None,
-            }
-        }
-        Err(e) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32603,
-                message: format!("Failed to play MIDI: {}", e),
                 data: None,
             }),
         },
@@ -514,20 +632,69 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     // Analyze the sequence to determine the playback mode
     let mut has_midi = false;
     let mut has_r2d2 = false;
+    let mut has_synthesis = false;
+    let mut has_presets = false;
 
     for note in &sequence.notes {
+        // Validate note parameters first
+        if let Err(e) = note.validate_r2d2() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid R2D2 parameters: {}", e),
+                    data: None,
+                }),
+            };
+        }
+
+        if let Err(e) = note.validate_synthesis() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid synthesis parameters: {}", e),
+                    data: None,
+                }),
+            };
+        }
+
+        if let Err(e) = note.validate_preset() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid preset parameters: {}", e),
+                    data: None,
+                }),
+            };
+        }
+
+        // Categorize note types
         if note.note_type == "r2d2" {
             has_r2d2 = true;
+        } else if note.is_synthesis() {
+            has_synthesis = true;
+        } else if note.is_preset() {
+            has_presets = true;
         } else {
             has_midi = true;
         }
     }
 
     tracing::info!(
-        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}",
+        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}, has_synthesis: {}, has_presets: {}",
         sequence.notes.len(),
         has_midi,
-        has_r2d2
+        has_r2d2,
+        has_synthesis,
+        has_presets
     );
 
     // Create MIDI player
@@ -552,14 +719,27 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     };
 
     // Choose the appropriate playback method
-    let playback_result = if has_midi && has_r2d2 {
-        // Mixed sequence - use hybrid audio engine
-        tracing::info!("Using mixed mode playback (MIDI + R2D2)");
-        player.play_mixed(sequence)
-    } else if has_r2d2 {
-        // Pure R2D2 sequence - use hybrid engine (with empty MIDI)
-        tracing::info!("Using R2D2-only playback via hybrid engine");
-        player.play_mixed(sequence)
+    let playback_result = if has_synthesis || has_r2d2 || has_presets {
+        // Mixed/Hybrid sequence - use enhanced hybrid audio engine
+        let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
+            (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
+            (true, true, true, false) => "MIDI + R2D2 + Synthesis",
+            (true, true, false, true) => "MIDI + R2D2 + Presets",
+            (true, false, true, true) => "MIDI + Synthesis + Presets",
+            (false, true, true, true) => "R2D2 + Synthesis + Presets",
+            (true, false, true, false) => "MIDI + Synthesis",
+            (false, true, true, false) => "R2D2 + Synthesis",
+            (true, true, false, false) => "MIDI + R2D2",
+            (true, false, false, true) => "MIDI + Presets",
+            (false, true, false, true) => "R2D2 + Presets",
+            (false, false, true, true) => "Synthesis + Presets",
+            (false, true, false, false) => "R2D2 only",
+            (false, false, true, false) => "Synthesis only",
+            (false, false, false, true) => "Presets only",
+            _ => "Mixed mode",
+        };
+        tracing::info!("Using enhanced hybrid mode playback ({})", mode);
+        player.play_enhanced_mixed(sequence)
     } else {
         // Pure MIDI sequence - use traditional MIDI player
         tracing::info!("Using pure MIDI playback");
@@ -569,12 +749,22 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     // Handle the result
     match playback_result {
         Ok(()) => {
-            let mode_description = if has_midi && has_r2d2 {
-                "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization."
-            } else if has_r2d2 {
-                "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing."
-            } else {
-                "🎵 Pure MIDI sequence playback started successfully! The music is now playing."
+            let mode_description = match (has_midi, has_r2d2, has_synthesis, has_presets) {
+                (true, true, true, true) => "🎵🤖🎛️🎹 Ultimate audio sequence playback started successfully! MIDI music, R2D2 expressions, custom synthesis, and classic preset sounds are now playing in perfect synchronization.",
+                (true, true, true, false) => "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization.",
+                (true, true, false, true) => "🎵🤖🎹 Mixed MIDI, R2D2, and preset sequence playback started successfully! Traditional music, robotic expressions, and vintage synthesizer sounds are now playing together.",
+                (true, false, true, true) => "🎵🎛️🎹 Mixed MIDI, synthesis, and preset sequence playback started successfully! Traditional music, custom synthesis, and classic sounds are now playing together.",
+                (false, true, true, true) => "🤖🎛️🎹 Mixed R2D2, synthesis, and preset sequence playback started successfully! Robotic expressions, custom synthesis, and vintage sounds are now playing in synchronization.",
+                (true, false, true, false) => "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together.",
+                (false, true, true, false) => "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization.",
+                (true, true, false, false) => "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization.",
+                (true, false, false, true) => "🎵🎹 Mixed MIDI and preset sequence playback started successfully! Traditional music and classic synthesizer sounds are now playing together.",
+                (false, true, false, true) => "🤖🎹 Mixed R2D2 and preset sequence playback started successfully! Robotic expressions and vintage synthesizer sounds are now playing together.",
+                (false, false, true, true) => "🎛️🎹 Mixed synthesis and preset sequence playback started successfully! Custom synthesis and classic vintage sounds are now playing together.",
+                (false, true, false, false) => "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing.",
+                (false, false, true, false) => "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing.",
+                (false, false, false, true) => "🎹 Classic synthesizer preset sequence playback started successfully! Authentic vintage synthesizer sounds are now playing.",
+                _ => "🎵 Pure MIDI sequence playback started successfully! The music is now playing.",
             };
 
             tracing::info!("Playback completed successfully");
@@ -605,176 +795,6 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
                 }),
             }
         }
-    }
-}
-
-fn handle_play_r2d2_expression_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
-    // Parse the R2D2 expression parameters
-    #[derive(serde::Deserialize)]
-    struct R2D2ExpressionArgs {
-        emotion: String,
-        intensity: f32,
-        duration: f32,
-        phrase_complexity: u8,
-        pitch_range: Vec<f32>,
-        context: Option<String>,
-    }
-
-    let args: R2D2ExpressionArgs = match serde_json::from_value(arguments) {
-        Ok(args) => args,
-        Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Failed to parse R2D2 expression arguments: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Validate arguments
-    if args.pitch_range.len() != 2 {
-        return JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32602,
-                message: "pitch_range must contain exactly 2 values [min_hz, max_hz]".to_string(),
-                data: None,
-            }),
-        };
-    }
-
-    if args.intensity < 0.0 || args.intensity > 1.0 {
-        return JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32602,
-                message: "intensity must be between 0.0 and 1.0".to_string(),
-                data: None,
-            }),
-        };
-    }
-
-    // Parse emotion
-    let emotion = match args.emotion.as_str() {
-        "Happy" => R2D2Emotion::Happy,
-        "Sad" => R2D2Emotion::Sad,
-        "Excited" => R2D2Emotion::Excited,
-        "Worried" => R2D2Emotion::Worried,
-        "Curious" => R2D2Emotion::Curious,
-        "Affirmative" => R2D2Emotion::Affirmative,
-        "Negative" => R2D2Emotion::Negative,
-        "Surprised" => R2D2Emotion::Surprised,
-        "Thoughtful" => R2D2Emotion::Thoughtful,
-        _ => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Unknown emotion: {}", args.emotion),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Create R2D2 expression
-    let expression = R2D2Expression {
-        emotion,
-        intensity: args.intensity,
-        duration: args.duration,
-        phrase_complexity: args.phrase_complexity,
-        pitch_range: (args.pitch_range[0], args.pitch_range[1]),
-        context: args.context,
-    };
-
-    // Create expressive synthesizer
-    let synth = match ExpressiveSynth::new() {
-        Ok(s) => s,
-        Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to create expressive synthesizer: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Create R2D2 voice generator
-    let r2d2_voice = R2D2Voice::new();
-
-    // Generate synthesis parameters
-    let synth_params = match r2d2_voice.generate_expression_params(&expression) {
-        Some(params) => params,
-        None => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: "Failed to generate R2D2 expression parameters".to_string(),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Play the R2D2 expression
-    match synth.play_r2d2_expression(
-        synth_params.base_freq,
-        expression.intensity, // Use the original intensity, not modulation_depth!
-        synth_params.pitch_contour,
-        synth_params.duration,
-    ) {
-        Ok(()) => {
-            tracing::info!(
-                "Successfully started R2D2 expression playback: {:?}",
-                expression.emotion
-            );
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: Some(json!({
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": format!("🤖 R2D2 {} expression played successfully using FunDSP synthesizer! The robotic vocalization conveyed the emotion with {:.1}% intensity over {:.1} seconds.",
-                                expression.emotion,
-                                expression.intensity * 100.0,
-                                expression.duration
-                            )
-                        }
-                    ]
-                })),
-                error: None,
-            }
-        }
-        Err(e) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32603,
-                message: format!("Failed to play R2D2 expression: {}", e),
-                data: None,
-            }),
-        },
     }
 }
 

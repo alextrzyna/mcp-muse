@@ -1,7 +1,6 @@
 pub mod parser;
 pub mod player;
 
-pub use parser::*;
 pub use player::*;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -20,10 +19,12 @@ where
 /// Can represent both MIDI notes and R2D2 expressions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleNote {
-    /// MIDI note number (0-127, where 60 = middle C)
-    pub note: u8,
-    /// Velocity (0-127, where 127 = loudest)
-    pub velocity: u8,
+    /// MIDI note number (0-127, where 60 = middle C) - Optional for R2D2 notes
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub note: Option<u8>,
+    /// Velocity (0-127, where 127 = loudest) - Optional for R2D2 notes
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub velocity: Option<u8>,
     /// Start time in seconds
     pub start_time: f64,
     /// Duration in seconds
@@ -79,6 +80,88 @@ pub struct SimpleNote {
     /// R2D2 context for enhanced expression
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub r2d2_context: Option<String>,
+
+    // NEW: Synthesis parameters (optional)
+    /// Synthesis type: "sine", "square", "sawtooth", "triangle", "noise", "fm", "granular", "wavetable",
+    /// "kick", "snare", "hihat", "cymbal", "swoosh", "zap", "chime", "burst", "pad", "texture", "drone"
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_type: Option<String>,
+    /// Synthesis frequency in Hz (20-20000, optional, overrides MIDI note if present)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_frequency: Option<f32>,
+    /// Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_amplitude: Option<f32>,
+
+    // Synthesis envelope parameters
+    /// Attack time in seconds (0.0-5.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_attack: Option<f32>,
+    /// Decay time in seconds (0.0-5.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_decay: Option<f32>,
+    /// Sustain level (0.0-1.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_sustain: Option<f32>,
+    /// Release time in seconds (0.0-10.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_release: Option<f32>,
+
+    // Synthesis filter parameters
+    /// Filter type: "lowpass", "highpass", "bandpass" (optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_filter_type: Option<String>,
+    /// Filter cutoff frequency in Hz (20-20000, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_filter_cutoff: Option<f32>,
+    /// Filter resonance (0.0-1.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_filter_resonance: Option<f32>,
+
+    // Synthesis effects parameters
+    /// Reverb intensity (0.0-1.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_reverb: Option<f32>,
+    /// Chorus intensity (0.0-1.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_chorus: Option<f32>,
+    /// Delay intensity (0.0-1.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_delay: Option<f32>,
+    /// Delay time in seconds (0.0-2.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_delay_time: Option<f32>,
+
+    // Synthesis-specific parameters
+    /// Pulse width for square wave (0.1-0.9, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_pulse_width: Option<f32>,
+    /// FM modulator frequency in Hz (0.1-1000.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_modulator_freq: Option<f32>,
+    /// FM modulation index (0.0-10.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_modulation_index: Option<f32>,
+    /// Granular grain size in seconds (0.01-0.5, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_grain_size: Option<f32>,
+    /// Texture roughness (0.0-1.0, optional)
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub synth_texture_roughness: Option<f32>,
+
+    // NEW: Classic Synthesizer Preset parameters (optional)
+    /// Preset name to load (e.g., "Minimoog Bass", "TB-303 Acid")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_name: Option<String>,
+    /// Preset category to select from (e.g., "bass", "pad", "lead")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_category: Option<String>,
+    /// Preset variation to apply (e.g., "bright", "dark")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_variation: Option<String>,
+    /// If true, select random preset from category
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub preset_random: Option<bool>,
 }
 
 fn default_note_type() -> String {
@@ -117,8 +200,8 @@ impl SimpleSequence {
         duration: f64,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note,
-            velocity,
+            note: Some(note),
+            velocity: Some(velocity),
             start_time,
             duration,
             channel: 0,
@@ -136,6 +219,29 @@ impl SimpleSequence {
             r2d2_complexity: None,
             r2d2_pitch_range: None,
             r2d2_context: None,
+            synth_type: None,
+            synth_frequency: None,
+            synth_amplitude: None,
+            synth_attack: None,
+            synth_decay: None,
+            synth_sustain: None,
+            synth_release: None,
+            synth_filter_type: None,
+            synth_filter_cutoff: None,
+            synth_filter_resonance: None,
+            synth_reverb: None,
+            synth_chorus: None,
+            synth_delay: None,
+            synth_delay_time: None,
+            synth_pulse_width: None,
+            synth_modulator_freq: None,
+            synth_modulation_index: None,
+            synth_grain_size: None,
+            synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -151,8 +257,8 @@ impl SimpleSequence {
         channel: u8,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note,
-            velocity,
+            note: Some(note),
+            velocity: Some(velocity),
             start_time,
             duration,
             channel,
@@ -170,6 +276,29 @@ impl SimpleSequence {
             r2d2_complexity: None,
             r2d2_pitch_range: None,
             r2d2_context: None,
+            synth_type: None,
+            synth_frequency: None,
+            synth_amplitude: None,
+            synth_attack: None,
+            synth_decay: None,
+            synth_sustain: None,
+            synth_release: None,
+            synth_filter_type: None,
+            synth_filter_cutoff: None,
+            synth_filter_resonance: None,
+            synth_reverb: None,
+            synth_chorus: None,
+            synth_delay: None,
+            synth_delay_time: None,
+            synth_pulse_width: None,
+            synth_modulator_freq: None,
+            synth_modulation_index: None,
+            synth_grain_size: None,
+            synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -186,8 +315,8 @@ impl SimpleSequence {
         instrument: u8,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note,
-            velocity,
+            note: Some(note),
+            velocity: Some(velocity),
             start_time,
             duration,
             channel,
@@ -205,6 +334,29 @@ impl SimpleSequence {
             r2d2_complexity: None,
             r2d2_pitch_range: None,
             r2d2_context: None,
+            synth_type: None,
+            synth_frequency: None,
+            synth_amplitude: None,
+            synth_attack: None,
+            synth_decay: None,
+            synth_sustain: None,
+            synth_release: None,
+            synth_filter_type: None,
+            synth_filter_cutoff: None,
+            synth_filter_resonance: None,
+            synth_reverb: None,
+            synth_chorus: None,
+            synth_delay: None,
+            synth_delay_time: None,
+            synth_pulse_width: None,
+            synth_modulator_freq: None,
+            synth_modulation_index: None,
+            synth_grain_size: None,
+            synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -243,8 +395,8 @@ impl SimpleSequence {
         context: Option<String>,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note: 60,     // Dummy MIDI note (not used for R2D2)
-            velocity: 80, // Dummy velocity (not used for R2D2)
+            note: None,
+            velocity: None,
             start_time,
             duration,
             channel: 0,
@@ -262,6 +414,29 @@ impl SimpleSequence {
             r2d2_complexity: Some(complexity),
             r2d2_pitch_range: pitch_range,
             r2d2_context: context,
+            synth_type: None,
+            synth_frequency: None,
+            synth_amplitude: None,
+            synth_attack: None,
+            synth_decay: None,
+            synth_sustain: None,
+            synth_release: None,
+            synth_filter_type: None,
+            synth_filter_cutoff: None,
+            synth_filter_resonance: None,
+            synth_reverb: None,
+            synth_chorus: None,
+            synth_delay: None,
+            synth_delay_time: None,
+            synth_pulse_width: None,
+            synth_modulator_freq: None,
+            synth_modulation_index: None,
+            synth_grain_size: None,
+            synth_texture_roughness: None,
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
         });
         self
     }
@@ -273,10 +448,16 @@ impl SimpleNote {
         self.note_type == "r2d2"
     }
 
-    /// Check if this note is a MIDI note
-    #[allow(dead_code)]
-    pub fn is_midi(&self) -> bool {
-        self.note_type == "midi"
+    /// Check if this note is a synthesis note
+    pub fn is_synthesis(&self) -> bool {
+        self.synth_type.is_some()
+    }
+
+    /// Check if this note uses presets
+    pub fn is_preset(&self) -> bool {
+        self.preset_name.is_some()
+            || self.preset_category.is_some()
+            || self.preset_random.unwrap_or(false)
     }
 
     /// Validate R2D2 parameters if this is an R2D2 note
@@ -350,6 +531,265 @@ impl SimpleNote {
             }
             if min < 50.0 || max > 2000.0 {
                 return Err("R2D2 pitch range should be between 50Hz and 2000Hz".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate synthesis parameters if this is a synthesis note
+    pub fn validate_synthesis(&self) -> Result<(), String> {
+        if !self.is_synthesis() {
+            return Ok(());
+        }
+
+        let synth_type = self.synth_type.as_ref().unwrap();
+
+        // Validate synthesis type
+        let valid_types = [
+            "sine",
+            "square",
+            "sawtooth",
+            "triangle",
+            "noise",
+            "fm",
+            "granular",
+            "wavetable",
+            "kick",
+            "snare",
+            "hihat",
+            "cymbal",
+            "swoosh",
+            "zap",
+            "chime",
+            "burst",
+            "pad",
+            "texture",
+            "drone",
+        ];
+
+        if !valid_types.contains(&synth_type.as_str()) {
+            return Err(format!(
+                "Invalid synthesis type: {}. Must be one of: {}",
+                synth_type,
+                valid_types.join(", ")
+            ));
+        }
+
+        // Validate frequency range if present
+        if let Some(freq) = self.synth_frequency {
+            if !(20.0..=20000.0).contains(&freq) {
+                return Err(format!(
+                    "Synthesis frequency {} is out of range (20-20000 Hz)",
+                    freq
+                ));
+            }
+        }
+
+        // Validate amplitude if present
+        if let Some(amp) = self.synth_amplitude {
+            if !(0.0..=1.0).contains(&amp) {
+                return Err(format!(
+                    "Synthesis amplitude {} is out of range (0.0-1.0)",
+                    amp
+                ));
+            }
+        }
+
+        // Validate envelope parameters
+        if let Some(attack) = self.synth_attack {
+            if !(0.0..=5.0).contains(&attack) {
+                return Err(format!(
+                    "Synthesis attack {} is out of range (0.0-5.0 seconds)",
+                    attack
+                ));
+            }
+        }
+
+        if let Some(decay) = self.synth_decay {
+            if !(0.0..=5.0).contains(&decay) {
+                return Err(format!(
+                    "Synthesis decay {} is out of range (0.0-5.0 seconds)",
+                    decay
+                ));
+            }
+        }
+
+        if let Some(sustain) = self.synth_sustain {
+            if !(0.0..=1.0).contains(&sustain) {
+                return Err(format!(
+                    "Synthesis sustain {} is out of range (0.0-1.0)",
+                    sustain
+                ));
+            }
+        }
+
+        if let Some(release) = self.synth_release {
+            if !(0.0..=10.0).contains(&release) {
+                return Err(format!(
+                    "Synthesis release {} is out of range (0.0-10.0 seconds)",
+                    release
+                ));
+            }
+        }
+
+        // Validate filter parameters
+        if let Some(filter_type) = &self.synth_filter_type {
+            let valid_filter_types = ["lowpass", "highpass", "bandpass"];
+            if !valid_filter_types.contains(&filter_type.as_str()) {
+                return Err(format!(
+                    "Invalid filter type: {}. Must be one of: {}",
+                    filter_type,
+                    valid_filter_types.join(", ")
+                ));
+            }
+        }
+
+        if let Some(cutoff) = self.synth_filter_cutoff {
+            if !(20.0..=20000.0).contains(&cutoff) {
+                return Err(format!(
+                    "Filter cutoff {} is out of range (20-20000 Hz)",
+                    cutoff
+                ));
+            }
+        }
+
+        if let Some(resonance) = self.synth_filter_resonance {
+            if !(0.0..=1.0).contains(&resonance) {
+                return Err(format!(
+                    "Filter resonance {} is out of range (0.0-1.0)",
+                    resonance
+                ));
+            }
+        }
+
+        // Validate effect intensities
+        if let Some(reverb) = self.synth_reverb {
+            if !(0.0..=1.0).contains(&reverb) {
+                return Err(format!(
+                    "Synthesis reverb {} is out of range (0.0-1.0)",
+                    reverb
+                ));
+            }
+        }
+
+        if let Some(chorus) = self.synth_chorus {
+            if !(0.0..=1.0).contains(&chorus) {
+                return Err(format!(
+                    "Synthesis chorus {} is out of range (0.0-1.0)",
+                    chorus
+                ));
+            }
+        }
+
+        if let Some(delay) = self.synth_delay {
+            if !(0.0..=1.0).contains(&delay) {
+                return Err(format!(
+                    "Synthesis delay {} is out of range (0.0-1.0)",
+                    delay
+                ));
+            }
+        }
+
+        if let Some(delay_time) = self.synth_delay_time {
+            if !(0.0..=2.0).contains(&delay_time) {
+                return Err(format!(
+                    "Synthesis delay time {} is out of range (0.0-2.0 seconds)",
+                    delay_time
+                ));
+            }
+        }
+
+        // Validate synthesis-specific parameters
+        if let Some(pulse_width) = self.synth_pulse_width {
+            if !(0.1..=0.9).contains(&pulse_width) {
+                return Err(format!(
+                    "Pulse width {} is out of range (0.1-0.9)",
+                    pulse_width
+                ));
+            }
+        }
+
+        if let Some(mod_freq) = self.synth_modulator_freq {
+            if !(0.1..=1000.0).contains(&mod_freq) {
+                return Err(format!(
+                    "Modulator frequency {} is out of range (0.1-1000.0 Hz)",
+                    mod_freq
+                ));
+            }
+        }
+
+        if let Some(mod_index) = self.synth_modulation_index {
+            if !(0.0..=10.0).contains(&mod_index) {
+                return Err(format!(
+                    "Modulation index {} is out of range (0.0-10.0)",
+                    mod_index
+                ));
+            }
+        }
+
+        if let Some(grain_size) = self.synth_grain_size {
+            if !(0.01..=0.5).contains(&grain_size) {
+                return Err(format!(
+                    "Grain size {} is out of range (0.01-0.5 seconds)",
+                    grain_size
+                ));
+            }
+        }
+
+        if let Some(roughness) = self.synth_texture_roughness {
+            if !(0.0..=1.0).contains(&roughness) {
+                return Err(format!(
+                    "Texture roughness {} is out of range (0.0-1.0)",
+                    roughness
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate preset parameters if this note uses presets
+    pub fn validate_preset(&self) -> Result<(), String> {
+        if !self.is_preset() {
+            return Ok(());
+        }
+
+        // Validate that we have either a name or category (but not both conflicting modes)
+        let has_name = self.preset_name.is_some();
+        let has_category = self.preset_category.is_some();
+        let has_random = self.preset_random.unwrap_or(false);
+
+        if has_name && has_random {
+            return Err(
+                "Cannot use both 'preset_name' and 'preset_random' - choose one".to_string(),
+            );
+        }
+
+        if has_category && has_name {
+            // This is fine - category can be used with name for validation
+        }
+
+        if has_random && !has_category {
+            return Err(
+                "When using 'preset_random', you must specify 'preset_category'".to_string(),
+            );
+        }
+
+        if !has_name && !has_category && !has_random {
+            return Err("Preset note must specify either 'preset_name', 'preset_category', or 'preset_random'".to_string());
+        }
+
+        // Validate category if provided
+        if let Some(category) = &self.preset_category {
+            let valid_categories = [
+                "bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects",
+            ];
+            if !valid_categories.contains(&category.to_lowercase().as_str()) {
+                return Err(format!(
+                    "Invalid preset category '{}'. Valid categories: {:?}",
+                    category, valid_categories
+                ));
             }
         }
 

@@ -1,3 +1,5 @@
+#![recursion_limit = "512"]
+
 use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
@@ -6,6 +8,8 @@ mod expressive;
 mod midi;
 mod server;
 mod setup;
+
+use crate::midi::{SimpleNote, SimpleSequence};
 
 fn init_logging() {
     // Cross-platform data directory (macOS: ~/Library/Application Support, Linux: ~/.local/share, Windows: %APPDATA%)
@@ -44,9 +48,14 @@ struct Args {
     /// Run setup for MCP hosts
     #[arg(long)]
     setup: bool,
+
+    /// Test preset integration
+    #[arg(long)]
+    test_presets: bool,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let args = Args::parse();
 
@@ -55,7 +64,208 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    if args.test_presets {
+        test_preset_integration().await?;
+        return Ok(());
+    }
+
     tracing::info!("Starting MCP MIDI Server (stdio mode)...");
     server::run_stdio_server();
     Ok(())
+}
+
+/// Test the preset integration with actual audio playback
+async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🎹 Testing Classic Synthesizer Preset Integration!");
+    println!("This will test the complete audio pipeline with presets...\n");
+
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+
+    // Test 1: Specific preset by name
+    println!("🎵 Test 1: Playing Minimoog Bass preset");
+    let minimoog_sequence = SimpleSequence {
+        notes: vec![
+            SimpleNote {
+                preset_name: Some("Minimoog Bass".to_string()),
+                note: Some(36), // C2
+                velocity: Some(100),
+                start_time: 0.0,
+                duration: 1.0,
+                channel: 0,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("Minimoog Bass".to_string()),
+                note: Some(43), // G2
+                velocity: Some(90),
+                start_time: 1.0,
+                duration: 1.0,
+                channel: 0,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+
+    player.play_enhanced_mixed(minimoog_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Test 2: Random preset from bass category
+    println!("🎵 Test 2: Playing random bass preset");
+    let random_bass_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_category: Some("bass".to_string()),
+            note: Some(40), // E2
+            velocity: Some(110),
+            start_time: 0.0,
+            duration: 1.5,
+            channel: 0,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+
+    player.play_enhanced_mixed(random_bass_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Test 3: Preset with variation
+    println!("🎵 Test 3: Playing TB-303 Acid preset with squelchy variation");
+    let acid_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("TB-303 Acid".to_string()),
+            preset_variation: Some("squelchy".to_string()),
+            note: Some(45), // A2
+            velocity: Some(127),
+            start_time: 0.0,
+            duration: 2.0,
+            channel: 0,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+
+    player.play_enhanced_mixed(acid_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Test 4: Multiple presets together
+    println!("🎵 Test 4: Playing multiple presets together");
+    let multi_preset_sequence = SimpleSequence {
+        notes: vec![
+            // Bass line
+            SimpleNote {
+                preset_name: Some("Jupiter Bass".to_string()),
+                note: Some(36), // C2
+                velocity: Some(100),
+                start_time: 0.0,
+                duration: 2.0,
+                channel: 0,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            // Pad
+            SimpleNote {
+                preset_category: Some("pad".to_string()),
+                note: Some(60), // C4
+                velocity: Some(80),
+                start_time: 0.5,
+                duration: 3.0,
+                channel: 1,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_category: Some("pad".to_string()),
+                note: Some(64), // E4
+                velocity: Some(75),
+                start_time: 0.5,
+                duration: 3.0,
+                channel: 1,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            // Random preset
+            SimpleNote {
+                preset_random: Some(true),
+                note: Some(72), // C5
+                velocity: Some(90),
+                start_time: 1.0,
+                duration: 1.0,
+                channel: 2,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+
+    player.play_enhanced_mixed(multi_preset_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    println!("✅ All preset tests completed successfully!");
+    println!("🎉 The classic synthesizer preset system is fully operational!");
+
+    Ok(())
+}
+
+impl Default for SimpleNote {
+    fn default() -> Self {
+        SimpleNote {
+            // MIDI parameters
+            note: None,
+            velocity: None,
+            instrument: None,
+            channel: 0,
+            start_time: 0.0,
+            duration: 1.0,
+            note_type: "midi".to_string(),
+
+            // MIDI effects
+            reverb: None,
+            chorus: None,
+            pan: None,
+            balance: None,
+            expression: None,
+            sustain: None,
+            volume: None,
+
+            // R2D2 parameters
+            r2d2_emotion: None,
+            r2d2_intensity: None,
+            r2d2_complexity: None,
+            r2d2_pitch_range: None,
+            r2d2_context: None,
+
+            // Custom synthesis parameters
+            synth_type: None,
+            synth_frequency: None,
+            synth_amplitude: None,
+            synth_attack: None,
+            synth_decay: None,
+            synth_sustain: None,
+            synth_release: None,
+            synth_filter_type: None,
+            synth_filter_cutoff: None,
+            synth_filter_resonance: None,
+            synth_reverb: None,
+            synth_chorus: None,
+            synth_delay: None,
+            synth_delay_time: None,
+            synth_modulator_freq: None,
+            synth_modulation_index: None,
+            synth_pulse_width: None,
+            synth_grain_size: None,
+            synth_texture_roughness: None,
+
+            // Preset parameters - NEW!
+            preset_name: None,
+            preset_category: None,
+            preset_variation: None,
+            preset_random: None,
+        }
+    }
 }
