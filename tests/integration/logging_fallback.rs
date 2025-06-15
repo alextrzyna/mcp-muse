@@ -15,7 +15,7 @@ fn test_logging_integration_fallback() {
     println!("📁 Testing normal logging directory creation...");
 
     let output = Command::new("cargo")
-        .args(&["run", "--", "--help"])
+        .args(["run", "--", "--help"])
         .env("HOME", temp_dir.join("fake-home"))
         .output()
         .expect("Failed to execute mcp-muse");
