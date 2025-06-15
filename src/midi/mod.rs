@@ -20,10 +20,12 @@ where
 /// Can represent both MIDI notes and R2D2 expressions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimpleNote {
-    /// MIDI note number (0-127, where 60 = middle C)
-    pub note: u8,
-    /// Velocity (0-127, where 127 = loudest)
-    pub velocity: u8,
+    /// MIDI note number (0-127, where 60 = middle C) - Optional for R2D2 notes
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub note: Option<u8>,
+    /// Velocity (0-127, where 127 = loudest) - Optional for R2D2 notes
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub velocity: Option<u8>,
     /// Start time in seconds
     pub start_time: f64,
     /// Duration in seconds
@@ -185,8 +187,8 @@ impl SimpleSequence {
         duration: f64,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note,
-            velocity,
+            note: Some(note),
+            velocity: Some(velocity),
             start_time,
             duration,
             channel: 0,
@@ -238,8 +240,8 @@ impl SimpleSequence {
         channel: u8,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note,
-            velocity,
+            note: Some(note),
+            velocity: Some(velocity),
             start_time,
             duration,
             channel,
@@ -292,8 +294,8 @@ impl SimpleSequence {
         instrument: u8,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note,
-            velocity,
+            note: Some(note),
+            velocity: Some(velocity),
             start_time,
             duration,
             channel,
@@ -368,8 +370,8 @@ impl SimpleSequence {
         context: Option<String>,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note: 60,     // Dummy MIDI note (not used for R2D2)
-            velocity: 80, // Dummy velocity (not used for R2D2)
+            note: None,
+            velocity: None,
             start_time,
             duration,
             channel: 0,

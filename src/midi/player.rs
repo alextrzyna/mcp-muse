@@ -105,13 +105,14 @@ impl MidiPlayer {
             return Ok(());
         }
 
-        // Convert SimpleNote to MidiNote
+        // Convert SimpleNote to MidiNote (only for MIDI notes)
         let notes: Vec<MidiNote> = sequence
             .notes
             .into_iter()
+            .filter(|simple_note| simple_note.note_type == "midi" && simple_note.note.is_some() && simple_note.velocity.is_some())
             .map(|simple_note| MidiNote {
-                note: simple_note.note,
-                velocity: simple_note.velocity,
+                note: simple_note.note.unwrap(), // Safe because we filtered for Some()
+                velocity: simple_note.velocity.unwrap(), // Safe because we filtered for Some()
                 channel: simple_note.channel,
                 start_time: Duration::from_secs_f64(simple_note.start_time),
                 duration: Duration::from_secs_f64(simple_note.duration),
@@ -191,13 +192,14 @@ impl MidiPlayer {
             return Ok(());
         }
 
-        // Convert SimpleNote to MidiNote
+        // Convert SimpleNote to MidiNote (only for MIDI notes)
         let notes: Vec<MidiNote> = sequence
             .notes
             .into_iter()
+            .filter(|simple_note| simple_note.note_type == "midi" && simple_note.note.is_some() && simple_note.velocity.is_some())
             .map(|simple_note| MidiNote {
-                note: simple_note.note,
-                velocity: simple_note.velocity,
+                note: simple_note.note.unwrap(), // Safe because we filtered for Some()
+                velocity: simple_note.velocity.unwrap(), // Safe because we filtered for Some()
                 channel: simple_note.channel,
                 start_time: Duration::from_secs_f64(simple_note.start_time),
                 duration: Duration::from_secs_f64(simple_note.duration),
@@ -320,17 +322,6 @@ impl MidiPlayer {
         Ok(())
     }
 
-    /// Stop playback (if any)
-    #[allow(dead_code)]
-    pub fn stop(&self) {
-        self.sink.stop();
-    }
-
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.sink.empty()
-    }
-
     /// Play a mixed sequence containing both MIDI and R2D2 notes
     pub fn play_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
         tracing::info!("Playing mixed sequence with {} notes", sequence.notes.len());
@@ -391,22 +382,24 @@ impl MidiPlayer {
                     expression,
                 });
             } else {
-                // Convert to MidiNote
-                midi_notes.push(MidiNote {
-                    note: note.note,
-                    velocity: note.velocity,
-                    channel: note.channel,
-                    start_time: Duration::from_secs_f64(note.start_time),
-                    duration: Duration::from_secs_f64(note.duration),
-                    instrument: note.instrument,
-                    reverb: note.reverb,
-                    chorus: note.chorus,
-                    volume: note.volume,
-                    pan: note.pan,
-                    balance: note.balance,
-                    expression: note.expression,
-                    sustain: note.sustain,
-                });
+                // Convert to MidiNote - only process if note and velocity exist
+                if let (Some(note_val), Some(velocity_val)) = (note.note, note.velocity) {
+                    midi_notes.push(MidiNote {
+                        note: note_val,
+                        velocity: velocity_val,
+                        channel: note.channel,
+                        start_time: Duration::from_secs_f64(note.start_time),
+                        duration: Duration::from_secs_f64(note.duration),
+                        instrument: note.instrument,
+                        reverb: note.reverb,
+                        chorus: note.chorus,
+                        volume: note.volume,
+                        pan: note.pan,
+                        balance: note.balance,
+                        expression: note.expression,
+                        sustain: note.sustain,
+                    });
+                }
             }
         }
 
@@ -533,22 +526,24 @@ impl MidiPlayer {
                     note: note,
                 });
             } else {
-                // Handle MIDI notes (existing logic)
-                midi_notes.push(MidiNote {
-                    note: note.note,
-                    velocity: note.velocity,
-                    channel: note.channel,
-                    start_time: Duration::from_secs_f64(note.start_time),
-                    duration: Duration::from_secs_f64(note.duration),
-                    instrument: note.instrument,
-                    reverb: note.reverb,
-                    chorus: note.chorus,
-                    volume: note.volume,
-                    pan: note.pan,
-                    balance: note.balance,
-                    expression: note.expression,
-                    sustain: note.sustain,
-                });
+                // Convert to MidiNote - only process if note and velocity exist
+                if let (Some(note_val), Some(velocity_val)) = (note.note, note.velocity) {
+                    midi_notes.push(MidiNote {
+                        note: note_val,
+                        velocity: velocity_val,
+                        channel: note.channel,
+                        start_time: Duration::from_secs_f64(note.start_time),
+                        duration: Duration::from_secs_f64(note.duration),
+                        instrument: note.instrument,
+                        reverb: note.reverb,
+                        chorus: note.chorus,
+                        volume: note.volume,
+                        pan: note.pan,
+                        balance: note.balance,
+                        expression: note.expression,
+                        sustain: note.sustain,
+                    });
+                }
             }
         }
 
@@ -1439,9 +1434,12 @@ impl EnhancedHybridAudioSource {
         // Determine frequency (synthesis frequency overrides MIDI note)
         let frequency = if let Some(synth_freq) = note.synth_frequency {
             synth_freq
-        } else {
+        } else if let Some(midi_note) = note.note {
             // Convert MIDI note to frequency
-            440.0 * 2.0_f32.powf((note.note as f32 - 69.0) / 12.0)
+            440.0 * 2.0_f32.powf((midi_note as f32 - 69.0) / 12.0)
+        } else {
+            // Fallback frequency if no note is specified
+            440.0
         };
 
         // Create envelope

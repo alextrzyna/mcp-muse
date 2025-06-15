@@ -337,7 +337,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                     "maximum": 1.0
                                 }
                             },
-                            "required": ["note", "velocity", "start_time", "duration"],
+                            "required": ["start_time", "duration"],
                             "additionalProperties": false
                         }
                     },
