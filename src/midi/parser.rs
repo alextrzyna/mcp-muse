@@ -1,3 +1,4 @@
+#[cfg(test)]
 use midly::{MidiMessage, Smf, TrackEventKind};
 use std::time::Duration;
 
@@ -18,15 +19,16 @@ pub struct MidiNote {
     pub sustain: Option<u8>,
 }
 
+
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct ParsedMidi {
     pub notes: Vec<MidiNote>,
-    #[allow(dead_code)]
     pub tempo: u32, // microseconds per quarter note
-    #[allow(dead_code)]
     pub ticks_per_quarter: u16,
 }
 
+#[cfg(test)]
 pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
     tracing::info!("Parsing MIDI data ({} bytes)", midi_bytes.len());
 
@@ -174,6 +176,7 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
     })
 }
 
+#[cfg(test)]
 fn ticks_to_duration(ticks: u32, ticks_per_quarter: u16, tempo: u32) -> Duration {
     let microseconds_per_tick = (tempo as f64) / (ticks_per_quarter as f64);
     let total_microseconds = (ticks as f64) * microseconds_per_tick;

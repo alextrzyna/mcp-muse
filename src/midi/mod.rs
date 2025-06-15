@@ -1,7 +1,6 @@
 pub mod parser;
 pub mod player;
 
-pub use parser::*;
 pub use player::*;
 
 use serde::{Deserialize, Deserializer, Serialize};
@@ -419,10 +418,7 @@ impl SimpleNote {
         self.note_type == "r2d2"
     }
 
-    /// Check if this note is a MIDI note
-    pub fn is_midi(&self) -> bool {
-        self.note_type == "midi"
-    }
+
 
     /// Check if this note is a synthesis note
     pub fn is_synthesis(&self) -> bool {

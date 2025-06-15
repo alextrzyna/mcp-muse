@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::expressive::{ExpressiveSynth, R2D2Emotion, R2D2Expression, R2D2Voice};
-use crate::midi::{parse_midi_data, MidiPlayer, SimpleSequence};
-use base64::engine::general_purpose::STANDARD as BASE64;
-use base64::Engine;
+use crate::midi::{MidiPlayer, SimpleSequence};
 use std::io::{self, BufRead, Write};
 
 #[derive(Debug, Deserialize)]

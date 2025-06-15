@@ -1,8 +1,5 @@
 use anyhow::Result;
-use rodio::{OutputStream, Sink, Source};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use rodio::OutputStream;
 // Add rand for noise generation
 use rand::Rng;
 
@@ -11,7 +8,6 @@ use rand::Rng;
 pub struct ExpressiveSynth {
     sample_rate: f32,
     _stream: OutputStream,
-    sink: Arc<Mutex<Sink>>,
 }
 
 /// New synthesis parameters for general music synthesis
@@ -118,7 +114,9 @@ pub enum SynthType {
 #[derive(Debug, Clone)]
 pub enum NoiseColor {
     White,
+    #[allow(dead_code)]
     Pink,
+    #[allow(dead_code)]
     Brown,
 }
 
@@ -160,65 +158,15 @@ pub enum EffectType {
 impl ExpressiveSynth {
     /// Create a new expressive synthesizer
     pub fn new() -> Result<Self> {
-        let (_stream, stream_handle) = OutputStream::try_default()?;
-        let sink = Sink::try_new(&stream_handle)?;
+        let (_stream, _stream_handle) = OutputStream::try_default()?;
 
         Ok(ExpressiveSynth {
             sample_rate: 44100.0,
             _stream,
-            sink: Arc::new(Mutex::new(sink)),
         })
     }
 
-    /// Play a synthesized note using simplified synthesis
-    pub fn play_synthesized_note(&self, params: SynthParams) -> Result<()> {
-        let samples = self.generate_synthesized_samples(&params)?;
-        let source = SynthAudioSource::new(samples, self.sample_rate);
-        
-        let sink = self.sink.lock().unwrap();
-        sink.append(source);
-        
-        // Wait for playback to complete
-        thread::sleep(Duration::from_secs_f32(params.duration + 0.1));
-        
-        Ok(())
-    }
 
-    /// Play a sequence of synthesized sounds with precise timing
-    pub fn play_synthesized_sequence(&self, sounds: Vec<SynthParams>) -> Result<()> {
-        if sounds.is_empty() {
-            return Ok(());
-        }
-
-        // Calculate total sequence duration
-        let total_duration = sounds.iter()
-            .map(|s| s.duration)
-            .fold(0.0, f32::max);
-        
-        // Pre-generate all audio samples
-        let mut mixed_samples = vec![0.0; (self.sample_rate * total_duration) as usize];
-        
-        for sound in sounds {
-            let samples = self.generate_synthesized_samples(&sound)?;
-            
-            // Mix into the output buffer
-            for (i, sample) in samples.iter().enumerate() {
-                if i < mixed_samples.len() {
-                    mixed_samples[i] += sample;
-                }
-            }
-        }
-        
-        // Play the mixed result
-        let source = SynthAudioSource::new(mixed_samples, self.sample_rate);
-        let sink = self.sink.lock().unwrap();
-        sink.append(source);
-        
-        // Wait for playback to complete
-        thread::sleep(Duration::from_secs_f32(total_duration + 0.1));
-        
-        Ok(())
-    }
 
     /// Generate audio samples using simplified synthesis (not FunDSP for now)
     pub fn generate_synthesized_samples(&self, params: &SynthParams) -> Result<Vec<f32>> {
@@ -270,18 +218,18 @@ impl ExpressiveSynth {
                 if x < 0.5 { 4.0 * x - 1.0 } else { 3.0 - 4.0 * x }
             },
             SynthType::Noise { color } => {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 match color {
-                    NoiseColor::White => (rng.gen::<f32>() - 0.5) * 2.0,
+                    NoiseColor::White => (rng.random::<f32>() - 0.5) * 2.0,
                     NoiseColor::Pink => {
                         // Simple pink noise approximation
-                        let white = (rng.gen::<f32>() - 0.5) * 2.0;
+                        let white = (rng.random::<f32>() - 0.5) * 2.0;
                         // Apply simple pink filter (approximation)
                         white * (1.0 / (1.0 + freq / 500.0).sqrt())
                     },
                     NoiseColor::Brown => {
                         // Simple brown noise approximation
-                        let white = (rng.gen::<f32>() - 0.5) * 2.0;
+                        let white = (rng.random::<f32>() - 0.5) * 2.0;
                         white * (1.0 / (1.0 + freq / 100.0))
                     }
                 }
@@ -318,10 +266,10 @@ impl ExpressiveSynth {
                         let envelope = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * grain_progress).cos());
                         
                         // PITCHED GRANULAR: Grains maintain musical pitch relationship
-                        let mut rng = rand::thread_rng();
+                        let mut rng = rand::rng();
                         
                         // Pitch coherence: blend between pitched and textural
-                        let base_pitch_variation = (rng.gen::<f32>() - 0.5) * grain_pitch_spread;
+                        let base_pitch_variation = (rng.random::<f32>() - 0.5) * grain_pitch_spread;
                         let coherent_pitch = freq; // Musical pitch
                         let random_pitch = freq * (1.0 + base_pitch_variation);
                         
@@ -333,7 +281,7 @@ impl ExpressiveSynth {
                         
                         // Mix sine wave (tonal) with filtered noise (textural)
                         let tonal_component = grain_phase.sin() * 0.7;
-                        let noise_component = (rng.gen::<f32>() - 0.5) * 0.3;
+                        let noise_component = (rng.random::<f32>() - 0.5) * 0.3;
                         let grain_sample = (tonal_component + noise_component) * envelope;
                         
                         // Spatial positioning for grain clouds
@@ -424,8 +372,8 @@ impl ExpressiveSynth {
                 // 3. Sharp attack, medium decay
                 
                 let tone = (2.0 * std::f32::consts::PI * tone_freq * t).sin();
-                let mut rng = rand::thread_rng();
-                let white_noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let white_noise = (rng.random::<f32>() - 0.5) * 2.0;
                 
                 // Create buzzy noise characteristic of snare wires
                 let buzz_freq = tone_freq * 2.5; // Higher frequency buzz
@@ -444,8 +392,8 @@ impl ExpressiveSynth {
                 // Professional hi-hat synthesis:
                 // Complex metallic frequencies + filtered noise
                 
-                let mut rng = rand::thread_rng();
-                let white_noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let white_noise = (rng.random::<f32>() - 0.5) * 2.0;
                 
                 // Multiple metallic frequencies for realistic cymbal sound
                 let freq1 = freq * brightness;
@@ -468,8 +416,8 @@ impl ExpressiveSynth {
             },
             SynthType::Cymbal { size, metallic, strike_intensity } => {
                 // Professional cymbal synthesis with complex harmonics
-                let mut rng = rand::thread_rng();
-                let white_noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let white_noise = (rng.random::<f32>() - 0.5) * 2.0;
                 
                 // Size affects fundamental frequency range
                 let base_freq = freq * (0.5 + size * 0.5);
@@ -502,8 +450,8 @@ impl ExpressiveSynth {
                 let current_freq = start_freq + (end_freq - start_freq) * progress;
                 
                 // Generate filtered noise with frequency sweep
-                let mut rng = rand::thread_rng();
-                let noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let noise = (rng.random::<f32>() - 0.5) * 2.0;
                 
                 // Simple bandpass filter simulation
                 let filter_center = current_freq;
@@ -545,8 +493,8 @@ impl ExpressiveSynth {
                 let harm4 = (2.0 * std::f32::consts::PI * current_freq * 5.23 * t).sin() * 0.2; // Chaotic
                 
                 // 3. HIGH-FREQUENCY NOISE BURST for "energy" character
-                let mut rng = rand::thread_rng();
-                let aggressive_noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let aggressive_noise = (rng.random::<f32>() - 0.5) * 2.0;
                 let noise_envelope = (-t * 12.0).exp(); // Sharp noise burst
                 let energy_burst = aggressive_noise * noise_envelope * energy * 0.5;
                 
@@ -599,8 +547,8 @@ impl ExpressiveSynth {
             },
             SynthType::Burst { center_freq, bandwidth, intensity, shape } => {
                 // Spectral burst around center frequency
-                let mut rng = rand::thread_rng();
-                let noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let noise = (rng.random::<f32>() - 0.5) * 2.0;
                 
                 // Create burst envelope
                 let progress = t / params.duration.max(0.1);
@@ -658,8 +606,8 @@ impl ExpressiveSynth {
             },
             SynthType::Texture { roughness, evolution, spectral_tilt, modulation_depth } => {
                 // Rough, evolving textural sound
-                let mut rng = rand::thread_rng();
-                let noise = (rng.gen::<f32>() - 0.5) * 2.0;
+                let mut rng = rand::rng();
+                let noise = (rng.random::<f32>() - 0.5) * 2.0;
                 
                 // Base oscillator
                 let osc = (2.0 * std::f32::consts::PI * freq * t).sin();
@@ -736,34 +684,7 @@ impl ExpressiveSynth {
         }
     }
 
-    /// Play an expressive R2D2 sound
-    pub fn play_r2d2_expression(
-        &self,
-        base_freq: f32,
-        emotion_intensity: f32,
-        pitch_contour: Vec<f32>,
-        duration: f32,
-    ) -> Result<()> {
-        // Generate R2D2-style audio samples with emotion-specific pitch contour
-        let samples = self.generate_r2d2_samples_with_contour(
-            base_freq,
-            emotion_intensity,
-            duration,
-            &pitch_contour,
-        );
 
-        // Create audio source
-        let source = R2D2AudioSource::new(samples, self.sample_rate);
-
-        // Play the sound
-        let sink = self.sink.lock().unwrap();
-        sink.append(source);
-
-        // Wait for playback to complete
-        thread::sleep(Duration::from_secs_f32(duration + 0.1));
-
-        Ok(())
-    }
 
     /// Generate R2D2-style audio samples with emotion-specific pitch contours
     pub fn generate_r2d2_samples_with_contour(
@@ -1111,8 +1032,8 @@ impl ExpressiveSynth {
                 
                 // Enhanced modulated delay times
                 let base_delay = 0.015; // 15ms base delay
-                let modulated_delay1 = base_delay + lfo1 * lfo_depth;
-                let modulated_delay2 = base_delay + lfo2 * lfo_depth * 0.7; // Different depth
+                let _modulated_delay1 = base_delay + lfo1 * lfo_depth;
+                let _modulated_delay2 = base_delay + lfo2 * lfo_depth * 0.7; // Different depth
                 
                 // Simulate pitch modulation through frequency shifting
                 let pitch_mod1 = 1.0 + lfo1 * 0.008; // Subtle pitch variation
@@ -1178,104 +1099,4 @@ impl ExpressiveSynth {
     }
 }
 
-/// Custom audio source for R2D2 samples
-struct R2D2AudioSource {
-    samples: Vec<f32>,
-    sample_rate: f32,
-    position: usize,
-}
 
-impl R2D2AudioSource {
-    fn new(samples: Vec<f32>, sample_rate: f32) -> Self {
-        Self {
-            samples,
-            sample_rate,
-            position: 0,
-        }
-    }
-}
-
-impl Iterator for R2D2AudioSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.position >= self.samples.len() {
-            return None;
-        }
-
-        let sample = self.samples[self.position];
-        self.position += 1;
-        Some(sample)
-    }
-}
-
-impl Source for R2D2AudioSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate as u32
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        Some(Duration::from_secs_f32(
-            self.samples.len() as f32 / self.sample_rate,
-        ))
-    }
-}
-
-/// Audio source for synthesized sounds using FunDSP
-struct SynthAudioSource {
-    samples: Vec<f32>,
-    sample_rate: f32,
-    position: usize,
-}
-
-impl SynthAudioSource {
-    fn new(samples: Vec<f32>, sample_rate: f32) -> Self {
-        SynthAudioSource {
-            samples,
-            sample_rate,
-            position: 0,
-        }
-    }
-}
-
-impl Iterator for SynthAudioSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.position < self.samples.len() {
-            let sample = self.samples[self.position];
-            self.position += 1;
-            Some(sample)
-        } else {
-            None
-        }
-    }
-}
-
-impl Source for SynthAudioSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate as u32
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        Some(Duration::from_secs_f32(
-            self.samples.len() as f32 / self.sample_rate,
-        ))
-    }
-}
