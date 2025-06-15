@@ -188,10 +188,7 @@ impl PresetLibrary {
 
         // Add to tag index
         for tag in tags {
-            self.tags
-                .entry(tag)
-                .or_default()
-                .push(name.clone());
+            self.tags.entry(tag).or_default().push(name.clone());
         }
     }
 

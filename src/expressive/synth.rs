@@ -528,8 +528,10 @@ impl ExpressiveSynth {
                 let harm1 = (2.0 * std::f32::consts::PI * base_freq * t).sin() * 0.3;
                 let harm2 = (2.0 * std::f32::consts::PI * base_freq * 1.593 * t).sin() * 0.25; // Slightly inharmonic
                 let harm3 = (2.0 * std::f32::consts::PI * base_freq * 2.135 * t).sin() * 0.2;
-                let harm4 = (2.0 * std::f32::consts::PI * base_freq * std::f32::consts::E * t).sin() * 0.15;
-                let harm5 = (2.0 * std::f32::consts::PI * base_freq * std::f32::consts::PI * t).sin() * 0.1;
+                let harm4 =
+                    (2.0 * std::f32::consts::PI * base_freq * std::f32::consts::E * t).sin() * 0.15;
+                let harm5 =
+                    (2.0 * std::f32::consts::PI * base_freq * std::f32::consts::PI * t).sin() * 0.1;
 
                 let harmonic_content = harm1 + harm2 + harm3 + harm4 + harm5;
 
