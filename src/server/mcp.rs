@@ -16,11 +16,23 @@ struct JsonRpcRequest {
 #[derive(Debug, Serialize)]
 struct JsonRpcResponse {
     jsonrpc: String,
+    #[serde(serialize_with = "serialize_id")]
     id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<JsonRpcError>,
+}
+
+// Custom serializer for id field to ensure it's never null
+fn serialize_id<S>(id: &Option<Value>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::ser::Serializer,
+{
+    match id {
+        Some(val) => val.serialize(serializer),
+        None => "unknown".serialize(serializer), // Use default string instead of null
+    }
 }
 
 #[derive(Debug, Serialize)]
