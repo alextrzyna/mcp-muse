@@ -2,6 +2,7 @@ use anyhow::Result;
 use rodio::OutputStream;
 // Add rand for noise generation
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 /// Core expressive synthesizer for R2D2-style vocalizations
 /// Using a simpler approach with direct audio generation
@@ -11,7 +12,7 @@ pub struct ExpressiveSynth {
 }
 
 /// New synthesis parameters for general music synthesis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SynthParams {
     pub synth_type: SynthType,
     pub frequency: f32,
@@ -22,7 +23,7 @@ pub struct SynthParams {
     pub effects: Vec<EffectParams>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SynthType {
     // Basic oscillator synthesis
     Sine,
@@ -111,7 +112,7 @@ pub enum SynthType {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NoiseColor {
     White,
     #[allow(dead_code)]
@@ -120,7 +121,7 @@ pub enum NoiseColor {
     Brown,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvelopeParams {
     pub attack: f32,
     pub decay: f32,
@@ -128,27 +129,27 @@ pub struct EnvelopeParams {
     pub release: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterParams {
     pub cutoff: f32,
     pub resonance: f32,
     pub filter_type: FilterType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FilterType {
     LowPass,
     HighPass,
     BandPass,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectParams {
     pub effect_type: EffectType,
     pub intensity: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EffectType {
     Reverb,
     Chorus,
