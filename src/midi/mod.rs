@@ -1,7 +1,9 @@
 pub mod parser;
 pub mod player;
+pub mod polyphonic_source;
 
 pub use player::*;
+pub use polyphonic_source::*;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -791,6 +793,91 @@ impl SimpleNote {
                     "Invalid preset category '{}'. Valid categories: {:?}",
                     category, valid_categories
                 ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate MIDI note parameters
+    pub fn validate_midi(&self) -> Result<(), String> {
+        if self.note_type != "midi" {
+            return Err("Note type must be 'midi' for MIDI validation".to_string());
+        }
+
+        // MIDI note validation
+        if let Some(note) = self.note {
+            if note > 127 {
+                return Err(format!("MIDI note must be 0-127, got {}", note));
+            }
+        }
+
+        if let Some(velocity) = self.velocity {
+            if velocity > 127 {
+                return Err(format!("MIDI velocity must be 0-127, got {}", velocity));
+            }
+        }
+
+        if let Some(channel) = self.channel {
+            if channel > 15 {
+                return Err(format!("MIDI channel must be 0-15, got {}", channel));
+            }
+        }
+
+        if self.duration <= 0.0 {
+            return Err(format!("Duration must be positive, got {}", self.duration));
+        }
+
+        if self.start_time < 0.0 {
+            return Err(format!("Start time must be non-negative, got {}", self.start_time));
+        }
+
+        // Optional parameter validation
+        if let Some(instrument) = self.instrument {
+            if instrument > 127 {
+                return Err(format!("MIDI instrument must be 0-127, got {}", instrument));
+            }
+        }
+
+        if let Some(reverb) = self.reverb {
+            if reverb > 127 {
+                return Err(format!("MIDI reverb must be 0-127, got {}", reverb));
+            }
+        }
+
+        if let Some(chorus) = self.chorus {
+            if chorus > 127 {
+                return Err(format!("MIDI chorus must be 0-127, got {}", chorus));
+            }
+        }
+
+        if let Some(volume) = self.volume {
+            if volume > 127 {
+                return Err(format!("MIDI volume must be 0-127, got {}", volume));
+            }
+        }
+
+        if let Some(pan) = self.pan {
+            if pan > 127 {
+                return Err(format!("MIDI pan must be 0-127, got {}", pan));
+            }
+        }
+
+        if let Some(balance) = self.balance {
+            if balance > 127 {
+                return Err(format!("MIDI balance must be 0-127, got {}", balance));
+            }
+        }
+
+        if let Some(expression) = self.expression {
+            if expression > 127 {
+                return Err(format!("MIDI expression must be 0-127, got {}", expression));
+            }
+        }
+
+        if let Some(sustain) = self.sustain {
+            if sustain > 127 {
+                return Err(format!("MIDI sustain must be 0-127, got {}", sustain));
             }
         }
 

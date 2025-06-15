@@ -720,7 +720,7 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
 
     // Choose the appropriate playback method
     let playback_result = if has_synthesis || has_r2d2 || has_presets {
-        // Mixed/Hybrid sequence - use enhanced hybrid audio engine
+        // Mixed/Hybrid sequence - use real-time polyphonic audio engine for better polyphony
         let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
             (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
             (true, true, true, false) => "MIDI + R2D2 + Synthesis",
@@ -738,8 +738,8 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
             (false, false, false, true) => "Presets only",
             _ => "Mixed mode",
         };
-        tracing::info!("Using enhanced hybrid mode playback ({})", mode);
-        player.play_enhanced_mixed(sequence)
+        tracing::info!("Using real-time polyphonic mode playback ({})", mode);
+        player.play_polyphonic(sequence)
     } else {
         // Pure MIDI sequence - use traditional MIDI player
         tracing::info!("Using pure MIDI playback");
