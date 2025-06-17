@@ -818,10 +818,8 @@ impl SimpleNote {
             }
         }
 
-        if let Some(channel) = self.channel {
-            if channel > 15 {
-                return Err(format!("MIDI channel must be 0-15, got {}", channel));
-            }
+        if self.channel > 15 {
+            return Err(format!("MIDI channel must be 0-15, got {}", self.channel));
         }
 
         if self.duration <= 0.0 {

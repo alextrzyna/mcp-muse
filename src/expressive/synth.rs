@@ -204,6 +204,114 @@ impl ExpressiveSynth {
         })
     }
 
+    /// Generate R2D2 samples without creating an audio stream (static method)
+    pub fn generate_r2d2_samples_static(
+        base_freq: f32,
+        emotion_intensity: f32,
+        duration: f32,
+        pitch_contour: &[f32],
+    ) -> Vec<f32> {
+        let sample_rate = 44100.0;
+        let num_samples = (duration * sample_rate) as usize;
+        let mut samples = Vec::with_capacity(num_samples);
+
+        for i in 0..num_samples {
+            let t = i as f32 / sample_rate;
+            let progress = t / duration;
+
+            // Apply pitch contour from emotion presets
+            let pitch_multiplier = Self::interpolate_pitch_contour_static(progress, pitch_contour, emotion_intensity);
+            let contoured_freq = base_freq * pitch_multiplier;
+
+            // Ben Burtt-style ring modulation synthesis
+            let carrier_freq = contoured_freq;
+            let modulator_freq = contoured_freq * 0.618; // Golden ratio for organic modulation
+
+            // Generate carrier and modulator
+            let carrier = (2.0 * std::f32::consts::PI * carrier_freq * t).sin();
+            let modulator = (2.0 * std::f32::consts::PI * modulator_freq * t).sin();
+
+            // Ring modulation (core R2D2 sound)
+            let ring_mod = carrier * modulator;
+
+            // Add slight harmonics for character
+            let harmonic = (2.0 * std::f32::consts::PI * carrier_freq * 1.1 * t).sin() * 0.1;
+
+            // Apply emotion-specific envelope
+            let envelope = Self::calculate_emotion_envelope_static(t, duration, emotion_intensity, pitch_contour);
+
+            // Mix and apply envelope
+            let sample = (ring_mod + harmonic) * envelope * 0.3;
+
+            samples.push(sample);
+        }
+
+        samples
+    }
+
+    /// Static version of interpolate_pitch_contour
+    fn interpolate_pitch_contour_static(
+        progress: f32,
+        pitch_contour: &[f32],
+        intensity: f32,
+    ) -> f32 {
+        if pitch_contour.is_empty() {
+            return 1.0;
+        }
+
+        let index = progress * (pitch_contour.len() - 1) as f32;
+        let floor_index = index.floor() as usize;
+        let ceil_index = (index.ceil() as usize).min(pitch_contour.len() - 1);
+        let frac = index - floor_index as f32;
+
+        let start_value = pitch_contour[floor_index];
+        let end_value = pitch_contour[ceil_index];
+        let base_pitch = start_value + (end_value - start_value) * frac;
+
+        // Apply intensity scaling
+        1.0 + (base_pitch - 1.0) * intensity
+    }
+
+    /// Static version of calculate_emotion_envelope
+    fn calculate_emotion_envelope_static(
+        t: f32,
+        duration: f32,
+        emotion_intensity: f32,
+        pitch_contour: &[f32],
+    ) -> f32 {
+        let progress = t / duration;
+
+        // Dynamic envelope based on pitch contour
+        let pitch_multiplier = Self::interpolate_pitch_contour_static(progress, pitch_contour, emotion_intensity);
+
+        // Base envelope
+        let attack = 0.02;
+        let decay = 0.1;
+        let sustain = 0.7;
+        let release = 0.3;
+
+        let envelope = if progress < attack {
+            progress / attack
+        } else if progress < attack + decay {
+            let decay_progress = (progress - attack) / decay;
+            1.0 - decay_progress * (1.0 - sustain)
+        } else if progress < 1.0 - release {
+            sustain
+        } else {
+            let release_progress = (progress - (1.0 - release)) / release;
+            sustain * (1.0 - release_progress)
+        };
+
+        // Modulate envelope based on pitch for expressiveness
+        let pitch_envelope_mod = if pitch_multiplier > 1.2 {
+            1.0 + (pitch_multiplier - 1.0) * 0.2 // Boost amplitude for high pitches
+        } else {
+            1.0
+        };
+
+        envelope * pitch_envelope_mod * emotion_intensity
+    }
+
     /// Generate audio samples using hybrid approach: FunDSP for quality-critical synthesis, custom DSP for others
     pub fn generate_synthesized_samples(&self, params: &SynthParams) -> Result<Vec<f32>> {
         // Check if this synthesis type should use FunDSP for higher quality

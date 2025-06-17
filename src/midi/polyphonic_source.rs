@@ -2,7 +2,7 @@ use anyhow::Result;
 use rodio::Source;
 use std::time::Duration;
 
-use crate::expressive::{PolyphonicVoiceManager, SynthParams, ExpressiveSynth, R2D2Voice, R2D2Expression};
+use crate::expressive::{PolyphonicVoiceManager, SynthParams, R2D2Voice, R2D2Expression};
 use crate::midi::{SimpleNote, parser::MidiNote};
 
 /// Event for scheduling synthesis notes in real-time
@@ -37,6 +37,12 @@ pub struct RealtimePolyphonicAudioSource {
     
     /// R2D2 voice for generating parameters
     r2d2_voice: R2D2Voice,
+    
+    /// Current R2D2 samples being played
+    current_r2d2_samples: Option<Vec<f32>>,
+    
+    /// Current position in R2D2 samples
+    r2d2_sample_position: usize,
     
     /// Sample rate
     sample_rate: u32,
@@ -86,6 +92,8 @@ impl RealtimePolyphonicAudioSource {
             synthesis_events,
             r2d2_events,
             r2d2_voice,
+            current_r2d2_samples: None,
+            r2d2_sample_position: 0,
             sample_rate,
             current_sample: 0,
             total_duration,
@@ -107,7 +115,7 @@ impl RealtimePolyphonicAudioSource {
                     
                     // Extract note and channel info
                     let note = event.note.note;
-                    let channel = event.note.channel.unwrap_or(0);
+                    let channel = event.note.channel;
                     
                     // Allocate voice
                     match self.voice_manager.allocate_voice(
@@ -130,47 +138,28 @@ impl RealtimePolyphonicAudioSource {
             }
         }
         
-        // Process R2D2 events
+        // Process R2D2 events using the sophisticated existing synthesis
         for event in &mut self.r2d2_events {
             if event.voice_id.is_none() && current_time >= event.start_time {
-                // Generate R2D2 synthesis parameters
+                // Generate R2D2 expression using static synthesis method (avoids audio stream conflicts)
                 if let Some(r2d2_params) = self.r2d2_voice.generate_expression_params(&event.expression) {
-                    // Convert R2D2 parameters to SynthParams
-                    let synth_params = SynthParams {
-                        synth_type: crate::expressive::SynthType::Sine, // R2D2 uses ring modulation, simplified to sine for now
-                        frequency: r2d2_params.base_freq,
-                        amplitude: 0.3,
-                        duration: r2d2_params.duration,
-                        envelope: crate::expressive::EnvelopeParams {
-                            attack: 0.02,
-                            decay: 0.1,
-                            sustain: 0.7,
-                            release: 0.3,
-                        },
-                        filter: None,
-                        effects: Vec::new(),
-                    };
+                    // Use the static R2D2 sample generation method for authentic sound without audio stream conflicts
+                    let r2d2_samples = crate::expressive::ExpressiveSynth::generate_r2d2_samples_static(
+                        r2d2_params.base_freq,
+                        event.expression.intensity,
+                        r2d2_params.duration,
+                        &r2d2_params.pitch_contour,
+                    );
                     
-                    // High priority for R2D2 expressions
-                    let priority = 200;
+                    tracing::debug!("Generated {} R2D2 samples for event at {:.3}s", 
+                                  r2d2_samples.len(), event.start_time);
                     
-                    // Allocate voice
-                    match self.voice_manager.allocate_voice(
-                        synth_params,
-                        event.start_time,
-                        None, // R2D2 doesn't have MIDI notes
-                        0,    // Default channel
-                        priority,
-                    ) {
-                        Ok(voice_id) => {
-                            event.voice_id = Some(voice_id);
-                            tracing::debug!("Allocated voice {} for R2D2 event at {:.3}s", 
-                                          voice_id, event.start_time);
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to allocate voice for R2D2 event: {}", e);
-                        }
-                    }
+                    // Store the pre-computed samples
+                    self.current_r2d2_samples = Some(r2d2_samples);
+                    self.r2d2_sample_position = 0;
+                    
+                    // Mark event as processed
+                    event.voice_id = Some(999); // Dummy voice ID to indicate processing
                 }
             }
         }
@@ -310,8 +299,30 @@ impl Iterator for RealtimePolyphonicAudioSource {
         // Process all voices and get synthesis sample
         let synthesis_sample = self.voice_manager.process_voices(self.dt);
 
+        // Get R2D2 sample if available
+        let r2d2_sample = if let Some(ref r2d2_samples) = self.current_r2d2_samples {
+            if self.r2d2_sample_position < r2d2_samples.len() {
+                let sample = r2d2_samples[self.r2d2_sample_position];
+                self.r2d2_sample_position += 1;
+                sample
+            } else {
+                // Finished playing R2D2 samples
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        // Clear finished R2D2 samples
+        if let Some(ref r2d2_samples) = self.current_r2d2_samples.clone() {
+            if self.r2d2_sample_position >= r2d2_samples.len() {
+                self.current_r2d2_samples = None;
+                self.r2d2_sample_position = 0;
+            }
+        }
+
         // Mix all audio sources
-        let mixed_sample = midi_sample + synthesis_sample;
+        let mixed_sample = midi_sample + synthesis_sample + r2d2_sample;
 
         self.current_sample += 1;
 

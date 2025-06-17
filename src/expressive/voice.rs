@@ -1,15 +1,13 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::expressive::{SynthParams, SynthType, EnvelopeParams, FilterParams, EffectParams};
+use crate::expressive::{SynthParams, SynthType, FilterParams, EffectParams};
 
 /// Maximum number of simultaneous voices
 pub const MAX_VOICES: usize = 32;
 
 /// Voice state management
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VoiceState {
     /// Voice is idle and available for allocation
     Idle,
@@ -190,7 +188,7 @@ impl PolyphonicVoiceManager {
         self.current_time += dt as f64;
         let mut output = 0.0;
 
-        // Process each active voice
+        // Process voices in a single pass to avoid borrowing issues
         for voice in &mut self.voices {
             // Skip voices that haven't started yet
             if self.current_time < voice.start_time {
@@ -200,20 +198,154 @@ impl PolyphonicVoiceManager {
             // Update voice time
             voice.time += dt;
 
-            // Calculate envelope
-            voice.envelope_value = self.calculate_envelope(voice);
+            // Calculate envelope - moved calculation inline to avoid borrowing issues
+            let env = &voice.params.envelope;
+            let t = voice.time;
 
-            // Update voice state based on envelope
-            self.update_voice_state(voice);
+            voice.envelope_value = match voice.state {
+                VoiceState::Idle => 0.0,
+                VoiceState::Attack => {
+                    if env.attack > 0.0 {
+                        (t / env.attack).min(1.0)
+                    } else {
+                        1.0
+                    }
+                }
+                VoiceState::Decay => {
+                    let attack_time = env.attack;
+                    let decay_progress = (t - attack_time) / env.decay.max(0.001);
+                    1.0 - decay_progress.min(1.0) * (1.0 - env.sustain)
+                }
+                VoiceState::Sustain => env.sustain,
+                VoiceState::Release => {
+                    // Find when release started
+                    let total_duration = voice.duration;
+                    let release_start_time = total_duration - env.release;
+                    let release_progress = (t - release_start_time) / env.release.max(0.001);
+                    env.sustain * (1.0 - release_progress.min(1.0))
+                }
+            };
+
+            // Update voice state based on current time and envelope - inline to avoid borrowing
+            match voice.state {
+                VoiceState::Attack => {
+                    if t >= env.attack {
+                        voice.state = VoiceState::Decay;
+                    }
+                }
+                VoiceState::Decay => {
+                    if t >= env.attack + env.decay {
+                        voice.state = VoiceState::Sustain;
+                    }
+                }
+                VoiceState::Sustain => {
+                    // Stay in sustain until released or duration expires
+                    if t >= voice.duration - env.release {
+                        voice.state = VoiceState::Release;
+                    }
+                }
+                VoiceState::Release => {
+                    if voice.envelope_value <= 0.001 || t >= voice.duration {
+                        voice.state = VoiceState::Idle;
+                    }
+                }
+                VoiceState::Idle => {
+                    // Already idle, nothing to do
+                }
+            }
 
             // Skip idle voices
             if voice.state == VoiceState::Idle {
                 continue;
             }
 
-            // Generate sample for this voice
-            let sample = self.generate_voice_sample(voice, dt);
-            output += sample;
+            // Generate sample for this voice - inline to avoid borrowing issues
+            let freq = voice.params.frequency;
+            let phase_increment = 2.0 * std::f32::consts::PI * freq * dt;
+            voice.oscillator_phase += phase_increment;
+            
+            // Keep phase in range [0, 2π]
+            while voice.oscillator_phase >= 2.0 * std::f32::consts::PI {
+                voice.oscillator_phase -= 2.0 * std::f32::consts::PI;
+            }
+
+            // Generate sample based on synthesis type
+            let mut sample = match &voice.params.synth_type {
+                SynthType::Sine => voice.oscillator_phase.sin(),
+                SynthType::Square { pulse_width } => {
+                    let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
+                    if normalized_phase < *pulse_width { 1.0 } else { -1.0 }
+                }
+                SynthType::Sawtooth => {
+                    let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
+                    2.0 * normalized_phase - 1.0
+                }
+                SynthType::Triangle => {
+                    let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
+                    if normalized_phase < 0.5 {
+                        4.0 * normalized_phase - 1.0
+                    } else {
+                        3.0 - 4.0 * normalized_phase
+                    }
+                }
+                // Add more synthesis types as needed
+                _ => {
+                    // For complex synthesis types, we'll need to implement separate methods
+                    // For now, default to sine wave
+                    voice.oscillator_phase.sin()
+                }
+            };
+
+            // Apply filter if present (inline implementation)
+            if let Some(filter) = &voice.params.filter {
+                // Simple one-pole filter implementation with state
+                let alpha = 1.0 - (-2.0 * std::f32::consts::PI * filter.cutoff / self.sample_rate).exp();
+                
+                match filter.filter_type {
+                    crate::expressive::FilterType::LowPass => {
+                        voice.filter_state.lowpass_history = voice.filter_state.lowpass_history + alpha * (sample - voice.filter_state.lowpass_history);
+                        sample = voice.filter_state.lowpass_history;
+                    }
+                    crate::expressive::FilterType::HighPass => {
+                        voice.filter_state.highpass_history = voice.filter_state.highpass_history + alpha * (sample - voice.filter_state.highpass_history);
+                        sample = sample - voice.filter_state.highpass_history;
+                    }
+                    crate::expressive::FilterType::BandPass => {
+                        // Implement bandpass as series lowpass + highpass
+                        let low_cutoff = filter.cutoff - filter.cutoff * 0.2;
+                        let high_cutoff = filter.cutoff + filter.cutoff * 0.2;
+                        
+                        let low_alpha = 1.0 - (-2.0 * std::f32::consts::PI * low_cutoff / self.sample_rate).exp();
+                        let high_alpha = 1.0 - (-2.0 * std::f32::consts::PI * high_cutoff / self.sample_rate).exp();
+                        
+                        voice.filter_state.lowpass_history = voice.filter_state.lowpass_history + low_alpha * (sample - voice.filter_state.lowpass_history);
+                        voice.filter_state.highpass_history = voice.filter_state.highpass_history + high_alpha * (voice.filter_state.lowpass_history - voice.filter_state.highpass_history);
+                        
+                        sample = voice.filter_state.lowpass_history - voice.filter_state.highpass_history;
+                    }
+                }
+            }
+
+            // Apply effects (simplified for now)
+            for effect in &voice.params.effects {
+                sample = match &effect.effect_type {
+                    crate::expressive::EffectType::Reverb => {
+                        // Simple reverb approximation
+                        sample * (1.0 + effect.intensity * 0.3)
+                    }
+                    crate::expressive::EffectType::Chorus => {
+                        // Simple chorus approximation
+                        sample * (1.0 + effect.intensity * 0.2)
+                    }
+                    crate::expressive::EffectType::Delay { .. } => {
+                        // Simple delay approximation
+                        sample * (1.0 + effect.intensity * 0.4)
+                    }
+                };
+            }
+
+            // Apply envelope and amplitude and add to output
+            output += sample * voice.envelope_value * voice.params.amplitude;
         }
 
         // Clean up idle voices
@@ -260,176 +392,6 @@ impl PolyphonicVoiceManager {
         Ok(())
     }
 
-    /// Calculate envelope value for a voice
-    fn calculate_envelope(&self, voice: &SynthVoice) -> f32 {
-        let env = &voice.params.envelope;
-        let t = voice.time;
-
-        match voice.state {
-            VoiceState::Idle => 0.0,
-            VoiceState::Attack => {
-                if env.attack > 0.0 {
-                    (t / env.attack).min(1.0)
-                } else {
-                    1.0
-                }
-            }
-            VoiceState::Decay => {
-                let attack_time = env.attack;
-                let decay_progress = (t - attack_time) / env.decay.max(0.001);
-                1.0 - decay_progress.min(1.0) * (1.0 - env.sustain)
-            }
-            VoiceState::Sustain => env.sustain,
-            VoiceState::Release => {
-                // Find when release started
-                let total_duration = voice.duration;
-                let release_start_time = total_duration - env.release;
-                let release_progress = (t - release_start_time) / env.release.max(0.001);
-                env.sustain * (1.0 - release_progress.min(1.0))
-            }
-        }
-    }
-
-    /// Update voice state based on current time and envelope
-    fn update_voice_state(&self, voice: &mut SynthVoice) {
-        let env = &voice.params.envelope;
-        let t = voice.time;
-
-        match voice.state {
-            VoiceState::Attack => {
-                if t >= env.attack {
-                    voice.state = VoiceState::Decay;
-                }
-            }
-            VoiceState::Decay => {
-                if t >= env.attack + env.decay {
-                    voice.state = VoiceState::Sustain;
-                }
-            }
-            VoiceState::Sustain => {
-                // Stay in sustain until released or duration expires
-                if t >= voice.duration - env.release {
-                    voice.state = VoiceState::Release;
-                }
-            }
-            VoiceState::Release => {
-                if voice.envelope_value <= 0.001 || t >= voice.duration {
-                    voice.state = VoiceState::Idle;
-                }
-            }
-            VoiceState::Idle => {
-                // Already idle, nothing to do
-            }
-        }
-    }
-
-    /// Generate a single sample for a voice
-    fn generate_voice_sample(&mut self, voice: &mut SynthVoice, dt: f32) -> f32 {
-        // Generate basic oscillator sample
-        let mut sample = self.generate_oscillator_sample(voice, dt);
-
-        // Apply filter if present
-        if let Some(filter) = &voice.params.filter {
-            sample = self.apply_voice_filter(sample, filter, &mut voice.filter_state, dt);
-        }
-
-        // Apply effects
-        for effect in &voice.params.effects {
-            sample = self.apply_voice_effect(sample, effect, &mut voice.effect_state, dt);
-        }
-
-        // Apply envelope and amplitude
-        sample * voice.envelope_value * voice.params.amplitude
-    }
-
-    /// Generate oscillator sample for a voice
-    fn generate_oscillator_sample(&mut self, voice: &mut SynthVoice, dt: f32) -> f32 {
-        let freq = voice.params.frequency;
-        let phase_increment = 2.0 * std::f32::consts::PI * freq * dt;
-        voice.oscillator_phase += phase_increment;
-        
-        // Keep phase in range [0, 2π]
-        while voice.oscillator_phase >= 2.0 * std::f32::consts::PI {
-            voice.oscillator_phase -= 2.0 * std::f32::consts::PI;
-        }
-
-        // Generate sample based on synthesis type
-        match &voice.params.synth_type {
-            SynthType::Sine => voice.oscillator_phase.sin(),
-            SynthType::Square { pulse_width } => {
-                let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
-                if normalized_phase < *pulse_width { 1.0 } else { -1.0 }
-            }
-            SynthType::Sawtooth => {
-                let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
-                2.0 * normalized_phase - 1.0
-            }
-            SynthType::Triangle => {
-                let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
-                if normalized_phase < 0.5 {
-                    4.0 * normalized_phase - 1.0
-                } else {
-                    3.0 - 4.0 * normalized_phase
-                }
-            }
-            // Add more synthesis types as needed
-            _ => {
-                // For complex synthesis types, we'll need to implement separate methods
-                // For now, default to sine wave
-                voice.oscillator_phase.sin()
-            }
-        }
-    }
-
-    /// Apply filter to voice sample (stateful)
-    fn apply_voice_filter(&self, sample: f32, filter: &FilterParams, filter_state: &mut FilterState, _dt: f32) -> f32 {
-        // Simple one-pole filter implementation with state
-        let alpha = 1.0 - (-2.0 * std::f32::consts::PI * filter.cutoff / self.sample_rate).exp();
-        
-        match filter.filter_type {
-            crate::expressive::FilterType::LowPass => {
-                filter_state.lowpass_history = filter_state.lowpass_history + alpha * (sample - filter_state.lowpass_history);
-                filter_state.lowpass_history
-            }
-            crate::expressive::FilterType::HighPass => {
-                filter_state.highpass_history = filter_state.highpass_history + alpha * (sample - filter_state.highpass_history);
-                sample - filter_state.highpass_history
-            }
-            crate::expressive::FilterType::BandPass => {
-                // Implement bandpass as series lowpass + highpass
-                let low_cutoff = filter.cutoff - filter.cutoff * 0.2;
-                let high_cutoff = filter.cutoff + filter.cutoff * 0.2;
-                
-                let low_alpha = 1.0 - (-2.0 * std::f32::consts::PI * low_cutoff / self.sample_rate).exp();
-                let high_alpha = 1.0 - (-2.0 * std::f32::consts::PI * high_cutoff / self.sample_rate).exp();
-                
-                filter_state.lowpass_history = filter_state.lowpass_history + low_alpha * (sample - filter_state.lowpass_history);
-                filter_state.highpass_history = filter_state.highpass_history + high_alpha * (filter_state.lowpass_history - filter_state.highpass_history);
-                
-                filter_state.lowpass_history - filter_state.highpass_history
-            }
-        }
-    }
-
-    /// Apply effect to voice sample (stateful)
-    fn apply_voice_effect(&self, sample: f32, effect: &EffectParams, _effect_state: &mut EffectState, _dt: f32) -> f32 {
-        // Simplified effects for now - in full implementation, these would use the effect_state
-        match &effect.effect_type {
-            crate::expressive::EffectType::Reverb => {
-                // Simple reverb approximation
-                sample * (1.0 + effect.intensity * 0.3)
-            }
-            crate::expressive::EffectType::Chorus => {
-                // Simple chorus approximation
-                sample * (1.0 + effect.intensity * 0.2)
-            }
-            crate::expressive::EffectType::Delay { .. } => {
-                // Simple delay approximation
-                sample * (1.0 + effect.intensity * 0.4)
-            }
-        }
-    }
-
     /// Get number of active voices
     pub fn active_voice_count(&self) -> usize {
         self.voices.iter().filter(|v| v.state != VoiceState::Idle).count()
@@ -441,5 +403,63 @@ impl PolyphonicVoiceManager {
             .iter()
             .map(|v| (v.id, v.state.clone(), v.note, v.channel))
             .collect()
+    }
+
+    /// Get detailed voice statistics for performance monitoring
+    pub fn get_voice_statistics(&self) -> VoiceStatistics {
+        let total_voices = self.voices.len();
+        let active_voices = self.voices.iter().filter(|v| v.state != VoiceState::Idle).count();
+        let voice_states: std::collections::HashMap<VoiceState, usize> = {
+            let mut states = std::collections::HashMap::new();
+            for voice in &self.voices {
+                *states.entry(voice.state.clone()).or_insert(0) += 1;
+            }
+            states
+        };
+
+        VoiceStatistics {
+            total_voices,
+            active_voices,
+            idle_voices: total_voices - active_voices,
+            max_voices: MAX_VOICES,
+            voice_utilization: (active_voices as f32 / MAX_VOICES as f32) * 100.0,
+            voice_states,
+            allocation_strategy: self.allocation_strategy.clone(),
+        }
+    }
+
+    /// Set voice allocation strategy
+    pub fn set_allocation_strategy(&mut self, strategy: VoiceAllocationStrategy) {
+        self.allocation_strategy = strategy.clone();
+        tracing::info!("Voice allocation strategy changed to {:?}", strategy);
+    }
+}
+
+/// Voice statistics for performance monitoring
+#[derive(Debug, Clone)]
+pub struct VoiceStatistics {
+    pub total_voices: usize,
+    pub active_voices: usize,
+    pub idle_voices: usize,
+    pub max_voices: usize,
+    pub voice_utilization: f32,
+    pub voice_states: std::collections::HashMap<VoiceState, usize>,
+    pub allocation_strategy: VoiceAllocationStrategy,
+}
+
+impl VoiceStatistics {
+    pub fn report(&self) {
+        println!("📊 Voice Manager Statistics:");
+        println!("   🎵 Active voices: {}/{}", self.active_voices, self.max_voices);
+        println!("   💤 Idle voices: {}", self.idle_voices);
+        println!("   📈 Voice utilization: {:.1}%", self.voice_utilization);
+        println!("   🎛️  Allocation strategy: {:?}", self.allocation_strategy);
+        
+        if !self.voice_states.is_empty() {
+            println!("   📋 Voice states breakdown:");
+            for (state, count) in &self.voice_states {
+                println!("      {:?}: {}", state, count);
+            }
+        }
     }
 } 
