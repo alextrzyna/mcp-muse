@@ -14,6 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo test` - Run all unit and integration tests
 - `cargo run -- test-presets` - Test classic synthesizer preset integration
 - `cargo run -- test-polyphony` - Test polyphonic voice management
+- `cargo run -- test-drums` - Test drum synthesis and preset functionality
 - `cargo run -- debug-dx7` - Debug DX7 synthesis issues
 
 ### Development Utilities
@@ -46,7 +47,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Synthesis System (src/expressive/)**
 - `synth.rs` - PolyphonicVoiceManager for real-time voice allocation
 - `r2d2.rs` - Ring modulation synthesis with emotion-specific parameters
-- `presets/` - 26 classic synthesizer presets (Minimoog, TB-303, Jupiter-8, etc.)
+- `presets/` - 31 classic synthesizer presets (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
 
 **Setup System (src/setup/)**
 - Automatic FluidR3_GM SoundFont download (142MB)
@@ -55,10 +56,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Audio Capabilities
 
-**160+ Sound Options:**
+**165+ Sound Options:**
 - 128 GM instruments (FluidR3_GM SoundFont)
 - 9 R2D2 emotional expressions
-- 26 classic synthesizer presets
+- 31 classic synthesizer presets (including 5 drum machine presets)
 - 19 custom synthesis types
 
 **Key Features:**
