@@ -36,18 +36,18 @@ impl PresetLibrary {
             ],
             synth_params: SynthParams {
                 synth_type: SynthType::Pad {
-                    warmth: 0.8,        // Authentic Jupiter-8 warmth
-                    movement: 0.4,      // Subtle analog movement/detuning
-                    space: 0.6,         // Spacious Jupiter character
+                    warmth: 0.8,             // Authentic Jupiter-8 warmth
+                    movement: 0.4,           // Subtle analog movement/detuning
+                    space: 0.6,              // Spacious Jupiter character
                     harmonic_evolution: 0.3, // Gentle harmonic changes
                 },
                 frequency: 440.0,
-                amplitude: 0.75,  // Increased for better audibility
+                amplitude: 0.75, // Increased for better audibility
                 duration: 4.0,
                 envelope: PresetLibrary::create_envelope(0.8, 0.3, 0.8, 1.5), // Slow attack for pad character
                 filter: Some(PresetLibrary::create_filter(
                     1200.0,
-                    0.2,    // Reduced resonance for warmer Jupiter character
+                    0.2, // Reduced resonance for warmer Jupiter character
                     FilterType::LowPass,
                 )),
                 effects: vec![
@@ -73,18 +73,18 @@ impl PresetLibrary {
             ],
             synth_params: SynthParams {
                 synth_type: SynthType::Pad {
-                    warmth: 0.9,        // Very warm Oberheim character
-                    movement: 0.2,      // Gentle Oberheim movement
-                    space: 0.5,         // Creamy spatial character
+                    warmth: 0.9,             // Very warm Oberheim character
+                    movement: 0.2,           // Gentle Oberheim movement
+                    space: 0.5,              // Creamy spatial character
                     harmonic_evolution: 0.4, // Oberheim harmonic richness
                 },
                 frequency: 440.0,
-                amplitude: 0.75,  // Standardized pad level
+                amplitude: 0.75, // Standardized pad level
                 duration: 4.0,
                 envelope: PresetLibrary::create_envelope(0.5, 0.4, 0.7, 1.2),
                 filter: Some(PresetLibrary::create_filter(
-                    900.0,  // Slightly warmer filter for Oberheim character
-                    0.3,    // Moderate resonance for Oberheim "creamy" character
+                    900.0, // Slightly warmer filter for Oberheim character
+                    0.3,   // Moderate resonance for Oberheim "creamy" character
                     FilterType::LowPass,
                 )),
                 effects: vec![
@@ -116,8 +116,8 @@ impl PresetLibrary {
                     harmonic_evolution: 0.5,
                 },
                 frequency: 440.0,
-                amplitude: 0.75,  // Increased for better presence
-                duration: 8.0, // Long pad duration
+                amplitude: 0.75, // Increased for better presence
+                duration: 8.0,   // Long pad duration
                 envelope: PresetLibrary::create_envelope(1.2, 0.8, 0.85, 2.0),
                 filter: Some(PresetLibrary::create_filter(
                     900.0,
@@ -158,7 +158,7 @@ impl PresetLibrary {
                     harmonic_evolution: 0.7,
                 },
                 frequency: 440.0,
-                amplitude: 0.75,  // Standardized level
+                amplitude: 0.75, // Standardized level
                 duration: 6.0,
                 envelope: PresetLibrary::create_envelope(0.3, 0.8, 0.8, 1.8), // Quick attack then evolving
                 filter: Some(PresetLibrary::create_filter(
@@ -190,7 +190,7 @@ impl PresetLibrary {
             synth_params: SynthParams {
                 synth_type: SynthType::Triangle, // Clean, pure tone
                 frequency: 440.0,
-                amplitude: 0.75,  // Standardized level
+                amplitude: 0.75, // Standardized level
                 duration: 5.0,
                 envelope: PresetLibrary::create_envelope(0.6, 0.2, 0.9, 1.5),
                 filter: Some(PresetLibrary::create_filter(
@@ -229,7 +229,7 @@ impl PresetLibrary {
                     harmonic_evolution: 0.8,
                 },
                 frequency: 440.0,
-                amplitude: 0.7,   // Atmospheric but still present
+                amplitude: 0.7, // Atmospheric but still present
                 duration: 10.0, // Very long atmospheric pad
                 envelope: PresetLibrary::create_envelope(2.0, 1.0, 0.9, 3.0), // Very slow attack
                 filter: Some(PresetLibrary::create_filter(
@@ -288,7 +288,7 @@ impl PresetLibrary {
             synth_params: SynthParams {
                 synth_type: SynthType::Triangle, // Softer than sawtooth
                 frequency: 440.0,
-                amplitude: 0.75,  // Standardized level  
+                amplitude: 0.75, // Standardized level
                 duration: 8.0,
                 envelope: PresetLibrary::create_envelope(1.0, 0.6, 0.8, 2.0),
                 filter: Some(PresetLibrary::create_filter(
@@ -323,7 +323,7 @@ impl PresetLibrary {
                 },
                 frequency: 440.0,
                 amplitude: 0.65, // Softer for wind character but still audible
-                duration: 12.0, // Very long for ambience
+                duration: 12.0,  // Very long for ambience
                 envelope: PresetLibrary::create_envelope(3.0, 2.0, 0.6, 4.0), // Very slow development
                 filter: Some(PresetLibrary::create_filter(
                     600.0,
@@ -357,7 +357,7 @@ impl PresetLibrary {
                     modulation_depth: 0.6,
                 },
                 frequency: 440.0,
-                amplitude: 0.7,   // Dreamy but audible
+                amplitude: 0.7, // Dreamy but audible
                 duration: 15.0, // Very long dreamy pad
                 envelope: PresetLibrary::create_envelope(4.0, 3.0, 0.8, 5.0), // Extremely slow
                 filter: Some(PresetLibrary::create_filter(

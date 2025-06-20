@@ -54,7 +54,7 @@ impl PresetLibrary {
                     frequency_sweep: (200.0, 2000.0), // Low to high
                 },
                 frequency: 200.0,
-                amplitude: 0.8,  // Standardized effect level
+                amplitude: 0.8, // Standardized effect level
                 duration: 2.0,
                 envelope: PresetLibrary::create_envelope(0.1, 0.5, 0.8, 1.0),
                 filter: Some(PresetLibrary::create_filter(

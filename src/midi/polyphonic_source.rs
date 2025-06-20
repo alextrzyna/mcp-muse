@@ -2,8 +2,8 @@ use anyhow::Result;
 use rodio::Source;
 use std::time::Duration;
 
-use crate::expressive::{PolyphonicVoiceManager, SynthParams, R2D2Voice, R2D2Expression};
-use crate::midi::{SimpleNote, parser::MidiNote};
+use crate::expressive::{PolyphonicVoiceManager, R2D2Expression, R2D2Voice, SynthParams};
+use crate::midi::{parser::MidiNote, SimpleNote};
 
 /// Event for scheduling synthesis notes in real-time
 #[derive(Debug, Clone)]
@@ -25,34 +25,34 @@ pub struct RealtimeR2D2Event {
 pub struct RealtimePolyphonicAudioSource {
     /// Voice manager for synthesis
     voice_manager: PolyphonicVoiceManager,
-    
+
     /// MIDI synthesizer (OxiSynth) - keep existing polyphonic support
     oxisynth_source: Option<super::player::OxiSynthSource>,
-    
+
     /// Scheduled synthesis events
     synthesis_events: Vec<RealtimeSynthEvent>,
-    
+
     /// Scheduled R2D2 events
     r2d2_events: Vec<RealtimeR2D2Event>,
-    
+
     /// R2D2 voice for generating parameters
     r2d2_voice: R2D2Voice,
-    
+
     /// Current R2D2 samples being played
     current_r2d2_samples: Option<Vec<f32>>,
-    
+
     /// Current position in R2D2 samples
     r2d2_sample_position: usize,
-    
+
     /// Sample rate
     sample_rate: u32,
-    
+
     /// Current sample index
     current_sample: usize,
-    
+
     /// Total duration
     total_duration: Duration,
-    
+
     /// Delta time per sample
     dt: f32,
 }
@@ -66,7 +66,7 @@ impl RealtimePolyphonicAudioSource {
     ) -> Result<Self> {
         let sample_rate = 44100;
         let dt = 1.0 / sample_rate as f32;
-        
+
         // Create MIDI synthesizer source if there are MIDI notes
         let oxisynth_source = if !midi_notes.is_empty() {
             Some(
@@ -76,16 +76,19 @@ impl RealtimePolyphonicAudioSource {
         } else {
             None
         };
-        
+
         // Create voice manager
         let voice_manager = PolyphonicVoiceManager::new(sample_rate as f32);
-        
+
         // Create R2D2 voice
         let r2d2_voice = R2D2Voice::new();
-        
-        tracing::info!("Created RealtimePolyphonicAudioSource with {} synthesis events, {} R2D2 events",
-                      synthesis_events.len(), r2d2_events.len());
-        
+
+        tracing::info!(
+            "Created RealtimePolyphonicAudioSource with {} synthesis events, {} R2D2 events",
+            synthesis_events.len(),
+            r2d2_events.len()
+        );
+
         Ok(Self {
             voice_manager,
             oxisynth_source,
@@ -100,23 +103,27 @@ impl RealtimePolyphonicAudioSource {
             dt,
         })
     }
-    
+
     /// Process events that should start at the current time
     fn process_scheduled_events(&mut self) {
         let current_time = self.current_sample as f64 / self.sample_rate as f64;
-        
+
         // Process synthesis events
         for event in &mut self.synthesis_events {
             if event.voice_id.is_none() && current_time >= event.start_time {
                 // Convert SimpleNote to SynthParams
                 if let Ok(synth_params) = Self::convert_simple_note_to_synth_params(&event.note) {
                     // Determine priority based on note characteristics
-                    let priority = if event.note.preset_name.is_some() { 100 } else { 50 };
-                    
+                    let priority = if event.note.preset_name.is_some() {
+                        100
+                    } else {
+                        50
+                    };
+
                     // Extract note and channel info
                     let note = event.note.note;
                     let channel = event.note.channel;
-                    
+
                     // Allocate voice
                     match self.voice_manager.allocate_voice(
                         synth_params,
@@ -127,8 +134,11 @@ impl RealtimePolyphonicAudioSource {
                     ) {
                         Ok(voice_id) => {
                             event.voice_id = Some(voice_id);
-                            tracing::debug!("Allocated voice {} for synthesis event at {:.3}s", 
-                                          voice_id, event.start_time);
+                            tracing::debug!(
+                                "Allocated voice {} for synthesis event at {:.3}s",
+                                voice_id,
+                                event.start_time
+                            );
                         }
                         Err(e) => {
                             tracing::warn!("Failed to allocate voice for synthesis event: {}", e);
@@ -137,34 +147,41 @@ impl RealtimePolyphonicAudioSource {
                 }
             }
         }
-        
+
         // Process R2D2 events using the sophisticated existing synthesis
         for event in &mut self.r2d2_events {
             if event.voice_id.is_none() && current_time >= event.start_time {
                 // Generate R2D2 expression using static synthesis method (avoids audio stream conflicts)
-                if let Some(r2d2_params) = self.r2d2_voice.generate_expression_params(&event.expression) {
+                if let Some(r2d2_params) = self
+                    .r2d2_voice
+                    .generate_expression_params(&event.expression)
+                {
                     // Use the static R2D2 sample generation method for authentic sound without audio stream conflicts
-                    let r2d2_samples = crate::expressive::ExpressiveSynth::generate_r2d2_samples_static(
-                        r2d2_params.base_freq,
-                        event.expression.intensity,
-                        r2d2_params.duration,
-                        &r2d2_params.pitch_contour,
+                    let r2d2_samples =
+                        crate::expressive::ExpressiveSynth::generate_r2d2_samples_static(
+                            r2d2_params.base_freq,
+                            event.expression.intensity,
+                            r2d2_params.duration,
+                            &r2d2_params.pitch_contour,
+                        );
+
+                    tracing::debug!(
+                        "Generated {} R2D2 samples for event at {:.3}s",
+                        r2d2_samples.len(),
+                        event.start_time
                     );
-                    
-                    tracing::debug!("Generated {} R2D2 samples for event at {:.3}s", 
-                                  r2d2_samples.len(), event.start_time);
-                    
+
                     // Store the pre-computed samples
                     self.current_r2d2_samples = Some(r2d2_samples);
                     self.r2d2_sample_position = 0;
-                    
+
                     // Mark event as processed
                     event.voice_id = Some(999); // Dummy voice ID to indicate processing
                 }
             }
         }
     }
-    
+
     /// Convert SimpleNote to SynthParams (moved from player.rs)
     fn convert_simple_note_to_synth_params(note: &SimpleNote) -> Result<SynthParams> {
         use crate::expressive::{
@@ -193,7 +210,12 @@ impl RealtimePolyphonicAudioSource {
                 modulation_index: note.synth_modulation_index.unwrap_or(1.0),
             },
             // Add more types as needed
-            _ => return Err(anyhow::anyhow!("Unknown synthesis type: {}", synth_type_str)),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unknown synthesis type: {}",
+                    synth_type_str
+                ))
+            }
         };
 
         // Determine frequency
@@ -280,7 +302,8 @@ impl Iterator for RealtimePolyphonicAudioSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_time = Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+        let current_time =
+            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
 
         if current_time > self.total_duration {
             return None;
@@ -346,4 +369,4 @@ impl Source for RealtimePolyphonicAudioSource {
     fn total_duration(&self) -> Option<Duration> {
         Some(self.total_duration)
     }
-} 
+}

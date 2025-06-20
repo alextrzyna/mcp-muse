@@ -43,7 +43,7 @@ pub enum SynthType {
     },
     // DX7-style 6-operator FM synthesis
     DX7FM {
-        algorithm: u8,           // 1-32 (DX7 algorithms)
+        algorithm: u8,               // 1-32 (DX7 algorithms)
         operators: [DX7Operator; 6], // 6 operators like real DX7
     },
     Granular {
@@ -171,9 +171,9 @@ pub enum EffectType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DX7Operator {
-    pub frequency_ratio: f32,    // Frequency ratio (0.5, 1.0, 2.0, etc.)
-    pub output_level: f32,       // Operator output level (0.0-1.0)
-    pub detune: f32,            // Fine detune (-7 to +7)
+    pub frequency_ratio: f32,     // Frequency ratio (0.5, 1.0, 2.0, etc.)
+    pub output_level: f32,        // Operator output level (0.0-1.0)
+    pub detune: f32,              // Fine detune (-7 to +7)
     pub envelope: EnvelopeParams, // Individual operator envelope
 }
 
@@ -220,7 +220,8 @@ impl ExpressiveSynth {
             let progress = t / duration;
 
             // Apply pitch contour from emotion presets
-            let pitch_multiplier = Self::interpolate_pitch_contour_static(progress, pitch_contour, emotion_intensity);
+            let pitch_multiplier =
+                Self::interpolate_pitch_contour_static(progress, pitch_contour, emotion_intensity);
             let contoured_freq = base_freq * pitch_multiplier;
 
             // Ben Burtt-style ring modulation synthesis
@@ -238,7 +239,12 @@ impl ExpressiveSynth {
             let harmonic = (2.0 * std::f32::consts::PI * carrier_freq * 1.1 * t).sin() * 0.1;
 
             // Apply emotion-specific envelope
-            let envelope = Self::calculate_emotion_envelope_static(t, duration, emotion_intensity, pitch_contour);
+            let envelope = Self::calculate_emotion_envelope_static(
+                t,
+                duration,
+                emotion_intensity,
+                pitch_contour,
+            );
 
             // Mix and apply envelope
             let sample = (ring_mod + harmonic) * envelope * 0.3;
@@ -282,7 +288,8 @@ impl ExpressiveSynth {
         let progress = t / duration;
 
         // Dynamic envelope based on pitch contour
-        let pitch_multiplier = Self::interpolate_pitch_contour_static(progress, pitch_contour, emotion_intensity);
+        let pitch_multiplier =
+            Self::interpolate_pitch_contour_static(progress, pitch_contour, emotion_intensity);
 
         // Base envelope
         let attack = 0.02;
@@ -439,27 +446,48 @@ impl ExpressiveSynth {
                 let modulator = (2.0 * std::f32::consts::PI * modulator_freq * t).sin();
                 (phase + modulation_index * modulator).sin()
             }
-            SynthType::DX7FM { algorithm: _, operators } => {
-                // Enhanced DX7-style FM synthesis with proper operator envelopes
-                // Use first two operators: op1 = carrier (output), op2 = modulator
-                let carrier = &operators[0];   // Carrier (fundamental)
-                let modulator = &operators[1]; // Modulator (creates harmonics)
+            SynthType::DX7FM {
+                algorithm: _,
+                operators,
+            } => {
+                // Enhanced DX7-style FM synthesis with all active operators
+                let mut output = 0.0;
                 
-                let carrier_freq = freq * carrier.frequency_ratio;
-                let modulator_freq = freq * modulator.frequency_ratio;
+                // Use up to 3 operators for more authentic DX7 sound
+                for (i, operator) in operators.iter().take(3).enumerate() {
+                    // Skip operators with zero output level (inactive)
+                    if operator.output_level <= 0.0 {
+                        continue;
+                    }
+                    
+                    let op_freq = freq * operator.frequency_ratio;
+                    let op_envelope = self.calculate_operator_envelope(t, &operator.envelope);
+                    
+                    if i == 0 {
+                        // First operator is always a carrier
+                        let phase = 2.0 * std::f32::consts::PI * op_freq * t + operator.detune;
+                        output += phase.sin() * operator.output_level * op_envelope;
+                    } else {
+                        // Additional operators can be carriers or modulators
+                        // For simplicity, we'll add them as additional carriers with slight phase modulation
+                        let phase = 2.0 * std::f32::consts::PI * op_freq * t + operator.detune;
+                        
+                        // If frequency ratio is high (>10), treat as modulator
+                        if operator.frequency_ratio > 10.0 {
+                            // High frequency operator acts as modulator
+                            let modulator_signal = phase.sin() * operator.output_level * op_envelope * 0.5;
+                            // Apply modulation to the fundamental
+                            let carrier_phase = 2.0 * std::f32::consts::PI * freq * t;
+                            output += (carrier_phase + modulator_signal).sin() * operator.output_level * op_envelope * 0.5;
+                        } else {
+                            // Low frequency operator acts as additional carrier
+                            output += phase.sin() * operator.output_level * op_envelope;
+                        }
+                    }
+                }
                 
-                // Calculate individual operator envelopes
-                let carrier_envelope = self.calculate_operator_envelope(t, &carrier.envelope);
-                let modulator_envelope = self.calculate_operator_envelope(t, &modulator.envelope);
-                
-                // Generate modulator signal with its envelope
-                let modulator_signal = (2.0 * std::f32::consts::PI * modulator_freq * t).sin() 
-                    * modulator.output_level * modulator_envelope;
-                
-                // Apply phase modulation to carrier (proper FM synthesis)
-                let carrier_phase = 2.0 * std::f32::consts::PI * carrier_freq * t;
-                // Reduced modulation depth for cleaner bass - was * 2.0, now scaled by modulator level
-                (carrier_phase + modulator_signal).sin() * carrier.output_level * carrier_envelope
+                // Normalize output to prevent clipping with multiple operators
+                output * 0.8
             }
             SynthType::Granular {
                 grain_size,
@@ -970,28 +998,28 @@ impl ExpressiveSynth {
         let attack = envelope.attack;
         let decay = envelope.decay;
         let sustain = envelope.sustain;
-        let release = envelope.release;
+        let _release = envelope.release;
 
         if t < attack {
             // Attack phase: linear rise from 0 to 1
             if attack > 0.0 {
                 t / attack
             } else {
-                1.0  // Instant attack
+                1.0 // Instant attack
             }
         } else if t < attack + decay {
-            // Decay phase: exponential decay from 1 to sustain level  
+            // Decay phase: exponential decay from 1 to sustain level
             if decay > 0.0 {
                 let decay_progress = (t - attack) / decay;
                 1.0 - (1.0 - sustain) * decay_progress
             } else {
-                sustain  // Instant decay
+                sustain // Instant decay
             }
         } else {
             // Sustain phase: hold sustain level (DX7 operators sustain until note release)
             // Unlike traditional ADSR, DX7 operators hold sustain until the note ends
             // Then apply release envelope from note-off time
-            sustain.max(0.0)  // Hold sustain level, ensure non-negative
+            sustain.max(0.0) // Hold sustain level, ensure non-negative
         }
     }
 

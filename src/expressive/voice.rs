@@ -1,7 +1,5 @@
 use anyhow::Result;
-use std::time::Duration;
-
-use crate::expressive::{SynthParams, SynthType, FilterParams, EffectParams};
+use crate::expressive::{SynthParams, SynthType};
 
 /// Maximum number of simultaneous voices
 pub const MAX_VOICES: usize = 32;
@@ -23,6 +21,7 @@ pub enum VoiceState {
 
 /// Individual synthesis voice with real-time parameter control
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SynthVoice {
     /// Unique voice ID
     pub id: usize,
@@ -54,6 +53,7 @@ pub struct SynthVoice {
 
 /// Filter state for maintaining filter memory
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct FilterState {
     pub lowpass_history: f32,
     pub highpass_history: f32,
@@ -61,7 +61,8 @@ pub struct FilterState {
 }
 
 /// Effect state for maintaining effect memory
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct EffectState {
     pub reverb_buffer: Vec<f32>,
     pub chorus_buffer: Vec<f32>,
@@ -78,15 +79,6 @@ impl Default for FilterState {
     }
 }
 
-impl Default for EffectState {
-    fn default() -> Self {
-        Self {
-            reverb_buffer: Vec::new(),
-            chorus_buffer: Vec::new(),
-            delay_buffer: Vec::new(),
-        }
-    }
-}
 
 /// Real-time polyphonic voice manager
 pub struct PolyphonicVoiceManager {
@@ -103,6 +95,7 @@ pub struct PolyphonicVoiceManager {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum VoiceAllocationStrategy {
     /// Steal oldest voice when full
     OldestFirst,
@@ -157,11 +150,17 @@ impl PolyphonicVoiceManager {
         };
 
         self.voices.push(voice);
-        tracing::debug!("Allocated voice {} for note {:?} on channel {}", voice_id, note, channel);
+        tracing::debug!(
+            "Allocated voice {} for note {:?} on channel {}",
+            voice_id,
+            note,
+            channel
+        );
         Ok(voice_id)
     }
 
     /// Release a voice (trigger release phase)
+    #[allow(dead_code)]
     pub fn release_voice(&mut self, voice_id: usize) {
         if let Some(voice) = self.voices.iter_mut().find(|v| v.id == voice_id) {
             if voice.state != VoiceState::Release && voice.state != VoiceState::Idle {
@@ -172,13 +171,17 @@ impl PolyphonicVoiceManager {
     }
 
     /// Release all voices for a specific note (for note-off events)
+    #[allow(dead_code)]
     pub fn release_note(&mut self, note: u8, channel: u8) {
         for voice in &mut self.voices {
-            if voice.note == Some(note) && voice.channel == channel {
-                if voice.state != VoiceState::Release && voice.state != VoiceState::Idle {
-                    voice.state = VoiceState::Release;
-                    tracing::debug!("Released voice {} for note {} on channel {}", voice.id, note, channel);
-                }
+            if voice.note == Some(note) && voice.channel == channel && voice.state != VoiceState::Release && voice.state != VoiceState::Idle {
+                voice.state = VoiceState::Release;
+                tracing::debug!(
+                    "Released voice {} for note {} on channel {}",
+                    voice.id,
+                    note,
+                    channel
+                );
             }
         }
     }
@@ -263,7 +266,7 @@ impl PolyphonicVoiceManager {
             let freq = voice.params.frequency;
             let phase_increment = 2.0 * std::f32::consts::PI * freq * dt;
             voice.oscillator_phase += phase_increment;
-            
+
             // Keep phase in range [0, 2π]
             while voice.oscillator_phase >= 2.0 * std::f32::consts::PI {
                 voice.oscillator_phase -= 2.0 * std::f32::consts::PI;
@@ -274,7 +277,11 @@ impl PolyphonicVoiceManager {
                 SynthType::Sine => voice.oscillator_phase.sin(),
                 SynthType::Square { pulse_width } => {
                     let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
-                    if normalized_phase < *pulse_width { 1.0 } else { -1.0 }
+                    if normalized_phase < *pulse_width {
+                        1.0
+                    } else {
+                        -1.0
+                    }
                 }
                 SynthType::Sawtooth => {
                     let normalized_phase = voice.oscillator_phase / (2.0 * std::f32::consts::PI);
@@ -299,29 +306,39 @@ impl PolyphonicVoiceManager {
             // Apply filter if present (inline implementation)
             if let Some(filter) = &voice.params.filter {
                 // Simple one-pole filter implementation with state
-                let alpha = 1.0 - (-2.0 * std::f32::consts::PI * filter.cutoff / self.sample_rate).exp();
-                
+                let alpha =
+                    1.0 - (-2.0 * std::f32::consts::PI * filter.cutoff / self.sample_rate).exp();
+
                 match filter.filter_type {
                     crate::expressive::FilterType::LowPass => {
-                        voice.filter_state.lowpass_history = voice.filter_state.lowpass_history + alpha * (sample - voice.filter_state.lowpass_history);
+                        voice.filter_state.lowpass_history = voice.filter_state.lowpass_history
+                            + alpha * (sample - voice.filter_state.lowpass_history);
                         sample = voice.filter_state.lowpass_history;
                     }
                     crate::expressive::FilterType::HighPass => {
-                        voice.filter_state.highpass_history = voice.filter_state.highpass_history + alpha * (sample - voice.filter_state.highpass_history);
-                        sample = sample - voice.filter_state.highpass_history;
+                        voice.filter_state.highpass_history = voice.filter_state.highpass_history
+                            + alpha * (sample - voice.filter_state.highpass_history);
+                        sample -= voice.filter_state.highpass_history;
                     }
                     crate::expressive::FilterType::BandPass => {
                         // Implement bandpass as series lowpass + highpass
                         let low_cutoff = filter.cutoff - filter.cutoff * 0.2;
                         let high_cutoff = filter.cutoff + filter.cutoff * 0.2;
-                        
-                        let low_alpha = 1.0 - (-2.0 * std::f32::consts::PI * low_cutoff / self.sample_rate).exp();
-                        let high_alpha = 1.0 - (-2.0 * std::f32::consts::PI * high_cutoff / self.sample_rate).exp();
-                        
-                        voice.filter_state.lowpass_history = voice.filter_state.lowpass_history + low_alpha * (sample - voice.filter_state.lowpass_history);
-                        voice.filter_state.highpass_history = voice.filter_state.highpass_history + high_alpha * (voice.filter_state.lowpass_history - voice.filter_state.highpass_history);
-                        
-                        sample = voice.filter_state.lowpass_history - voice.filter_state.highpass_history;
+
+                        let low_alpha = 1.0
+                            - (-2.0 * std::f32::consts::PI * low_cutoff / self.sample_rate).exp();
+                        let high_alpha = 1.0
+                            - (-2.0 * std::f32::consts::PI * high_cutoff / self.sample_rate).exp();
+
+                        voice.filter_state.lowpass_history = voice.filter_state.lowpass_history
+                            + low_alpha * (sample - voice.filter_state.lowpass_history);
+                        voice.filter_state.highpass_history = voice.filter_state.highpass_history
+                            + high_alpha
+                                * (voice.filter_state.lowpass_history
+                                    - voice.filter_state.highpass_history);
+
+                        sample = voice.filter_state.lowpass_history
+                            - voice.filter_state.highpass_history;
                     }
                 }
             }
@@ -379,14 +396,20 @@ impl PolyphonicVoiceManager {
                 self.voices
                     .iter()
                     .enumerate()
-                    .min_by(|(_, a), (_, b)| a.envelope_value.partial_cmp(&b.envelope_value).unwrap())
+                    .min_by(|(_, a), (_, b)| {
+                        a.envelope_value.partial_cmp(&b.envelope_value).unwrap()
+                    })
                     .map(|(i, _)| i)
             }
         };
 
         if let Some(index) = steal_index {
             let stolen_voice = self.voices.remove(index);
-            tracing::debug!("Stole voice {} (priority {})", stolen_voice.id, stolen_voice.priority);
+            tracing::debug!(
+                "Stole voice {} (priority {})",
+                stolen_voice.id,
+                stolen_voice.priority
+            );
         }
 
         Ok(())
@@ -394,7 +417,10 @@ impl PolyphonicVoiceManager {
 
     /// Get number of active voices
     pub fn active_voice_count(&self) -> usize {
-        self.voices.iter().filter(|v| v.state != VoiceState::Idle).count()
+        self.voices
+            .iter()
+            .filter(|v| v.state != VoiceState::Idle)
+            .count()
     }
 
     /// Get voice information for debugging
@@ -406,9 +432,14 @@ impl PolyphonicVoiceManager {
     }
 
     /// Get detailed voice statistics for performance monitoring
+    #[allow(dead_code)]
     pub fn get_voice_statistics(&self) -> VoiceStatistics {
         let total_voices = self.voices.len();
-        let active_voices = self.voices.iter().filter(|v| v.state != VoiceState::Idle).count();
+        let active_voices = self
+            .voices
+            .iter()
+            .filter(|v| v.state != VoiceState::Idle)
+            .count();
         let voice_states: std::collections::HashMap<VoiceState, usize> = {
             let mut states = std::collections::HashMap::new();
             for voice in &self.voices {
@@ -429,6 +460,7 @@ impl PolyphonicVoiceManager {
     }
 
     /// Set voice allocation strategy
+    #[allow(dead_code)]
     pub fn set_allocation_strategy(&mut self, strategy: VoiceAllocationStrategy) {
         self.allocation_strategy = strategy.clone();
         tracing::info!("Voice allocation strategy changed to {:?}", strategy);
@@ -437,6 +469,7 @@ impl PolyphonicVoiceManager {
 
 /// Voice statistics for performance monitoring
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct VoiceStatistics {
     pub total_voices: usize,
     pub active_voices: usize,
@@ -448,13 +481,17 @@ pub struct VoiceStatistics {
 }
 
 impl VoiceStatistics {
+    #[allow(dead_code)]
     pub fn report(&self) {
         println!("📊 Voice Manager Statistics:");
-        println!("   🎵 Active voices: {}/{}", self.active_voices, self.max_voices);
+        println!(
+            "   🎵 Active voices: {}/{}",
+            self.active_voices, self.max_voices
+        );
         println!("   💤 Idle voices: {}", self.idle_voices);
         println!("   📈 Voice utilization: {:.1}%", self.voice_utilization);
         println!("   🎛️  Allocation strategy: {:?}", self.allocation_strategy);
-        
+
         if !self.voice_states.is_empty() {
             println!("   📋 Voice states breakdown:");
             for (state, count) in &self.voice_states {
@@ -462,4 +499,4 @@ impl VoiceStatistics {
             }
         }
     }
-} 
+}

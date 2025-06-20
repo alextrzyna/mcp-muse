@@ -1364,9 +1364,9 @@ impl EnhancedHybridAudioSource {
             "dx7fm" => {
                 // Import DX7Operator for default configuration
                 use crate::expressive::DX7Operator;
-                
+
                 SynthType::DX7FM {
-                    algorithm: 1,  // Default algorithm
+                    algorithm: 1, // Default algorithm
                     operators: [
                         // Default 2-operator FM configuration
                         DX7Operator {
@@ -1398,7 +1398,7 @@ impl EnhancedHybridAudioSource {
                         DX7Operator::default(),
                     ],
                 }
-            },
+            }
             "granular" => SynthType::Granular {
                 grain_size: note.synth_grain_size.unwrap_or(0.1),
                 overlap: 0.5,

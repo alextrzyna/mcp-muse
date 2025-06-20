@@ -1,7 +1,7 @@
 use crate::expressive::presets::{
     ClassicSynthPreset, PresetCategory, PresetLibrary, PresetVariation,
 };
-use crate::expressive::{FilterType, SynthParams, SynthType, DX7Operator};
+use crate::expressive::{DX7Operator, FilterType, SynthParams, SynthType};
 use std::collections::HashMap;
 
 impl PresetLibrary {
@@ -58,8 +58,8 @@ impl PresetLibrary {
                 duration: 1.0, // Will be overridden
                 envelope: PresetLibrary::create_envelope(0.01, 0.3, 0.7, 0.5),
                 filter: Some(PresetLibrary::create_filter(
-                    700.0,  // Lower cutoff for classic bass filtering 
-                    0.05,   // Near-zero resonance for authentic clean bass
+                    700.0, // Lower cutoff for classic bass filtering
+                    0.05,  // Near-zero resonance for authentic clean bass
                     FilterType::LowPass,
                 )),
                 effects: vec![PresetLibrary::create_reverb(0.15)],
@@ -163,8 +163,8 @@ impl PresetLibrary {
                 duration: 1.0,
                 envelope: PresetLibrary::create_envelope(0.02, 0.4, 0.8, 0.6),
                 filter: Some(PresetLibrary::create_filter(
-                    750.0,  // Slightly higher cutoff for Jupiter-8 character
-                    0.3,    // Moderate resonance for authentic Jupiter "aggressive but warm" character
+                    750.0, // Slightly higher cutoff for Jupiter-8 character
+                    0.3, // Moderate resonance for authentic Jupiter "aggressive but warm" character
                     FilterType::LowPass,
                 )),
                 effects: vec![
@@ -216,7 +216,8 @@ impl PresetLibrary {
             name: "DX7 Slap Bass".to_string(),
             category: PresetCategory::Bass,
             subcategory: "Digital".to_string(),
-            description: "Authentic DX7 Bass 1 preset - the famous 80s slap bass from Take On Me".to_string(),
+            description: "Authentic DX7 Bass 1 preset - the famous 80s slap bass from Take On Me"
+                .to_string(),
             inspiration: "Yamaha DX7 ROM 1A 15 Bass 1 (Algorithm 16)".to_string(),
             tags: vec![
                 "authentic".to_string(),
@@ -227,19 +228,19 @@ impl PresetLibrary {
             ],
             synth_params: SynthParams {
                 synth_type: SynthType::DX7FM {
-                    algorithm: 16,  // Algorithm 16: Pure frequency modulation
+                    algorithm: 16, // Algorithm 16: Pure frequency modulation
                     operators: [
                         // Operator 1 (Carrier) - Fundamental frequency
                         DX7Operator {
-                            frequency_ratio: 1.0,  // Fundamental frequency for strong bass
-                            output_level: 0.9,     // High output for strong fundamental
+                            frequency_ratio: 1.0, // Fundamental frequency for strong bass
+                            output_level: 0.9,    // High output for strong fundamental
                             detune: 0.0,
                             envelope: PresetLibrary::create_envelope(0.001, 0.06, 0.6, 3.0), // Longer release for smooth transitions
                         },
                         // Operator 2 (Modulator) - Higher ratio for slap character
                         DX7Operator {
-                            frequency_ratio: 2.0,  // Higher ratio creates slap harmonics without overwhelming fundamental
-                            output_level: 0.3,     // Reduced modulation to preserve fundamental
+                            frequency_ratio: 2.0, // Higher ratio creates slap harmonics without overwhelming fundamental
+                            output_level: 0.3,    // Reduced modulation to preserve fundamental
                             detune: 0.0,
                             envelope: PresetLibrary::create_envelope(0.001, 0.04, 0.2, 2.5), // Longer release to match carrier
                         },
@@ -250,13 +251,13 @@ impl PresetLibrary {
                         DX7Operator::default(),
                     ],
                 },
-                frequency: 55.0,  // Bass frequency
-                amplitude: 0.8,   // Standardized bass level
+                frequency: 55.0, // Bass frequency
+                amplitude: 0.8,  // Standardized bass level
                 duration: 1.2,
                 envelope: PresetLibrary::create_envelope(0.001, 0.06, 0.6, 4.0), // Extended release for smooth note transitions
                 filter: Some(PresetLibrary::create_filter(
-                    1800.0,  // Slightly lower cutoff to emphasize fundamental
-                    0.05,    // Very minimal resonance for clean bass
+                    1800.0, // Slightly lower cutoff to emphasize fundamental
+                    0.05,   // Very minimal resonance for clean bass
                     FilterType::LowPass,
                 )),
                 effects: vec![PresetLibrary::create_reverb(0.05)],

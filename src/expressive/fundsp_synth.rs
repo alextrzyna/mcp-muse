@@ -362,13 +362,13 @@ impl FunDSPSynth {
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
-            
+
             // Proper FM synthesis: modulate the phase, not the frequency
             let modulator = (2.0 * std::f32::consts::PI * modulator_freq * t).sin();
             let carrier_phase = 2.0 * std::f32::consts::PI * carrier_freq * t;
             let modulated_phase = carrier_phase + modulation_index * modulator;
             let carrier = modulated_phase.sin();
-            
+
             // More musical envelope for sustained sounds
             let envelope_value = (-t * 2.0).exp();
             samples.push(carrier * envelope_value * amplitude);
@@ -492,30 +492,49 @@ impl FunDSPSynth {
         &self,
         frequency: f32,
         warmth: f32,
-        _movement: f32,
+        movement: f32,
         space: f32,
-        _harmonic_evolution: f32,
+        harmonic_evolution: f32,
         amplitude: f32,
         sample_count: usize,
     ) -> Result<Vec<f32>> {
         let mut samples = Vec::with_capacity(sample_count);
+        let duration = sample_count as f32 / self.sample_rate;
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
-            let envelope_value = (-t * 2.0).exp();
+            
+            // Proper pad envelope - slow attack, long sustain
+            let attack_time = duration * 0.2; // 20% of duration for attack
+            let envelope_value = if t < attack_time {
+                // Attack phase - gradual rise
+                t / attack_time
+            } else {
+                // Sustain phase - hold level with slight decay
+                let sustain_time = t - attack_time;
+                let decay_rate = 0.5; // Very slow decay for pad character
+                (1.0 - sustain_time * decay_rate / duration).max(0.3) // Never go below 30%
+            };
 
-            // Multi-harmonic pad synthesis with enhanced warmth
+            // Multi-harmonic pad synthesis with enhanced warmth and movement
             let fundamental = (2.0 * std::f32::consts::PI * frequency * t).sin() * 0.4;
             let harmonic2 = (2.0 * std::f32::consts::PI * frequency * 2.0 * t).sin() * 0.3 * warmth;
             let harmonic3 = (2.0 * std::f32::consts::PI * frequency * 3.0 * t).sin() * 0.2 * warmth;
             let harmonic4 = (2.0 * std::f32::consts::PI * frequency * 4.0 * t).sin() * 0.1 * warmth;
 
-            let mut sample =
-                (fundamental + harmonic2 + harmonic3 + harmonic4) * envelope_value * amplitude;
+            // Add movement with slow LFO
+            let movement_lfo = (2.0 * std::f32::consts::PI * 0.3 * t).sin() * movement * 0.1;
+            let movement_factor = 1.0 + movement_lfo;
 
-            // Apply simple lowpass filter if space > 0.1
+            // Add harmonic evolution over time
+            let evolution_factor = 1.0 + (t * harmonic_evolution * 0.1).sin() * 0.2;
+
+            let mut sample = (fundamental + harmonic2 * evolution_factor + harmonic3 + harmonic4) 
+                * envelope_value * amplitude * movement_factor;
+
+            // Apply simple lowpass filter with space parameter
             if space > 0.1 {
-                let cutoff_freq = frequency * 3.0;
+                let cutoff_freq = frequency * (2.0 + space * 2.0); // Space affects filter cutoff
                 let rc = 1.0 / (2.0 * std::f32::consts::PI * cutoff_freq);
                 let dt = 1.0 / self.sample_rate;
                 let alpha = dt / (rc + dt);

@@ -827,7 +827,10 @@ impl SimpleNote {
         }
 
         if self.start_time < 0.0 {
-            return Err(format!("Start time must be non-negative, got {}", self.start_time));
+            return Err(format!(
+                "Start time must be non-negative, got {}",
+                self.start_time
+            ));
         }
 
         // Optional parameter validation

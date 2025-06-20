@@ -76,10 +76,10 @@ pub enum Commands {
         #[arg(long, default_value = "mcp-muse")]
         name: String,
     },
-    
+
     /// Run setup for MCP hosts
     Setup,
-    
+
     /// Test preset functionality
     #[command(name = "test-presets")]
     TestPresets,
@@ -146,6 +146,45 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     let player =
         midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+
+    // Test 0: Specific test for reported non-working presets
+    println!("🔧 Test 0: Testing reported problematic presets");
+    
+    println!("  🎹 Testing JP-8 Strings...");
+    let jp8_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("JP-8 Strings".to_string()),
+            note: Some(60), // C4
+            velocity: Some(80),
+            start_time: 0.0,
+            duration: 3.0,
+            channel: 0,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(jp8_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(3500)).await;
+
+    println!("  🎹 Testing DX7 E.Piano...");
+    let dx7_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("DX7 E.Piano".to_string()),
+            note: Some(64), // E4
+            velocity: Some(90),
+            start_time: 0.0,
+            duration: 2.0,
+            channel: 0,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(dx7_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+    
+    println!("✅ Problematic preset test completed\n");
 
     // Test 1: Specific preset by name
     println!("🎵 Test 1: Playing Minimoog Bass preset");
@@ -282,16 +321,17 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     println!("🚀 Starting Comprehensive Polyphony Validation");
     println!("{}", "=".repeat(60));
 
-    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 1: Voice Manager Unit Tests
     println!("🔧 Test 1: Voice Manager Unit Tests");
     println!("Testing voice manager internals directly...");
 
-    use crate::expressive::{PolyphonicVoiceManager, SynthParams, SynthType, EnvelopeParams};
+    use crate::expressive::{EnvelopeParams, PolyphonicVoiceManager, SynthParams, SynthType};
 
     let mut voice_manager = PolyphonicVoiceManager::new(44100.0);
-    
+
     // Basic voice allocation test
     let synth_params = SynthParams {
         synth_type: SynthType::Sine,
@@ -309,7 +349,8 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("  🧪 Testing basic voice allocation...");
-    let voice_id = voice_manager.allocate_voice(synth_params.clone(), 0.0, Some(60), 0, 100)
+    let voice_id = voice_manager
+        .allocate_voice(synth_params.clone(), 0.0, Some(60), 0, 100)
         .map_err(|e| format!("Voice allocation failed: {}", e))?;
     println!("     ✅ Allocated voice ID: {}", voice_id);
 
@@ -321,13 +362,15 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     // Multiple voice allocation
     println!("  🧪 Testing multiple voice allocation...");
     for i in 1..8 {
-        let _voice_id = voice_manager.allocate_voice(
-            synth_params.clone(), 
-            i as f64 * 0.1, 
-            Some(60 + i as u8), 
-            0, 
-            100
-        ).map_err(|e| format!("Voice allocation {} failed: {}", i, e))?;
+        let _voice_id = voice_manager
+            .allocate_voice(
+                synth_params.clone(),
+                i as f64 * 0.1,
+                Some(60 + i as u8),
+                0,
+                100,
+            )
+            .map_err(|e| format!("Voice allocation {} failed: {}", i, e))?;
     }
     let active_count = voice_manager.active_voice_count();
     println!("     ✅ Active voices after allocation: {}", active_count);
@@ -335,7 +378,8 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     // Voice processing
     println!("  🧪 Testing voice processing...");
     let dt = 1.0 / 44100.0; // One sample at 44.1kHz
-    for _ in 0..1000 { // Process 1000 samples
+    for _ in 0..1000 {
+        // Process 1000 samples
         let _output = voice_manager.process_voices(dt);
     }
     println!("     ✅ Voice processing completed without errors");
@@ -344,9 +388,12 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     println!("  🧪 Testing voice information retrieval...");
     let voice_info = voice_manager.get_voice_info();
     println!("     ✅ Retrieved info for {} voices", voice_info.len());
-    
+
     for (id, state, note, channel) in voice_info.iter().take(3) {
-        println!("       Voice {}: state={:?}, note={:?}, channel={}", id, state, note, channel);
+        println!(
+            "       Voice {}: state={:?}, note={:?}, channel={}",
+            id, state, note, channel
+        );
     }
 
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -361,14 +408,14 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     let chord_times = [0.0, 2.0, 4.0, 6.0];
     let chord_progressions = [
         vec![60, 64, 67, 72], // C Major
-        vec![57, 60, 64, 69], // A Minor  
+        vec![57, 60, 64, 69], // A Minor
         vec![58, 62, 65, 70], // Bb Major
         vec![67, 71, 74, 79], // G Major
     ];
 
     for (i, &start_time) in chord_times.iter().enumerate() {
         let chord = &chord_progressions[i % chord_progressions.len()];
-        
+
         for &note_num in chord {
             notes.push(SimpleNote {
                 start_time,
@@ -395,8 +442,11 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let sequence = SimpleSequence { notes, tempo: 120 };
-    println!("▶️  Playing chord progression with {} total notes (up to 8 simultaneous)", sequence.notes.len());
-    
+    println!(
+        "▶️  Playing chord progression with {} total notes (up to 8 simultaneous)",
+        sequence.notes.len()
+    );
+
     player.play_polyphonic(sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
@@ -406,17 +456,17 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut notes = Vec::new();
     let arp_pattern = [60, 64, 67, 72, 76, 79, 84, 88]; // C Major arpeggio
-    
+
     // Create overlapping fast arpeggios
     for sequence in 0..4 {
         let base_time = sequence as f64 * 1.0;
-        
+
         for (i, &note_num) in arp_pattern.iter().enumerate() {
             notes.push(SimpleNote {
                 start_time: base_time + (i as f64 * 0.1), // Very fast notes every 100ms
-                duration: 0.8, // Long enough to create overlaps
+                duration: 0.8,                            // Long enough to create overlaps
                 note: Some(note_num + (sequence * 12) as u8), // Transpose each sequence
-                velocity: Some(90 + (i % 4) as u8 * 10), // Varying velocities
+                velocity: Some(90 + (i % 4) as u8 * 10),  // Varying velocities
                 preset_name: Some("Prophet Lead".to_string()),
                 ..Default::default()
             });
@@ -424,8 +474,11 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let sequence = SimpleSequence { notes, tempo: 120 };
-    println!("▶️  Playing fast arpeggios with {} notes (testing voice stealing)", sequence.notes.len());
-    
+    println!(
+        "▶️  Playing fast arpeggios with {} notes (testing voice stealing)",
+        sequence.notes.len()
+    );
+
     player.play_polyphonic(sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
@@ -433,54 +486,54 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n🎛️  Test 4: Mixed Audio Modes");
     println!("Testing simultaneous MIDI, presets, R2D2, and synthesis...");
 
-    let mut notes = Vec::new();
-
-    // MIDI drum pattern
-    notes.push(SimpleNote {
-        start_time: 0.0,
-        duration: 0.1,
-        note: Some(36), // Kick
-        velocity: Some(120),
-        instrument: Some(0), // Standard kit (0-127 range)
-        channel: 9,      // MIDI drum channel
-        ..Default::default()
-    });
-
-    // Preset bass
-    notes.push(SimpleNote {
-        start_time: 0.0,
-        duration: 1.0,
-        note: Some(48),
-        velocity: Some(90),
-        preset_name: Some("Jupiter Bass".to_string()),
-        ..Default::default()
-    });
-
-    // R2D2 expression
-    notes.push(SimpleNote {
-        start_time: 0.5,
-        duration: 0.8,
-        r2d2_emotion: Some("Excited".to_string()),
-        r2d2_intensity: Some(0.8),
-        r2d2_complexity: Some(3),
-        ..Default::default()
-    });
-
-    // Custom synthesis
-    notes.push(SimpleNote {
-        start_time: 1.0,
-        duration: 1.5,
-        synth_type: Some("sawtooth".to_string()),
-        synth_frequency: Some(440.0),
-        synth_amplitude: Some(0.5),
-        synth_filter_cutoff: Some(1200.0),
-        synth_reverb: Some(0.3),
-        ..Default::default()
-    });
+    let notes = vec![
+        // MIDI drum pattern
+        SimpleNote {
+            start_time: 0.0,
+            duration: 0.1,
+            note: Some(36), // Kick
+            velocity: Some(120),
+            instrument: Some(0), // Standard kit (0-127 range)
+            channel: 9,          // MIDI drum channel
+            ..Default::default()
+        },
+        // Preset bass
+        SimpleNote {
+            start_time: 0.0,
+            duration: 1.0,
+            note: Some(48),
+            velocity: Some(90),
+            preset_name: Some("Jupiter Bass".to_string()),
+            ..Default::default()
+        },
+        // R2D2 expression
+        SimpleNote {
+            start_time: 0.5,
+            duration: 0.8,
+            r2d2_emotion: Some("Excited".to_string()),
+            r2d2_intensity: Some(0.8),
+            r2d2_complexity: Some(3),
+            ..Default::default()
+        },
+        // Custom synthesis
+        SimpleNote {
+            start_time: 1.0,
+            duration: 1.5,
+            synth_type: Some("sawtooth".to_string()),
+            synth_frequency: Some(440.0),
+            synth_amplitude: Some(0.5),
+            synth_filter_cutoff: Some(1200.0),
+            synth_reverb: Some(0.3),
+            ..Default::default()
+        },
+    ];
 
     let sequence = SimpleSequence { notes, tempo: 120 };
-    println!("▶️  Playing mixed audio sequence with {} notes (MIDI + Presets + R2D2 + Synthesis)", sequence.notes.len());
-    
+    println!(
+        "▶️  Playing mixed audio sequence with {} notes (MIDI + Presets + R2D2 + Synthesis)",
+        sequence.notes.len()
+    );
+
     player.play_polyphonic(sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
@@ -501,9 +554,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
 /// Test DX7 specifically with debugging output
 async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Debugging DX7 Slap Bass - Testing all components");
-    
-    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
-    
+
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+
     // Test 1: Simple FM (for comparison)
     println!("\n1️⃣ Testing basic FM synthesis for comparison:");
     let fm_sequence = SimpleSequence {
@@ -519,7 +573,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
     };
     player.play_enhanced_mixed(fm_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-    
+
     // Test 2: DX7 Slap Bass preset (suspected issue)
     println!("\n2️⃣ Testing DX7 Slap Bass preset:");
     let dx7_sequence = SimpleSequence {
@@ -535,7 +589,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
     };
     player.play_enhanced_mixed(dx7_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-    
+
     // Test 3: Check if other presets work
     println!("\n3️⃣ Testing Minimoog Bass for comparison:");
     let moog_sequence = SimpleSequence {
@@ -551,7 +605,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
     };
     player.play_enhanced_mixed(moog_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-    
+
     // Test 4: DX7 Keys preset (to see if all DX7FM presets have issues)
     println!("\n4️⃣ Testing DX7 E.Piano preset:");
     let dx7_keys_sequence = SimpleSequence {
@@ -567,10 +621,12 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
     };
     player.play_enhanced_mixed(dx7_keys_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-    
+
     println!("\n✅ DX7 debugging test complete!");
-    println!("If you didn't hear the DX7 presets but heard the others, there's a DX7FM synthesis issue.");
-    
+    println!(
+        "If you didn't hear the DX7 presets but heard the others, there's a DX7FM synthesis issue."
+    );
+
     Ok(())
 }
 
@@ -579,7 +635,8 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
     println!("🌊 Testing Enhanced Pad Presets - Authenticity Improvements!");
     println!("This will showcase the improved vintage character...\n");
 
-    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 1: Enhanced JP-8 Strings with authentic analog warmth
     println!("🎵 Test 1: Enhanced JP-8 Strings with authentic analog warmth/movement");
@@ -727,7 +784,8 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔊 Testing Volume Consistency Across Preset Categories");
     println!("This will test standardized amplitude levels...\n");
 
-    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test same note (C4=60) across different preset categories
     let test_note = 60; // C4
