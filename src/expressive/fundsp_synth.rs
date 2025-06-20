@@ -235,14 +235,20 @@ impl FunDSPSynth {
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
 
-            // Attack click component
-            let click_envelope = (-t * 20.0 * punch).exp();
+            // Attack click component with improved punch scaling
+            let click_decay_rate = 15.0 + punch * 25.0; // Punch affects click sharpness
+            let click_envelope = (-t * click_decay_rate).exp();
             let click_component =
-                (2.0 * std::f32::consts::PI * click_freq * t).sin() * click_envelope * punch;
+                (2.0 * std::f32::consts::PI * click_freq * t).sin() * click_envelope * punch * 0.5;
 
-            // Body resonant component with exponential pitch decay
-            let body_envelope = (-t * (6.0 / sustain.max(0.1))).exp();
-            let body_freq_sweep = body_freq * (1.0 + 2.0 * (-t * 8.0).exp());
+            // Body resonant component with improved pitch sweep
+            let sustain_clamped = sustain.max(0.1);
+            let body_decay_rate = 3.0 + (2.0 / sustain_clamped); // Sustain controls body decay
+            let body_envelope = (-t * body_decay_rate).exp();
+            
+            // Improved pitch sweep for more realistic kick character
+            let pitch_sweep_factor = 3.0 * (-t * 10.0).exp(); // Faster pitch drop
+            let body_freq_sweep = body_freq * (1.0 + pitch_sweep_factor);
             let body_component =
                 (2.0 * std::f32::consts::PI * body_freq_sweep * t).sin() * body_envelope;
 
@@ -267,7 +273,12 @@ impl FunDSPSynth {
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
-            let envelope_value = (-t * (12.0 + snap * 8.0)).exp();
+            // Improved snare envelope: very fast attack, snap controls decay sharpness
+            let attack_phase = 0.001; // 1ms attack
+            let attack_env = if t < attack_phase { t / attack_phase } else { 1.0 };
+            let decay_rate = 8.0 + snap * 12.0; // Snap controls how sharp the decay is
+            let decay_env = (-t * decay_rate).exp();
+            let envelope_value = attack_env * decay_env;
 
             // Tonal component
             let tonal = (2.0 * std::f32::consts::PI * tone_freq * t).sin() * (1.0 - noise_amount);
@@ -308,7 +319,12 @@ impl FunDSPSynth {
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
-            let envelope_value = (-t * (6.0 + decay * 4.0)).exp();
+            // Improved hi-hat envelope: faster attack, controllable decay
+            let attack_phase = 0.002; // 2ms attack
+            let attack_env = if t < attack_phase { t / attack_phase } else { 1.0 };
+            let decay_rate = 8.0 + (1.0 / decay.max(0.01)) * 5.0; // More responsive decay control
+            let decay_env = (-t * decay_rate).exp();
+            let envelope_value = attack_env * decay_env;
 
             // Multiple metallic frequencies
             let metallic1 = (2.0 * std::f32::consts::PI * freq1 * t).sin() * (0.4 * metallic);
@@ -338,15 +354,51 @@ impl FunDSPSynth {
         amplitude: f32,
         sample_count: usize,
     ) -> Result<Vec<f32>> {
-        // Use hihat with modified parameters for cymbal
-        self.generate_hihat_samples(
-            metallic,
-            size,
-            strike_intensity,
-            base_freq,
-            amplitude,
-            sample_count,
-        )
+        let mut samples = Vec::with_capacity(sample_count);
+
+        // Size affects fundamental frequencies (larger cymbal = lower frequencies)
+        let fundamental = base_freq * (0.5 + size * 0.5);
+        
+        // More complex harmonic series for cymbal vs hi-hat
+        let freq1 = fundamental;
+        let freq2 = fundamental * 1.593; // Slightly inharmonic ratio
+        let freq3 = fundamental * 2.135;
+        let freq4 = fundamental * std::f32::consts::E; // e
+        let freq5 = fundamental * std::f32::consts::PI; // π
+        let freq6 = fundamental * 4.236; // Additional high harmonic
+
+        for i in 0..sample_count {
+            let t = i as f32 / self.sample_rate;
+            
+            // Cymbal envelope: Sharp attack, long decay (different from hi-hat)
+            let decay_rate = 1.0 + size * 2.0; // Larger cymbals decay slower
+            let envelope_value = (-t * decay_rate).exp();
+
+            // Complex harmonic content with different amplitude ratios
+            let harm1 = (2.0 * std::f32::consts::PI * freq1 * t).sin() * (0.3 * metallic);
+            let harm2 = (2.0 * std::f32::consts::PI * freq2 * t).sin() * (0.25 * metallic);
+            let harm3 = (2.0 * std::f32::consts::PI * freq3 * t).sin() * (0.2 * metallic);
+            let harm4 = (2.0 * std::f32::consts::PI * freq4 * t).sin() * (0.15 * metallic);
+            let harm5 = (2.0 * std::f32::consts::PI * freq5 * t).sin() * (0.1 * metallic);
+            let harm6 = (2.0 * std::f32::consts::PI * freq6 * t).sin() * (0.05 * metallic);
+
+            // Shimmer effect for crash character
+            let shimmer_lfo = (2.0 * std::f32::consts::PI * 4.0 * t).sin() * 0.1 + 1.0;
+            
+            // Strike intensity affects initial volume and harmonic content
+            let strike_factor = 0.7 + strike_intensity * 0.3;
+            
+            // Filtered noise for cymbal texture
+            let mut rng = rand::rng();
+            let noise = (rng.random::<f32>() - 0.5) * 2.0;
+            let high_freq_noise = noise * (1.0 - metallic * 0.3) * 0.3;
+
+            let harmonic_sum = (harm1 + harm2 + harm3 + harm4 + harm5 + harm6) * shimmer_lfo;
+            let sample = (harmonic_sum + high_freq_noise) * envelope_value * amplitude * strike_factor;
+            samples.push(sample);
+        }
+
+        Ok(samples)
     }
 
     /// FM synthesis for complex harmonic content

@@ -88,6 +88,10 @@ pub enum Commands {
     #[command(name = "test-polyphony")]
     TestPolyphony,
 
+    /// Test drum synthesis
+    #[command(name = "test-drums")]
+    TestDrums,
+
     /// Debug DX7 synthesis issues
     #[command(name = "debug-dx7")]
     DebugDX7,
@@ -119,6 +123,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::TestPolyphony) => {
             test_polyphony_validation().await?;
+        }
+        Some(Commands::TestDrums) => {
+            test_drum_synthesis().await?;
         }
         Some(Commands::DebugDX7) => {
             test_dx7_debugging().await?;
@@ -957,6 +964,221 @@ impl Default for SimpleNote {
             synth_texture_roughness: None,
         }
     }
+}
+
+/// Test drum synthesis with all available drum types
+async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🥁 Testing Drum Synthesis - All Drum Types!");
+    println!("This will test kick, snare, hi-hat, and cymbal synthesis...\n");
+
+    let player =
+        midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+
+    // Test 1: TR-808 Kick (existing preset)
+    println!("🔥 Test 1: TR-808 Kick - Classic hip-hop kick");
+    let kick_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("TR-808 Kick".to_string()),
+            note: Some(36), // MIDI kick note
+            velocity: Some(127),
+            start_time: 0.0,
+            duration: 1.0,
+            channel: 9, // MIDI drum channel
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(kick_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
+
+    // Test 2: TR-909 Snare (existing preset)
+    println!("🔥 Test 2: TR-909 Snare - Techno snare with snap");
+    let snare_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("TR-909 Snare".to_string()),
+            note: Some(38), // MIDI snare note
+            velocity: Some(120),
+            start_time: 0.0,
+            duration: 0.5,
+            channel: 9,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(snare_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(700)).await;
+
+    // Test 3: TR-909 Hi-Hat (new preset)
+    println!("🔥 Test 3: TR-909 Hi-Hat - Sharp, metallic hi-hat");
+    let hihat_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("TR-909 Hi-Hat".to_string()),
+            note: Some(42), // MIDI closed hi-hat
+            velocity: Some(100),
+            start_time: 0.0,
+            duration: 0.15,
+            channel: 9,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(hihat_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+    // Test 4: Crash Cymbal (new preset)
+    println!("🔥 Test 4: Crash Cymbal - Bright crash with long decay");
+    let cymbal_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("Crash Cymbal".to_string()),
+            note: Some(49), // MIDI crash cymbal
+            velocity: Some(120),
+            start_time: 0.0,
+            duration: 2.0,
+            channel: 9,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(cymbal_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(2200)).await;
+
+    // Test 4b: TR-808 Hi-Hat (new preset)
+    println!("🔥 Test 4b: TR-808 Hi-Hat - Classic 808 hi-hat");
+    let hihat808_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("TR-808 Hi-Hat".to_string()),
+            note: Some(42),
+            velocity: Some(110),
+            start_time: 0.0,
+            duration: 0.08,
+            channel: 9,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(hihat808_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+
+    // Test 5: Custom kick parameters
+    println!("🔥 Test 5: Custom Kick Parameters - Punchy 808");
+    let custom_kick_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            synth_type: Some("kick".to_string()),
+            synth_frequency: Some(50.0), // Deep kick
+            synth_amplitude: Some(0.9),
+            start_time: 0.0,
+            duration: 1.2,
+            channel: 9,
+            note_type: "midi".to_string(),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(custom_kick_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1400)).await;
+
+    // Test 6: Drum pattern - All together
+    println!("🔥 Test 6: Basic Drum Pattern - All drums together");
+    let pattern_sequence = SimpleSequence {
+        notes: vec![
+            // Kick on beats 1 and 3
+            SimpleNote {
+                preset_name: Some("TR-808 Kick".to_string()),
+                note: Some(36),
+                velocity: Some(127),
+                start_time: 0.0,
+                duration: 0.3,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("TR-808 Kick".to_string()),
+                note: Some(36),
+                velocity: Some(110),
+                start_time: 1.0,
+                duration: 0.3,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            // Snare on beats 2 and 4
+            SimpleNote {
+                preset_name: Some("TR-909 Snare".to_string()),
+                note: Some(38),
+                velocity: Some(120),
+                start_time: 0.5,
+                duration: 0.2,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("TR-909 Snare".to_string()),
+                note: Some(38),
+                velocity: Some(100),
+                start_time: 1.5,
+                duration: 0.2,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            // Hi-hats on eighth notes
+            SimpleNote {
+                preset_name: Some("TR-808 Hi-Hat".to_string()),
+                note: Some(42),
+                velocity: Some(90),
+                start_time: 0.25,
+                duration: 0.08,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("TR-808 Hi-Hat".to_string()),
+                note: Some(42),
+                velocity: Some(70),
+                start_time: 0.75,
+                duration: 0.08,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("TR-808 Hi-Hat".to_string()),
+                note: Some(42),
+                velocity: Some(85),
+                start_time: 1.25,
+                duration: 0.08,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("TR-808 Hi-Hat".to_string()),
+                note: Some(42),
+                velocity: Some(65),
+                start_time: 1.75,
+                duration: 0.08,
+                channel: 9,
+                note_type: "midi".to_string(),
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(pattern_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+
+    println!("✅ Drum synthesis test completed!");
+    println!("If any drums were silent or too quiet, there may be synthesis issues to investigate.");
+
+    Ok(())
 }
 
 #[cfg(test)]
