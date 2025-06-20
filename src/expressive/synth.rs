@@ -452,17 +452,17 @@ impl ExpressiveSynth {
             } => {
                 // Enhanced DX7-style FM synthesis with all active operators
                 let mut output = 0.0;
-                
+
                 // Use up to 3 operators for more authentic DX7 sound
                 for (i, operator) in operators.iter().take(3).enumerate() {
                     // Skip operators with zero output level (inactive)
                     if operator.output_level <= 0.0 {
                         continue;
                     }
-                    
+
                     let op_freq = freq * operator.frequency_ratio;
                     let op_envelope = self.calculate_operator_envelope(t, &operator.envelope);
-                    
+
                     if i == 0 {
                         // First operator is always a carrier
                         let phase = 2.0 * std::f32::consts::PI * op_freq * t + operator.detune;
@@ -471,21 +471,25 @@ impl ExpressiveSynth {
                         // Additional operators can be carriers or modulators
                         // For simplicity, we'll add them as additional carriers with slight phase modulation
                         let phase = 2.0 * std::f32::consts::PI * op_freq * t + operator.detune;
-                        
+
                         // If frequency ratio is high (>10), treat as modulator
                         if operator.frequency_ratio > 10.0 {
                             // High frequency operator acts as modulator
-                            let modulator_signal = phase.sin() * operator.output_level * op_envelope * 0.5;
+                            let modulator_signal =
+                                phase.sin() * operator.output_level * op_envelope * 0.5;
                             // Apply modulation to the fundamental
                             let carrier_phase = 2.0 * std::f32::consts::PI * freq * t;
-                            output += (carrier_phase + modulator_signal).sin() * operator.output_level * op_envelope * 0.5;
+                            output += (carrier_phase + modulator_signal).sin()
+                                * operator.output_level
+                                * op_envelope
+                                * 0.5;
                         } else {
                             // Low frequency operator acts as additional carrier
                             output += phase.sin() * operator.output_level * op_envelope;
                         }
                     }
                 }
-                
+
                 // Normalize output to prevent clipping with multiple operators
                 output * 0.8
             }

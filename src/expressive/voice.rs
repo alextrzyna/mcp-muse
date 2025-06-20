@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::expressive::{SynthParams, SynthType};
+use anyhow::Result;
 
 /// Maximum number of simultaneous voices
 pub const MAX_VOICES: usize = 32;
@@ -78,7 +78,6 @@ impl Default for FilterState {
         }
     }
 }
-
 
 /// Real-time polyphonic voice manager
 pub struct PolyphonicVoiceManager {
@@ -174,7 +173,11 @@ impl PolyphonicVoiceManager {
     #[allow(dead_code)]
     pub fn release_note(&mut self, note: u8, channel: u8) {
         for voice in &mut self.voices {
-            if voice.note == Some(note) && voice.channel == channel && voice.state != VoiceState::Release && voice.state != VoiceState::Idle {
+            if voice.note == Some(note)
+                && voice.channel == channel
+                && voice.state != VoiceState::Release
+                && voice.state != VoiceState::Idle
+            {
                 voice.state = VoiceState::Release;
                 tracing::debug!(
                     "Released voice {} for note {} on channel {}",

@@ -89,15 +89,18 @@ impl PresetLibrary {
         for (preset_name, preset) in &self.presets {
             let preset_lower = preset_name.to_lowercase();
             let preset_words: Vec<&str> = preset_lower.split_whitespace().collect();
-            
+
             // Check if most key words match
             let mut matches = 0;
             for word in &name_words {
-                if preset_words.iter().any(|pw| pw.contains(word) || word.contains(pw)) {
+                if preset_words
+                    .iter()
+                    .any(|pw| pw.contains(word) || word.contains(pw))
+                {
                     matches += 1;
                 }
             }
-            
+
             // If most words match, consider it a match
             if matches >= name_words.len().min(preset_words.len()) {
                 return Some(preset);

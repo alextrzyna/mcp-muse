@@ -245,7 +245,7 @@ impl FunDSPSynth {
             let sustain_clamped = sustain.max(0.1);
             let body_decay_rate = 3.0 + (2.0 / sustain_clamped); // Sustain controls body decay
             let body_envelope = (-t * body_decay_rate).exp();
-            
+
             // Improved pitch sweep for more realistic kick character
             let pitch_sweep_factor = 3.0 * (-t * 10.0).exp(); // Faster pitch drop
             let body_freq_sweep = body_freq * (1.0 + pitch_sweep_factor);
@@ -275,7 +275,11 @@ impl FunDSPSynth {
             let t = i as f32 / self.sample_rate;
             // Improved snare envelope: very fast attack, snap controls decay sharpness
             let attack_phase = 0.001; // 1ms attack
-            let attack_env = if t < attack_phase { t / attack_phase } else { 1.0 };
+            let attack_env = if t < attack_phase {
+                t / attack_phase
+            } else {
+                1.0
+            };
             let decay_rate = 8.0 + snap * 12.0; // Snap controls how sharp the decay is
             let decay_env = (-t * decay_rate).exp();
             let envelope_value = attack_env * decay_env;
@@ -321,7 +325,11 @@ impl FunDSPSynth {
             let t = i as f32 / self.sample_rate;
             // Improved hi-hat envelope: faster attack, controllable decay
             let attack_phase = 0.002; // 2ms attack
-            let attack_env = if t < attack_phase { t / attack_phase } else { 1.0 };
+            let attack_env = if t < attack_phase {
+                t / attack_phase
+            } else {
+                1.0
+            };
             let decay_rate = 8.0 + (1.0 / decay.max(0.01)) * 5.0; // More responsive decay control
             let decay_env = (-t * decay_rate).exp();
             let envelope_value = attack_env * decay_env;
@@ -358,7 +366,7 @@ impl FunDSPSynth {
 
         // Size affects fundamental frequencies (larger cymbal = lower frequencies)
         let fundamental = base_freq * (0.5 + size * 0.5);
-        
+
         // More complex harmonic series for cymbal vs hi-hat
         let freq1 = fundamental;
         let freq2 = fundamental * 1.593; // Slightly inharmonic ratio
@@ -369,7 +377,7 @@ impl FunDSPSynth {
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
-            
+
             // Cymbal envelope: Sharp attack, long decay (different from hi-hat)
             let decay_rate = 1.0 + size * 2.0; // Larger cymbals decay slower
             let envelope_value = (-t * decay_rate).exp();
@@ -384,17 +392,18 @@ impl FunDSPSynth {
 
             // Shimmer effect for crash character
             let shimmer_lfo = (2.0 * std::f32::consts::PI * 4.0 * t).sin() * 0.1 + 1.0;
-            
+
             // Strike intensity affects initial volume and harmonic content
             let strike_factor = 0.7 + strike_intensity * 0.3;
-            
+
             // Filtered noise for cymbal texture
             let mut rng = rand::rng();
             let noise = (rng.random::<f32>() - 0.5) * 2.0;
             let high_freq_noise = noise * (1.0 - metallic * 0.3) * 0.3;
 
             let harmonic_sum = (harm1 + harm2 + harm3 + harm4 + harm5 + harm6) * shimmer_lfo;
-            let sample = (harmonic_sum + high_freq_noise) * envelope_value * amplitude * strike_factor;
+            let sample =
+                (harmonic_sum + high_freq_noise) * envelope_value * amplitude * strike_factor;
             samples.push(sample);
         }
 
@@ -555,7 +564,7 @@ impl FunDSPSynth {
 
         for i in 0..sample_count {
             let t = i as f32 / self.sample_rate;
-            
+
             // Proper pad envelope - slow attack, long sustain
             let attack_time = duration * 0.2; // 20% of duration for attack
             let envelope_value = if t < attack_time {
@@ -581,8 +590,10 @@ impl FunDSPSynth {
             // Add harmonic evolution over time
             let evolution_factor = 1.0 + (t * harmonic_evolution * 0.1).sin() * 0.2;
 
-            let mut sample = (fundamental + harmonic2 * evolution_factor + harmonic3 + harmonic4) 
-                * envelope_value * amplitude * movement_factor;
+            let mut sample = (fundamental + harmonic2 * evolution_factor + harmonic3 + harmonic4)
+                * envelope_value
+                * amplitude
+                * movement_factor;
 
             // Apply simple lowpass filter with space parameter
             if space > 0.1 {

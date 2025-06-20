@@ -156,7 +156,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 0: Specific test for reported non-working presets
     println!("🔧 Test 0: Testing reported problematic presets");
-    
+
     println!("  🎹 Testing JP-8 Strings...");
     let jp8_sequence = SimpleSequence {
         notes: vec![SimpleNote {
@@ -190,7 +190,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
     };
     player.play_enhanced_mixed(dx7_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
-    
+
     println!("✅ Problematic preset test completed\n");
 
     // Test 1: Specific preset by name
@@ -1176,7 +1176,9 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
 
     println!("✅ Drum synthesis test completed!");
-    println!("If any drums were silent or too quiet, there may be synthesis issues to investigate.");
+    println!(
+        "If any drums were silent or too quiet, there may be synthesis issues to investigate."
+    );
 
     Ok(())
 }

@@ -89,7 +89,7 @@ impl PresetLibrary {
             synth_params: SynthParams {
                 synth_type: SynthType::HiHat {
                     metallic: 0.8,
-                    decay: 0.1,     // Short, crisp decay
+                    decay: 0.1,      // Short, crisp decay
                     brightness: 2.5, // High frequency content
                 },
                 frequency: 8000.0,
@@ -121,8 +121,8 @@ impl PresetLibrary {
             ],
             synth_params: SynthParams {
                 synth_type: SynthType::Cymbal {
-                    size: 0.7,           // Medium-large cymbal
-                    metallic: 0.9,       // Very metallic
+                    size: 0.7,             // Medium-large cymbal
+                    metallic: 0.9,         // Very metallic
                     strike_intensity: 0.8, // Hard strike
                 },
                 frequency: 3000.0,
@@ -155,7 +155,7 @@ impl PresetLibrary {
             synth_params: SynthParams {
                 synth_type: SynthType::HiHat {
                     metallic: 0.6,
-                    decay: 0.05,    // Very short 808 style
+                    decay: 0.05,     // Very short 808 style
                     brightness: 3.0, // Bright but not as harsh as 909
                 },
                 frequency: 9000.0,
