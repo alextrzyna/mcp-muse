@@ -330,6 +330,7 @@ impl MidiPlayer {
                 crate::expressive::SynthType::Triangle => "triangle",
                 crate::expressive::SynthType::Noise { .. } => "noise",
                 crate::expressive::SynthType::FM { .. } => "fm",
+                crate::expressive::SynthType::DX7FM { .. } => "dx7fm",
                 crate::expressive::SynthType::Granular { .. } => "granular",
                 crate::expressive::SynthType::Wavetable { .. } => "wavetable",
                 crate::expressive::SynthType::Kick { .. } => "kick",
@@ -411,10 +412,10 @@ impl MidiPlayer {
         Ok(())
     }
 
-    /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes
+    /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes (pre-computed approach)
     pub fn play_enhanced_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
         tracing::info!(
-            "Playing enhanced mixed sequence with {} notes",
+            "Playing enhanced mixed sequence with {} notes (pre-computed approach)",
             sequence.notes.len()
         );
 
@@ -583,6 +584,183 @@ impl MidiPlayer {
 
         Ok(())
     }
+
+    /// Play an enhanced mixed sequence with real-time polyphonic voice management
+    pub fn play_polyphonic(&self, sequence: SimpleSequence) -> Result<(), String> {
+        tracing::info!(
+            "Playing polyphonic sequence with {} notes using real-time voice management",
+            sequence.notes.len()
+        );
+
+        if sequence.notes.is_empty() {
+            tracing::warn!("No notes to play - sequence is empty");
+            return Ok(());
+        }
+
+        // Process each note and apply presets if specified
+        let mut processed_notes = Vec::new();
+        for mut note in sequence.notes {
+            // Apply preset configuration if present
+            if let Err(e) = self.apply_preset_to_note(&mut note) {
+                tracing::warn!("Failed to apply preset to note: {}", e);
+                // Continue with the note without preset - don't fail completely
+            }
+            processed_notes.push(note);
+        }
+
+        // Separate MIDI, R2D2, and synthesis notes
+        let mut midi_notes = Vec::new();
+        let mut r2d2_events = Vec::new();
+        let mut synthesis_events = Vec::new();
+
+        for note in processed_notes {
+            if note.note_type == "r2d2" {
+                // Handle R2D2 notes - convert to RealtimeR2D2Event
+                if let Err(e) = note.validate_r2d2() {
+                    return Err(format!("Invalid R2D2 note: {}", e));
+                }
+
+                let emotion_str = note
+                    .r2d2_emotion
+                    .as_ref()
+                    .ok_or("R2D2 emotion is required")?;
+                let emotion = match emotion_str.as_str() {
+                    "Happy" => R2D2Emotion::Happy,
+                    "Sad" => R2D2Emotion::Sad,
+                    "Excited" => R2D2Emotion::Excited,
+                    "Worried" => R2D2Emotion::Worried,
+                    "Curious" => R2D2Emotion::Curious,
+                    "Affirmative" => R2D2Emotion::Affirmative,
+                    "Negative" => R2D2Emotion::Negative,
+                    "Surprised" => R2D2Emotion::Surprised,
+                    "Thoughtful" => R2D2Emotion::Thoughtful,
+                    _ => return Err(format!("Unknown R2D2 emotion: {}", emotion_str)),
+                };
+
+                let expression = R2D2Expression {
+                    emotion,
+                    intensity: note.r2d2_intensity.unwrap_or(0.7),
+                    duration: note.duration as f32,
+                    phrase_complexity: note.r2d2_complexity.unwrap_or(2),
+                    pitch_range: if let Some(range) = &note.r2d2_pitch_range {
+                        if range.len() == 2 {
+                            (range[0], range[1])
+                        } else {
+                            (300.0, 800.0)
+                        }
+                    } else {
+                        (300.0, 800.0)
+                    },
+                    context: note.r2d2_context.clone(),
+                };
+
+                r2d2_events.push(crate::midi::RealtimeR2D2Event {
+                    start_time: note.start_time,
+                    expression,
+                    voice_id: None,
+                });
+            } else if note.is_synthesis() || note.is_preset() {
+                // Handle synthesis notes (including presets) - convert to RealtimeSynthEvent
+                synthesis_events.push(crate::midi::RealtimeSynthEvent {
+                    start_time: note.start_time,
+                    note: note.clone(),
+                    voice_id: None,
+                });
+            } else {
+                // Handle MIDI notes
+                if let Err(e) = note.validate_midi() {
+                    return Err(format!("Invalid MIDI note: {}", e));
+                }
+
+                let midi_note = MidiNote {
+                    note: note.note.unwrap_or(60),
+                    velocity: note.velocity.unwrap_or(64),
+                    start_time: Duration::from_secs_f64(note.start_time),
+                    duration: Duration::from_secs_f64(note.duration),
+                    channel: note.channel,
+                    instrument: note.instrument,
+                    reverb: note.reverb,
+                    chorus: note.chorus,
+                    volume: note.volume,
+                    pan: note.pan,
+                    balance: note.balance,
+                    expression: note.expression,
+                    sustain: note.sustain,
+                };
+
+                midi_notes.push(midi_note);
+            }
+        }
+
+        // Calculate total duration
+        let midi_end_time = if !midi_notes.is_empty() {
+            midi_notes
+                .iter()
+                .map(|note| note.start_time + note.duration)
+                .max()
+                .unwrap_or(Duration::from_secs(1))
+        } else {
+            Duration::from_secs(0)
+        };
+
+        let r2d2_end_time = if !r2d2_events.is_empty() {
+            r2d2_events
+                .iter()
+                .map(|event| {
+                    Duration::from_secs_f64(event.start_time + event.expression.duration as f64)
+                })
+                .max()
+                .unwrap_or(Duration::from_secs(1))
+        } else {
+            Duration::from_secs(0)
+        };
+
+        let synthesis_end_time = if !synthesis_events.is_empty() {
+            synthesis_events
+                .iter()
+                .map(|event| Duration::from_secs_f64(event.start_time + event.note.duration))
+                .max()
+                .unwrap_or(Duration::from_secs(1))
+        } else {
+            Duration::from_secs(0)
+        };
+
+        let note_end_time = midi_end_time.max(r2d2_end_time).max(synthesis_end_time);
+        let tail_time = Self::calculate_tail_time(&midi_notes);
+        let total_time = note_end_time + tail_time;
+
+        tracing::info!(
+            "Polyphonic sequence: {} MIDI notes, {} R2D2 events, {} synthesis events, total time: {:.2}s",
+            midi_notes.len(),
+            r2d2_events.len(),
+            synthesis_events.len(),
+            total_time.as_secs_f64()
+        );
+
+        // Create real-time polyphonic audio source
+        let polyphonic_source = crate::midi::RealtimePolyphonicAudioSource::new(
+            midi_notes,
+            synthesis_events,
+            r2d2_events,
+            total_time,
+        )
+        .map_err(|e| format!("Failed to create real-time polyphonic audio source: {}", e))?;
+
+        tracing::info!("Created real-time polyphonic audio source, starting playback");
+        self.sink.append(polyphonic_source);
+        self.sink.play();
+
+        // Wait for playback to complete
+        let wait_time = total_time + Duration::from_millis(200);
+        tracing::info!(
+            "Waiting {:.2}s for polyphonic playback to complete...",
+            wait_time.as_secs_f64()
+        );
+        std::thread::sleep(wait_time);
+
+        tracing::info!("Polyphonic playback completed");
+        Ok(())
+    }
 }
 
 fn find_soundfont() -> Result<PathBuf, String> {
@@ -633,7 +811,7 @@ fn find_soundfont() -> Result<PathBuf, String> {
 }
 
 // OxiSynth-based audio source
-struct OxiSynthSource {
+pub struct OxiSynthSource {
     synth: Synth,
     notes: Vec<MidiNote>,
     sample_rate: u32,
@@ -656,7 +834,7 @@ struct OxiSynthSource {
 }
 
 impl OxiSynthSource {
-    fn new(notes: Vec<MidiNote>, total_duration: Duration) -> Result<Self, String> {
+    pub fn new(notes: Vec<MidiNote>, total_duration: Duration) -> Result<Self, String> {
         let sample_rate = 44100;
 
         // Find and load the SoundFont
@@ -1183,6 +1361,44 @@ impl EnhancedHybridAudioSource {
                 modulator_freq: note.synth_modulator_freq.unwrap_or(440.0),
                 modulation_index: note.synth_modulation_index.unwrap_or(1.0),
             },
+            "dx7fm" => {
+                // Import DX7Operator for default configuration
+                use crate::expressive::DX7Operator;
+
+                SynthType::DX7FM {
+                    algorithm: 1, // Default algorithm
+                    operators: [
+                        // Default 2-operator FM configuration
+                        DX7Operator {
+                            frequency_ratio: 1.0,
+                            output_level: 0.8,
+                            detune: 0.0,
+                            envelope: crate::expressive::EnvelopeParams {
+                                attack: note.synth_attack.unwrap_or(0.01),
+                                decay: note.synth_decay.unwrap_or(0.1),
+                                sustain: note.synth_sustain.unwrap_or(0.7),
+                                release: note.synth_release.unwrap_or(0.3),
+                            },
+                        },
+                        DX7Operator {
+                            frequency_ratio: note.synth_modulator_freq.unwrap_or(440.0) / 440.0, // Convert to ratio
+                            output_level: note.synth_modulation_index.unwrap_or(1.0) * 0.5, // Scale modulation index
+                            detune: 0.0,
+                            envelope: crate::expressive::EnvelopeParams {
+                                attack: 0.001,
+                                decay: 0.1,
+                                sustain: 0.3,
+                                release: 0.2,
+                            },
+                        },
+                        // Unused operators
+                        DX7Operator::default(),
+                        DX7Operator::default(),
+                        DX7Operator::default(),
+                        DX7Operator::default(),
+                    ],
+                }
+            }
             "granular" => SynthType::Granular {
                 grain_size: note.synth_grain_size.unwrap_or(0.1),
                 overlap: 0.5,

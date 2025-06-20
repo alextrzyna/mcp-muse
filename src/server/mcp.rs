@@ -215,14 +215,18 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 **Random Preset Discovery:**
 [{\"preset_random\": true, \"preset_category\": \"bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 1.0}]
 
+**Classic Drum Pattern (808/909 Style):**
+[{\"preset_name\": \"TR-808 Kick\", \"note\": 36, \"velocity\": 127, \"start_time\": 0, \"duration\": 1.0, \"channel\": 9}, {\"preset_name\": \"TR-909 Snare\", \"note\": 38, \"velocity\": 120, \"start_time\": 0.5, \"duration\": 0.3, \"channel\": 9}, {\"preset_name\": \"TR-808 Hi-Hat\", \"note\": 42, \"velocity\": 90, \"start_time\": 0.25, \"duration\": 0.08, \"channel\": 9}, {\"preset_name\": \"TR-808 Hi-Hat\", \"note\": 42, \"velocity\": 70, \"start_time\": 0.75, \"duration\": 0.08, \"channel\": 9}]
+
 **Mixed Vintage + Modern:**
-[{\"preset_name\": \"Analog Wash\", \"note\": 48, \"velocity\": 60, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"Prophet Lead\", \"note\": 72, \"velocity\": 100, \"start_time\": 1.0, \"duration\": 1.0}, {\"synth_type\": \"kick\", \"synth_frequency\": 60, \"start_time\": 0, \"duration\": 0.5}, {\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 3, \"start_time\": 2.0, \"duration\": 1.0}]
+[{\"preset_name\": \"Analog Wash\", \"note\": 48, \"velocity\": 60, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"Prophet Lead\", \"note\": 72, \"velocity\": 100, \"start_time\": 1.0, \"duration\": 1.0}, {\"preset_name\": \"TR-808 Kick\", \"note\": 36, \"velocity\": 127, \"start_time\": 0, \"duration\": 0.5, \"channel\": 9}, {\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 3, \"start_time\": 2.0, \"duration\": 1.0}]
 
 🎛️ **AVAILABLE PRESET CATEGORIES:**
 • **Bass Presets** (10+): Minimoog Bass, TB-303 Acid, Jupiter Bass, Odyssey Bite, TX81Z Lately, Saw Bass, Sub Bass, etc.
 • **Pad Presets** (10+): JP-8 Strings, OB Brass, Analog Wash, D-50 Fantasia, Crystal Pad, Space Pad, Dream Pad, etc.
 • **Lead Presets**: Prophet Lead, Moog Lead, Sync Lead, and more coming soon
 • **Keys Presets**: DX7 E.Piano, Rhodes Classic, and more coming soon
+• **Drum Presets** (5+): TR-808 Kick, TR-909 Snare, TR-909 Hi-Hat, TR-808 Hi-Hat, Crash Cymbal - authentic drum machine sounds
 • **Effects Presets**: Sci-Fi Zap, Sweep Up for sound design
 
 💡 **PRESET USAGE TIPS:**
@@ -720,7 +724,7 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
 
     // Choose the appropriate playback method
     let playback_result = if has_synthesis || has_r2d2 || has_presets {
-        // Mixed/Hybrid sequence - use enhanced hybrid audio engine
+        // Mixed/Hybrid sequence - use real-time polyphonic audio engine for better polyphony
         let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
             (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
             (true, true, true, false) => "MIDI + R2D2 + Synthesis",
@@ -738,8 +742,8 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
             (false, false, false, true) => "Presets only",
             _ => "Mixed mode",
         };
-        tracing::info!("Using enhanced hybrid mode playback ({})", mode);
-        player.play_enhanced_mixed(sequence)
+        tracing::info!("Using real-time polyphonic mode playback ({})", mode);
+        player.play_polyphonic(sequence)
     } else {
         // Pure MIDI sequence - use traditional MIDI player
         tracing::info!("Using pure MIDI playback");

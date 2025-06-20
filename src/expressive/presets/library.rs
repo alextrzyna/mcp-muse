@@ -69,9 +69,45 @@ impl PresetLibrary {
         library
     }
 
-    /// Load a preset by name
+    /// Load a preset by name with fuzzy matching
     pub fn load_preset(&self, name: &str) -> Option<&ClassicSynthPreset> {
-        self.presets.get(name)
+        // First try exact match
+        if let Some(preset) = self.presets.get(name) {
+            return Some(preset);
+        }
+
+        // Try case-insensitive match
+        let name_lower = name.to_lowercase();
+        for (preset_name, preset) in &self.presets {
+            if preset_name.to_lowercase() == name_lower {
+                return Some(preset);
+            }
+        }
+
+        // Try fuzzy matching - check if the input contains key words from preset names
+        let name_words: Vec<&str> = name_lower.split_whitespace().collect();
+        for (preset_name, preset) in &self.presets {
+            let preset_lower = preset_name.to_lowercase();
+            let preset_words: Vec<&str> = preset_lower.split_whitespace().collect();
+
+            // Check if most key words match
+            let mut matches = 0;
+            for word in &name_words {
+                if preset_words
+                    .iter()
+                    .any(|pw| pw.contains(word) || word.contains(pw))
+                {
+                    matches += 1;
+                }
+            }
+
+            // If most words match, consider it a match
+            if matches >= name_words.len().min(preset_words.len()) {
+                return Some(preset);
+            }
+        }
+
+        None
     }
 
     /// Get all presets in a category
