@@ -163,8 +163,8 @@ impl PresetLibrary {
                 duration: 1.0,
                 envelope: PresetLibrary::create_envelope(0.02, 0.4, 0.8, 0.6),
                 filter: Some(PresetLibrary::create_filter(
-                    650.0,  // Lower cutoff for warm character
-                    0.1,    // Minimal resonance for authentic warm Jupiter bass
+                    750.0,  // Slightly higher cutoff for Jupiter-8 character
+                    0.3,    // Moderate resonance for authentic Jupiter "aggressive but warm" character
                     FilterType::LowPass,
                 )),
                 effects: vec![
@@ -251,7 +251,7 @@ impl PresetLibrary {
                     ],
                 },
                 frequency: 55.0,  // Bass frequency
-                amplitude: 0.6,   // Slightly higher amplitude since modulation is reduced
+                amplitude: 0.8,   // Standardized bass level
                 duration: 1.2,
                 envelope: PresetLibrary::create_envelope(0.001, 0.06, 0.6, 4.0), // Extended release for smooth note transitions
                 filter: Some(PresetLibrary::create_filter(

@@ -87,6 +87,18 @@ pub enum Commands {
     /// Test polyphony validation
     #[command(name = "test-polyphony")]
     TestPolyphony,
+
+    /// Debug DX7 synthesis issues
+    #[command(name = "debug-dx7")]
+    DebugDX7,
+
+    /// Test enhanced pad presets
+    #[command(name = "test-pads")]
+    TestPads,
+
+    /// Test volume-corrected presets
+    #[command(name = "test-volumes")]
+    TestVolumes,
 }
 
 #[tokio::main]
@@ -107,6 +119,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::TestPolyphony) => {
             test_polyphony_validation().await?;
+        }
+        Some(Commands::DebugDX7) => {
+            test_dx7_debugging().await?;
+        }
+        Some(Commands::TestPads) => {
+            test_enhanced_pads().await?;
+        }
+        Some(Commands::TestVolumes) => {
+            test_volume_consistency().await?;
         }
         None => {
             // Default behavior: start the MCP server
@@ -473,6 +494,360 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n🎉 ALL POLYPHONY TESTS PASSED!");
     println!("🏆 Real-time polyphonic voice management is fully operational!");
+
+    Ok(())
+}
+
+/// Test DX7 specifically with debugging output
+async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🔧 Debugging DX7 Slap Bass - Testing all components");
+    
+    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+    
+    // Test 1: Simple FM (for comparison)
+    println!("\n1️⃣ Testing basic FM synthesis for comparison:");
+    let fm_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            synth_type: Some("fm".to_string()),
+            synth_frequency: Some(110.0),
+            synth_amplitude: Some(0.8),
+            start_time: 0.0,
+            duration: 1.0,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(fm_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+    
+    // Test 2: DX7 Slap Bass preset (suspected issue)
+    println!("\n2️⃣ Testing DX7 Slap Bass preset:");
+    let dx7_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("DX7 Slap Bass".to_string()),
+            note: Some(48), // C3
+            velocity: Some(127),
+            start_time: 0.0,
+            duration: 2.0,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(dx7_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+    
+    // Test 3: Check if other presets work
+    println!("\n3️⃣ Testing Minimoog Bass for comparison:");
+    let moog_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("Minimoog Bass".to_string()),
+            note: Some(48), // C3
+            velocity: Some(127),
+            start_time: 0.0,
+            duration: 1.0,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(moog_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+    
+    // Test 4: DX7 Keys preset (to see if all DX7FM presets have issues)
+    println!("\n4️⃣ Testing DX7 E.Piano preset:");
+    let dx7_keys_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("DX7 E.Piano".to_string()),
+            note: Some(60), // C4
+            velocity: Some(100),
+            start_time: 0.0,
+            duration: 2.0,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(dx7_keys_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+    
+    println!("\n✅ DX7 debugging test complete!");
+    println!("If you didn't hear the DX7 presets but heard the others, there's a DX7FM synthesis issue.");
+    
+    Ok(())
+}
+
+/// Test enhanced pad presets with authenticity improvements
+async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🌊 Testing Enhanced Pad Presets - Authenticity Improvements!");
+    println!("This will showcase the improved vintage character...\n");
+
+    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+
+    // Test 1: Enhanced JP-8 Strings with authentic analog warmth
+    println!("🎵 Test 1: Enhanced JP-8 Strings with authentic analog warmth/movement");
+    let jp8_sequence = SimpleSequence {
+        notes: vec![
+            SimpleNote {
+                preset_name: Some("JP-8 Strings".to_string()),
+                note: Some(60), // C4
+                velocity: Some(80),
+                start_time: 0.0,
+                duration: 3.0,
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("JP-8 Strings".to_string()),
+                note: Some(64), // E4
+                velocity: Some(75),
+                start_time: 0.0,
+                duration: 3.0,
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("JP-8 Strings".to_string()),
+                note: Some(67), // G4
+                velocity: Some(70),
+                start_time: 0.0,
+                duration: 3.0,
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(jp8_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    // Test 2: Enhanced OB Brass with creamy Oberheim character
+    println!("🎵 Test 2: Enhanced OB Brass with creamy Oberheim character");
+    let ob_sequence = SimpleSequence {
+        notes: vec![
+            SimpleNote {
+                preset_name: Some("OB Brass".to_string()),
+                note: Some(57), // A3
+                velocity: Some(90),
+                start_time: 0.0,
+                duration: 2.5,
+                ..Default::default()
+            },
+            SimpleNote {
+                preset_name: Some("OB Brass".to_string()),
+                note: Some(62), // D4
+                velocity: Some(85),
+                start_time: 0.0,
+                duration: 2.5,
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(ob_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    // Test 3: D-50 Fantasia - Complex LA synthesis
+    println!("🎵 Test 3: D-50 Fantasia with complex LA synthesis character");
+    let d50_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("D-50 Fantasia".to_string()),
+            note: Some(72), // C5
+            velocity: Some(100),
+            start_time: 0.0,
+            duration: 4.0,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(d50_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    // Test 4: Space Pad - Atmospheric texture
+    println!("🎵 Test 4: Space Pad with cosmic atmospheric character");
+    let space_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("Space Pad".to_string()),
+            note: Some(48), // C3
+            velocity: Some(70),
+            start_time: 0.0,
+            duration: 6.0,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(space_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    // Test 5: Mixed pad progression showing authenticity improvements
+    println!("🎵 Test 5: Mixed pad progression - Authentic vintage character showcase");
+    let mixed_sequence = SimpleSequence {
+        notes: vec![
+            // JP-8 Strings foundation
+            SimpleNote {
+                preset_name: Some("JP-8 Strings".to_string()),
+                note: Some(48), // C3
+                velocity: Some(60),
+                start_time: 0.0,
+                duration: 6.0,
+                ..Default::default()
+            },
+            // OB Brass mid-range
+            SimpleNote {
+                preset_name: Some("OB Brass".to_string()),
+                note: Some(60), // C4
+                velocity: Some(70),
+                start_time: 1.0,
+                duration: 4.0,
+                ..Default::default()
+            },
+            // D-50 Fantasia highlight
+            SimpleNote {
+                preset_name: Some("D-50 Fantasia".to_string()),
+                note: Some(72), // C5
+                velocity: Some(80),
+                start_time: 2.0,
+                duration: 3.0,
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(mixed_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    println!("\n✅ Enhanced pad preset testing complete!");
+    println!("🎉 Authenticity improvements showcase finished!");
+    println!("\n🔍 What you should have heard:");
+    println!("   ✅ JP-8 Strings: Warm analog character with subtle movement/detuning");
+    println!("   ✅ OB Brass: Creamy Oberheim texture with rich harmonics");
+    println!("   ✅ D-50 Fantasia: Complex evolving pad with LA synthesis character");
+    println!("   ✅ Space Pad: Cosmic atmospheric texture with heavy reverb");
+    println!("   ✅ Mixed progression: All presets working together polyphonically");
+
+    Ok(())
+}
+
+/// Test volume consistency across preset categories
+async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🔊 Testing Volume Consistency Across Preset Categories");
+    println!("This will test standardized amplitude levels...\n");
+
+    let player = midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
+
+    // Test same note (C4=60) across different preset categories
+    let test_note = 60; // C4
+    let test_velocity = 100;
+    let test_duration = 2.0;
+
+    // Bass presets (should be 0.8)
+    println!("🎸 Testing Bass Presets - Target: Strong & Punchy");
+    println!("🎵 Minimoog Bass (amplitude: 0.8)");
+    let bass_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("Minimoog Bass".to_string()),
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            start_time: 0.0,
+            duration: test_duration,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(bass_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Pad presets (should be 0.75)
+    println!("🌊 Testing Pad Presets - Target: Present but Layerable");
+    println!("🎵 JP-8 Strings (amplitude: 0.75)");
+    let pad_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("JP-8 Strings".to_string()),
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            start_time: 0.0,
+            duration: test_duration,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(pad_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Keys presets (should be 0.8)
+    println!("🎹 Testing Keys Presets - Target: Clear & Present");
+    println!("🎵 DX7 E.Piano (amplitude: 0.8)");
+    let keys_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("DX7 E.Piano".to_string()),
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            start_time: 0.0,
+            duration: test_duration,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(keys_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Effects presets (should be 0.8)
+    println!("⚡ Testing Effects Presets - Target: Noticeable Impact");
+    println!("🎵 Sci-Fi Zap (amplitude: 0.8)");
+    let effects_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("Sci-Fi Zap".to_string()),
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            start_time: 0.0,
+            duration: 0.5, // Shorter for zap
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(effects_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(750)).await;
+
+    // Mixed progression to test layering
+    println!("🎼 Testing Mixed Layering - All Categories Together");
+    let mixed_sequence = SimpleSequence {
+        notes: vec![
+            // Bass foundation
+            SimpleNote {
+                preset_name: Some("Minimoog Bass".to_string()),
+                note: Some(36), // C2
+                velocity: Some(100),
+                start_time: 0.0,
+                duration: 4.0,
+                ..Default::default()
+            },
+            // Pad layer
+            SimpleNote {
+                preset_name: Some("JP-8 Strings".to_string()),
+                note: Some(60), // C4
+                velocity: Some(80),
+                start_time: 0.5,
+                duration: 3.0,
+                ..Default::default()
+            },
+            // Keys melody
+            SimpleNote {
+                preset_name: Some("DX7 E.Piano".to_string()),
+                note: Some(72), // C5
+                velocity: Some(90),
+                start_time: 1.0,
+                duration: 2.0,
+                ..Default::default()
+            },
+        ],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(mixed_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+
+    println!("\n✅ Volume consistency testing complete!");
+    println!("\n📊 Standardized Amplitude Levels:");
+    println!("   🎸 Bass Presets:    0.8   (Strong & Punchy)");
+    println!("   🌊 Pad Presets:     0.75  (Present but Layerable)");
+    println!("   🎹 Keys Presets:    0.8   (Clear & Present)");
+    println!("   ⚡ Effects Presets: 0.8   (Noticeable Impact)");
+    println!("   🥁 Drum Presets:    0.8-0.9 (Percussive Impact)");
+    println!("\n🎯 Result: All presets should now have consistent, audible volume levels!");
+    println!("🔧 Fixed: Pads are no longer too quiet compared to bass presets");
 
     Ok(())
 }

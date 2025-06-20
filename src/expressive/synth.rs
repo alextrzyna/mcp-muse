@@ -974,17 +974,24 @@ impl ExpressiveSynth {
 
         if t < attack {
             // Attack phase: linear rise from 0 to 1
-            t / attack
+            if attack > 0.0 {
+                t / attack
+            } else {
+                1.0  // Instant attack
+            }
         } else if t < attack + decay {
-            // Decay phase: exponential decay from 1 to sustain level
-            let decay_progress = (t - attack) / decay;
-            1.0 - (1.0 - sustain) * decay_progress
+            // Decay phase: exponential decay from 1 to sustain level  
+            if decay > 0.0 {
+                let decay_progress = (t - attack) / decay;
+                1.0 - (1.0 - sustain) * decay_progress
+            } else {
+                sustain  // Instant decay
+            }
         } else {
-            // Sustain/Release phase: hold sustain level then exponential decay
-            // For DX7 operators, we assume immediate release (no sustain hold)
-            let release_start = attack + decay;
-            let release_progress = (t - release_start) / release;
-            sustain * (-release_progress * 3.0).exp() // Exponential decay
+            // Sustain phase: hold sustain level (DX7 operators sustain until note release)
+            // Unlike traditional ADSR, DX7 operators hold sustain until the note ends
+            // Then apply release envelope from note-off time
+            sustain.max(0.0)  // Hold sustain level, ensure non-negative
         }
     }
 

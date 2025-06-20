@@ -51,7 +51,7 @@ impl PresetLibrary {
                     ],
                 },
                 frequency: 440.0,
-                amplitude: 0.4,  // Reduced amplitude to prevent distortion
+                amplitude: 0.8,  // Standardized level for proper audibility
                 duration: 3.0,
                 envelope: PresetLibrary::create_envelope(0.005, 0.3, 0.6, 3.0), // Even longer release to prevent cut-off
                 filter: Some(PresetLibrary::create_filter(
