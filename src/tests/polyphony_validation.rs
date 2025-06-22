@@ -63,7 +63,7 @@ impl PolyphonyValidator {
         let sequence = SimpleSequence { notes };
         println!("▶️  Playing chord progression with {} total notes (up to 8 simultaneous)", sequence.notes.len());
         
-        self.player.play_polyphonic(sequence)?;
+        self.player.play_enhanced_mixed(sequence)?;
         
         println!("✅ Chord progression test completed successfully!");
         Ok(())
@@ -96,7 +96,7 @@ impl PolyphonyValidator {
         let sequence = SimpleSequence { notes };
         println!("▶️  Playing fast arpeggios with {} notes (testing voice stealing)", sequence.notes.len());
         
-        self.player.play_polyphonic(sequence)?;
+        self.player.play_enhanced_mixed(sequence)?;
         
         println!("✅ Fast arpeggio test completed successfully!");
         Ok(())
@@ -132,7 +132,7 @@ impl PolyphonyValidator {
         let sequence = SimpleSequence { notes };
         println!("▶️  Playing acid bass sequence with {} notes (testing preset variations)", sequence.notes.len());
         
-        self.player.play_polyphonic(sequence)?;
+        self.player.play_enhanced_mixed(sequence)?;
         
         println!("✅ Acid bass polyphony test completed successfully!");
         Ok(())
@@ -200,7 +200,7 @@ impl PolyphonyValidator {
         let sequence = SimpleSequence { notes };
         println!("▶️  Playing mixed audio sequence with {} notes (MIDI + Presets + R2D2 + Synthesis)", sequence.notes.len());
         
-        self.player.play_polyphonic(sequence)?;
+        self.player.play_enhanced_mixed(sequence)?;
         
         println!("✅ Mixed audio modes test completed successfully!");
         Ok(())
@@ -231,7 +231,7 @@ impl PolyphonyValidator {
         let sequence = SimpleSequence { notes };
         println!("▶️  Playing stress test with {} notes (max 32 voices - testing stealing)", sequence.notes.len());
         
-        self.player.play_polyphonic(sequence)?;
+        self.player.play_enhanced_mixed(sequence)?;
         
         println!("✅ Voice manager stress test completed successfully!");
         Ok(())

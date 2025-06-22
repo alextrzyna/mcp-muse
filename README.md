@@ -55,7 +55,7 @@
 
 ### 🏆 **Comprehensive Audio Features**
 - **Mixed Mode Magic** - All 4 audio systems work together in perfect synchronization
-- **165+ Sound Options** - Massive audio vocabulary for every creative need
+- **187+ Sound Options** - Massive audio vocabulary for every creative need
 - **Real-Time Processing** - Instant musical reactions without conflicts or delays
 - **Professional Quality** - Research-driven algorithms for authentic sound reproduction
 
@@ -78,9 +78,10 @@
 - 🎹 **Classic Synthesizer Presets**: 31 authentic vintage recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
 - 🎛️ **Custom Synthesis Engine**: 19 advanced synthesis types (FM, Granular, Professional Drums, etc.)
 - 🎭 **Universal Mixed Mode**: All 4 audio systems work together in perfect synchronization
-- 🏆 **165+ Sound Options**: Massive audio vocabulary (128 GM + 9 R2D2 + 31 Presets + 19 Synthesis)
+- 🏆 **187+ Sound Options**: Massive audio vocabulary (128 GM + 9 R2D2 + 31 Presets + 19 Synthesis)
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
 - 🔌 **Single Tool Integration**: One unified `play_notes` tool for all audio capabilities
+- 🎚️ **Professional Effects**: Per-channel effects processing with intelligent limiting and gain compensation
 - ⚙️ **Zero Setup**: Automatic SoundFont download and multi-engine configuration
 - 🧪 **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
 
@@ -379,10 +380,57 @@ The system has been thoroughly validated through a comprehensive 10-scenario tes
 - **`channel`**: 0-8=melody instruments, 9=drums, 10-15=effects
 - **`instrument`**: 80=Square Lead (classic 8-bit), 73=Flute (Zelda), 56=Trumpet (fanfares)
 
-### **Retro Effects**
+### **Retro Effects (Legacy MIDI Parameters)**
 - **`volume`**: 90-127=prominent effects, 60-80=background ambience  
-- **`reverb`**: 40=dungeon echo, 80=magical sparkle, 127=cathedral
-- **`chorus`**: 0=clean retro, 60=lush SNES sound, 100=dreamy
+- **`reverb`**: 40=dungeon echo, 80=magical sparkle, 127=cathedral (MIDI CC 91)
+- **`chorus`**: 0=clean retro, 60=lush SNES sound, 100=dreamy (MIDI CC 93)
+
+### **Professional Audio Effects System** 🎛️
+The system includes a comprehensive effects processor with per-channel processing and intelligent limiting:
+
+#### **Available Effects**
+- **Reverb**: Professional Schroeder algorithm with room size, dampening, wet level, and pre-delay
+- **Delay**: Analog-style with feedback, damping, and tempo sync options
+- **Chorus**: Multi-tap modulation for rich, lush sounds
+- **Filter**: State-variable filter with 7 types (LowPass, HighPass, BandPass, Notch, Peak, LowShelf, HighShelf)
+- **Compressor**: Professional dynamics with threshold, ratio, attack, and release
+- **Distortion**: Musical saturation with pre/post filtering
+
+#### **Effects Configuration**
+```json
+{
+  "notes": [{
+    "note": 60,
+    "instrument": 1,
+    "effects": [{
+      "effect": {
+        "Reverb": {
+          "room_size": 0.7,
+          "dampening": 0.5,
+          "wet_level": 0.3,
+          "pre_delay": 0.02
+        }
+      },
+      "intensity": 0.8,
+      "enabled": true
+    }]
+  }]
+}
+```
+
+#### **Effects Presets**
+Use `effects_preset` for quick professional-quality effects:
+- `"concert_hall"` - Large space reverb
+- `"small_room"` - Intimate ambience
+- `"cathedral"` - Epic reverb with long decay
+- `"studio"` - Clean, controlled sound
+- `"vintage_analog"` - Warm tape-style effects
+
+#### **Important Effects Notes**
+- **Automatic Limiting**: Maximum 3 effects per channel to prevent signal destruction
+- **Gain Compensation**: Automatic 2x boost when effects cause excessive attenuation
+- **Per-Channel Processing**: Each audio type (MIDI, R2D2, synthesis) has independent effects
+- **All effects use the unified `play_notes` tool** - no separate playback methods needed
 
 ## 🎮 Classic Gaming Instruments
 
@@ -401,13 +449,13 @@ The system has been thoroughly validated through a comprehensive 10-scenario tes
 ### **Universal Quad-Engine Audio System**
 - **🎮 OxiSynth Engine**: Pure Rust SoundFont synthesis for authentic SNES gaming sounds (✅ **Tested**)
 - **🤖 ExpressiveSynth Engine**: Ring modulation synthesis for R2D2-style vocalizations (✅ **Tested**)  
-- **🎹 Classic Preset Engine**: 26 authentic vintage synthesizer recreations (✅ **Tested**)
+- **🎹 Classic Preset Engine**: 31 authentic vintage synthesizer recreations (✅ **Tested**)
 - **🎛️ Custom Synthesis Engine**: 19 advanced synthesis types with professional algorithms (✅ **Tested**)
-- **🔄 HybridAudioSource**: Real-time mixing of all 4 engines with sample-accurate timing (✅ **Tested**)
+- **🔄 EnhancedHybridAudioSource**: Unified playback with per-channel effects and intelligent limiting (✅ **Tested**)
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
-- **160+ Sound Options**: 128 GM instruments + 9 R2D2 emotions + 26 vintage presets + 19 synthesis types
+- **187+ Sound Options**: 128 GM instruments + 9 R2D2 emotions + 31 vintage presets + 19 synthesis types
 - **Mixed Mode Magic**: All audio systems work together in perfect synchronization  
 - **Professional Quality**: Research-driven algorithms for authentic sound reproduction
 - **Real-Time Performance**: Zero latency issues, instant musical reactions

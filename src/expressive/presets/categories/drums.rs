@@ -37,6 +37,7 @@ impl PresetLibrary {
                 effects: vec![],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
 
         // TR-909 Snare
@@ -71,6 +72,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.1)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
 
         // TR-909 Hi-Hat
@@ -104,6 +106,7 @@ impl PresetLibrary {
                 effects: vec![],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
 
         // Crash Cymbal
@@ -137,6 +140,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.3)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
 
         // 808 Hi-Hat (different style)
@@ -170,6 +174,7 @@ impl PresetLibrary {
                 effects: vec![],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
     }
 }

@@ -102,15 +102,17 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
             "name": "play_notes",
             "description": "🎮🤖🎛️ UNIVERSAL AUDIO ENGINE: The ultimate all-in-one tool for MIDI music, R2D2 expressions, and custom synthesis!
 
-🎵 MIDI MUSIC: 128 GM instruments, authentic SNES gaming sounds, professional effects
+🎵 MIDI MUSIC: 128 GM instruments, authentic SNES gaming sounds, professional effects chain
 🤖 R2D2 EXPRESSIONS: 9 emotions, ring modulation synthesis, authentic robotic vocalizations  
-🎛️ CUSTOM SYNTHESIS: 19 synthesis types, professional drum sounds, advanced effects
+🎛️ CUSTOM SYNTHESIS: 19 synthesis types, professional drum sounds, 6-effect audio processing
 
 💡 QUICK EXAMPLES:
 • Victory Fanfare: [{\"note\": 60, \"instrument\": 56, \"velocity\": 120, \"duration\": 1.0}]
+• Cathedral Piano: [{\"note\": 60, \"instrument\": 1, \"duration\": 3.0, \"effects_preset\": \"concert_hall\"}]
+• Vintage Warmth: [{\"note\": 60, \"instrument\": 0, \"duration\": 2.0, \"effects_preset\": \"vintage\"}]
 • R2D2 Celebration: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"duration\": 1.5}]
-• Sci-Fi Zap: [{\"synth_type\": \"zap\", \"synth_frequency\": 800, \"duration\": 0.3}]
-• Mixed Sequence: Combine all three types in perfect synchronization!
+• Custom Effects: [{\"note\": 60, \"instrument\": 73, \"duration\": 2.0, \"effects\": [{\"effect\": {\"type\": \"Reverb\", \"room_size\": 0.8, \"wet_level\": 0.6}, \"intensity\": 0.8}]}]
+• Mixed Sequence: Combine all types with signature preset effects for professional sound!
 
 🎯 ONE TOOL, INFINITE AUDIO POSSIBILITIES - From retro gaming music to expressive AI vocalizations!
 
@@ -155,7 +157,15 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 🎹 TECHNICAL CAPABILITIES:
 • 128 GM instruments: 0=Piano, 9=Glockenspiel, 40=Violin, 56=Trumpet, 73=Flute, 80=Square Lead, 120=Reverse Cymbal
 • 16 independent channels for rich layering
-• Professional effects: reverb (space), chorus (shimmer), expression (dynamics)
+• 🎛️ PROFESSIONAL EFFECTS CHAIN: 6 effect types with studio-quality algorithms
+  - Reverb: Schroeder algorithm with comb filters + allpass diffusion
+  - Delay: Feedback delay with analog character and high-frequency damping
+  - Chorus: Multi-tap modulated delays with LFO for lush swirling
+  - Filter: State variable filters (lowpass, highpass, bandpass, notch, peak, shelf)
+  - Compressor: Smooth dynamics processing with attack/release
+  - Distortion: Waveshaping with pre/post filtering for musical overdrive
+• 🎭 14 EFFECTS PRESETS: studio, concert_hall, vintage, ambient, live_stage, tight_mix, dreamy, spacious, analog_warmth, retro_echo, psychedelic, distorted, filtered, lush_chorus
+• 🎨 PRESET SIGNATURE EFFECTS: All classic synth presets include subtle, musical effects by default
 • Stereo positioning: pan (mono instruments), balance (stereo instruments)
 • Full drum kit on channel 9: 36=Kick, 38=Snare, 42=Hi-hat, 49=Crash
 
@@ -491,6 +501,103 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
                                 "preset_random": {
                                     "type": "boolean",
                                     "description": "🎲 Random preset selection: Set to true to randomly select a preset. Optionally combine with preset_category to limit random selection to specific category. Perfect for creative inspiration!"
+                                },
+                                "effects": {
+                                    "type": "array",
+                                    "description": "🎛️ PROFESSIONAL EFFECTS CHAIN: Apply high-quality audio effects to individual notes. Overrides preset signature effects when specified.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "effect": {
+                                                "type": "object",
+                                                "description": "🎚️ Effect type configuration",
+                                                "oneOf": [
+                                                    {
+                                                        "type": "object",
+                                                        "description": "🏛️ REVERB: Schroeder reverb with comb filters + allpass diffusion for realistic spatial effects",
+                                                        "properties": {
+                                                            "type": {"const": "Reverb"},
+                                                            "room_size": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Room size: 0.1=closet, 0.5=studio, 0.8=concert hall, 1.0=cathedral"},
+                                                            "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "High-frequency dampening: 0.0=bright, 0.5=natural, 1.0=dark"},
+                                                            "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Reverb amount: 0.1=subtle, 0.3=moderate, 0.6=lush, 0.9=swimming"},
+                                                            "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "Pre-delay in seconds: 0.02=small room, 0.05=large hall, 0.1=stadium"}
+                                                        }
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "description": "🔄 DELAY: Feedback delay with analog character and high-frequency damping",
+                                                        "properties": {
+                                                            "type": {"const": "Delay"},
+                                                            "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "Delay time in seconds: 0.125=8th note @120bpm, 0.25=quarter note, 0.5=half note"},
+                                                            "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "Feedback amount: 0.2=single echo, 0.5=multiple repeats, 0.8=infinite sustain"},
+                                                            "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Delay mix: 0.2=subtle, 0.5=balanced, 0.8=delay-heavy"},
+                                                            "sync_tempo": {"type": "boolean", "description": "Sync to tempo (future feature)"}
+                                                        }
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "description": "🌊 CHORUS: Multi-tap modulated delays with LFO for lush, swirling effects",
+                                                        "properties": {
+                                                            "type": {"const": "Chorus"},
+                                                            "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "LFO rate in Hz: 0.5=slow swirl, 1.5=moderate, 4.0=fast vibrato"},
+                                                            "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Modulation depth: 0.3=subtle, 0.6=lush, 0.9=dramatic"},
+                                                            "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.8, "description": "Chorus feedback: 0.2=clean, 0.4=rich, 0.7=resonant"},
+                                                            "stereo_width": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Stereo width: 0.5=narrow, 0.8=wide, 1.0=maximum"}
+                                                        }
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "description": "🎚️ FILTER: State variable filter with all filter types",
+                                                        "properties": {
+                                                            "type": {"const": "Filter"},
+                                                            "filter_type": {"type": "string", "enum": ["LowPass", "HighPass", "BandPass", "Notch", "Peak", "LowShelf", "HighShelf"], "description": "Filter type"},
+                                                            "cutoff": {"type": "number", "minimum": 20.0, "maximum": 20000.0, "description": "Cutoff frequency in Hz"},
+                                                            "resonance": {"type": "number", "minimum": 0.1, "maximum": 20.0, "description": "Filter resonance/Q factor"},
+                                                            "envelope_amount": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Envelope modulation (future feature)"}
+                                                        }
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "description": "📊 COMPRESSOR: Smooth dynamics processing for punch and control",
+                                                        "properties": {
+                                                            "type": {"const": "Compressor"},
+                                                            "threshold": {"type": "number", "minimum": -60.0, "maximum": 0.0, "description": "Threshold in dB: -20=gentle, -12=moderate, -6=aggressive"},
+                                                            "ratio": {"type": "number", "minimum": 1.0, "maximum": 20.0, "description": "Compression ratio: 2=subtle, 4=moderate, 8=heavy, 20=limiter"},
+                                                            "attack": {"type": "number", "minimum": 0.001, "maximum": 0.1, "description": "Attack time in seconds: 0.001=fast, 0.01=medium, 0.1=slow"},
+                                                            "release": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "Release time in seconds: 0.05=fast, 0.2=medium, 1.0=slow"}
+                                                        }
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "description": "🔥 DISTORTION: Waveshaping with pre/post filtering for musical overdrive",
+                                                        "properties": {
+                                                            "type": {"const": "Distortion"},
+                                                            "drive": {"type": "number", "minimum": 0.0, "maximum": 5.0, "description": "Drive amount: 1.0=warm, 2.5=crunch, 5.0=heavy"},
+                                                            "tone": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Tone control: 0.0=dark, 0.5=neutral, 1.0=bright"},
+                                                            "output_level": {"type": "number", "minimum": 0.1, "maximum": 2.0, "description": "Output compensation: 0.5=quiet, 1.0=unity, 1.5=boost"}
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            "intensity": {
+                                                "type": "number",
+                                                "minimum": 0.0,
+                                                "maximum": 1.0,
+                                                "description": "🔊 Effect intensity/wet-dry mix: 0.0=bypassed, 0.3=subtle, 0.6=moderate, 1.0=maximum effect"
+                                            },
+                                            "enabled": {
+                                                "type": "boolean",
+                                                "description": "🔛 Enable/disable this effect",
+                                                "default": true
+                                            }
+                                        },
+                                        "required": ["effect", "intensity"]
+                                    }
+                                },
+                                "effects_preset": {
+                                    "type": "string",
+                                    "description": "🎭 EFFECTS PRESET: Apply curated effect combinations. Choose from professional presets: 'studio' (clean + subtle reverb), 'concert_hall' (spacious reverb), 'vintage' (analog warmth), 'ambient' (lush atmospheric), 'live_stage' (punchy compression), 'tight_mix' (controlled dynamics), 'dreamy' (soft ethereal), 'spacious' (wide reverb), 'analog_warmth' (tube character), 'retro_echo' (tape delay), 'psychedelic' (wild modulation), 'distorted' (aggressive), 'filtered' (prominent filtering), 'lush_chorus' (rich modulation). Effects presets provide instant professional sound character!",
+                                    "enum": ["studio", "concert_hall", "vintage", "ambient", "live_stage", "tight_mix", "dreamy", "spacious", "analog_warmth", "retro_echo", "psychedelic", "distorted", "filtered", "lush_chorus"]
                                 }
                             },
                             "required": ["start_time", "duration"],
@@ -722,33 +829,30 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
         }
     };
 
-    // Choose the appropriate playback method
-    let playback_result = if has_synthesis || has_r2d2 || has_presets {
-        // Mixed/Hybrid sequence - use real-time polyphonic audio engine for better polyphony
-        let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
-            (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
-            (true, true, true, false) => "MIDI + R2D2 + Synthesis",
-            (true, true, false, true) => "MIDI + R2D2 + Presets",
-            (true, false, true, true) => "MIDI + Synthesis + Presets",
-            (false, true, true, true) => "R2D2 + Synthesis + Presets",
-            (true, false, true, false) => "MIDI + Synthesis",
-            (false, true, true, false) => "R2D2 + Synthesis",
-            (true, true, false, false) => "MIDI + R2D2",
-            (true, false, false, true) => "MIDI + Presets",
-            (false, true, false, true) => "R2D2 + Presets",
-            (false, false, true, true) => "Synthesis + Presets",
-            (false, true, false, false) => "R2D2 only",
-            (false, false, true, false) => "Synthesis only",
-            (false, false, false, true) => "Presets only",
-            _ => "Mixed mode",
-        };
-        tracing::info!("Using real-time polyphonic mode playback ({})", mode);
-        player.play_polyphonic(sequence)
-    } else {
-        // Pure MIDI sequence - use traditional MIDI player
-        tracing::info!("Using pure MIDI playback");
-        player.play_simple(sequence)
+    // Use universal enhanced mixed playback for ALL sequences (supports everything!)
+    let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
+        (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
+        (true, true, true, false) => "MIDI + R2D2 + Synthesis",
+        (true, true, false, true) => "MIDI + R2D2 + Presets",
+        (true, false, true, true) => "MIDI + Synthesis + Presets",
+        (false, true, true, true) => "R2D2 + Synthesis + Presets",
+        (true, false, true, false) => "MIDI + Synthesis",
+        (false, true, true, false) => "R2D2 + Synthesis",
+        (false, false, true, true) => "Synthesis + Presets",
+        (true, false, false, true) => "MIDI + Presets",
+        (false, true, false, true) => "R2D2 + Presets",
+        (false, false, true, false) => "Synthesis Only",
+        (false, true, false, false) => "R2D2 Only",
+        (false, false, false, true) => "Presets Only",
+        (true, false, false, false) => "Pure MIDI",
+        _ => "Mixed",
     };
+
+    tracing::info!(
+        "Using universal enhanced mixed playback for {} sequence",
+        mode
+    );
+    let playback_result = player.play_enhanced_mixed(sequence);
 
     // Handle the result
     match playback_result {

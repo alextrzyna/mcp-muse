@@ -3,7 +3,6 @@ pub mod player;
 pub mod polyphonic_source;
 
 pub use player::*;
-pub use polyphonic_source::*;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -15,6 +14,190 @@ where
 {
     let opt = Option::<T>::deserialize(deserializer)?;
     Ok(opt)
+}
+
+/// Universal effect configuration for all audio sources
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectConfig {
+    /// Effect type and parameters
+    #[serde(flatten)]
+    pub effect: EffectType,
+    /// Effect intensity/mix level (0.0-1.0)
+    #[serde(default = "default_effect_intensity")]
+    pub intensity: f32,
+    /// Whether this effect is enabled
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_effect_intensity() -> f32 {
+    0.5
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Effect types with their specific parameters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum EffectType {
+    /// High-quality reverb effect
+    Reverb {
+        /// Room size (0.0-1.0, default: 0.5)
+        #[serde(default = "default_half")]
+        room_size: f32,
+        /// High-frequency dampening (0.0-1.0, default: 0.3)
+        #[serde(default = "default_dampening")]
+        dampening: f32,
+        /// Wet signal level (0.0-1.0, default: 0.3)
+        #[serde(default = "default_wet_level")]
+        wet_level: f32,
+        /// Pre-delay in seconds (0.0-0.1, default: 0.02)
+        #[serde(default = "default_pre_delay")]
+        pre_delay: f32,
+    },
+    /// Delay/echo effect
+    Delay {
+        /// Delay time in seconds (0.0-2.0, default: 0.25)
+        #[serde(default = "default_delay_time")]
+        delay_time: f32,
+        /// Feedback amount (0.0-0.95, default: 0.4)
+        #[serde(default = "default_feedback")]
+        feedback: f32,
+        /// Wet signal level (0.0-1.0, default: 0.3)
+        #[serde(default = "default_wet_level")]
+        wet_level: f32,
+        /// Sync to tempo (if true, delay_time is in beats)
+        #[serde(default)]
+        sync_tempo: bool,
+    },
+    /// Chorus effect
+    Chorus {
+        /// LFO rate in Hz (0.1-10.0, default: 1.5)
+        #[serde(default = "default_chorus_rate")]
+        rate: f32,
+        /// Modulation depth (0.0-1.0, default: 0.3)
+        #[serde(default = "default_chorus_depth")]
+        depth: f32,
+        /// Feedback amount (0.0-0.9, default: 0.2)
+        #[serde(default = "default_chorus_feedback")]
+        feedback: f32,
+        /// Stereo width (0.0-1.0, default: 0.7)
+        #[serde(default = "default_stereo_width")]
+        stereo_width: f32,
+    },
+    /// Parametric filter
+    Filter {
+        /// Filter type
+        #[serde(default)]
+        filter_type: FilterType,
+        /// Cutoff frequency in Hz (20-20000, default: 1000)
+        #[serde(default = "default_filter_cutoff")]
+        cutoff: f32,
+        /// Resonance/Q factor (0.0-10.0, default: 1.0)
+        #[serde(default = "default_resonance")]
+        resonance: f32,
+        /// Envelope modulation amount (-1.0 to 1.0, default: 0.0)
+        #[serde(default)]
+        envelope_amount: f32,
+    },
+    /// Compressor/limiter
+    Compressor {
+        /// Threshold in dB (-60.0 to 0.0, default: -12.0)
+        #[serde(default = "default_threshold")]
+        threshold: f32,
+        /// Compression ratio (1.0-20.0, default: 4.0)
+        #[serde(default = "default_ratio")]
+        ratio: f32,
+        /// Attack time in seconds (0.001-1.0, default: 0.01)
+        #[serde(default = "default_attack")]
+        attack: f32,
+        /// Release time in seconds (0.01-10.0, default: 0.1)
+        #[serde(default = "default_release")]
+        release: f32,
+    },
+    /// Distortion/overdrive
+    Distortion {
+        /// Drive amount (0.0-10.0, default: 2.0)
+        #[serde(default = "default_drive")]
+        drive: f32,
+        /// Tone control (0.0-1.0, default: 0.5)
+        #[serde(default = "default_half")]
+        tone: f32,
+        /// Output level (0.0-2.0, default: 1.0)
+        #[serde(default = "default_one")]
+        output_level: f32,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FilterType {
+    #[default]
+    LowPass,
+    HighPass,
+    BandPass,
+    Notch,
+    Peak,
+    LowShelf,
+    HighShelf,
+}
+
+// Default value functions for effects
+fn default_half() -> f32 {
+    0.5
+}
+fn default_one() -> f32 {
+    1.0
+}
+fn default_dampening() -> f32 {
+    0.3
+}
+fn default_wet_level() -> f32 {
+    0.3
+}
+fn default_pre_delay() -> f32 {
+    0.02
+}
+fn default_delay_time() -> f32 {
+    0.25
+}
+fn default_feedback() -> f32 {
+    0.4
+}
+fn default_chorus_rate() -> f32 {
+    1.5
+}
+fn default_chorus_depth() -> f32 {
+    0.3
+}
+fn default_chorus_feedback() -> f32 {
+    0.2
+}
+fn default_stereo_width() -> f32 {
+    0.7
+}
+fn default_filter_cutoff() -> f32 {
+    1000.0
+}
+fn default_resonance() -> f32 {
+    1.0
+}
+fn default_threshold() -> f32 {
+    -12.0
+}
+fn default_ratio() -> f32 {
+    4.0
+}
+fn default_attack() -> f32 {
+    0.01
+}
+fn default_release() -> f32 {
+    0.1
+}
+fn default_drive() -> f32 {
+    2.0
 }
 
 /// Simple note representation that's easy to work with
@@ -164,6 +347,14 @@ pub struct SimpleNote {
     /// If true, select random preset from category
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub preset_random: Option<bool>,
+
+    // NEW: Universal Effects Parameters (compatible with all audio sources)
+    /// Effects chain to apply to this note
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub effects: Option<Vec<EffectConfig>>,
+    /// Effects preset to apply (e.g., "studio", "concert_hall", "vintage")
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    pub effects_preset: Option<String>,
 }
 
 fn default_note_type() -> String {
@@ -244,6 +435,8 @@ impl SimpleSequence {
             preset_category: None,
             preset_variation: None,
             preset_random: None,
+            effects: None,
+            effects_preset: None,
         });
         self
     }
@@ -301,6 +494,8 @@ impl SimpleSequence {
             preset_category: None,
             preset_variation: None,
             preset_random: None,
+            effects: None,
+            effects_preset: None,
         });
         self
     }
@@ -359,6 +554,8 @@ impl SimpleSequence {
             preset_category: None,
             preset_variation: None,
             preset_random: None,
+            effects: None,
+            effects_preset: None,
         });
         self
     }
@@ -439,6 +636,8 @@ impl SimpleSequence {
             preset_category: None,
             preset_variation: None,
             preset_random: None,
+            effects: None,
+            effects_preset: None,
         });
         self
     }
@@ -460,6 +659,11 @@ impl SimpleNote {
         self.preset_name.is_some()
             || self.preset_category.is_some()
             || self.preset_random.unwrap_or(false)
+    }
+
+    /// Check if this note has effects
+    pub fn has_effects(&self) -> bool {
+        self.effects.is_some() || self.effects_preset.is_some()
     }
 
     /// Validate R2D2 parameters if this is an R2D2 note
@@ -799,86 +1003,213 @@ impl SimpleNote {
         Ok(())
     }
 
-    /// Validate MIDI note parameters
-    pub fn validate_midi(&self) -> Result<(), String> {
-        if self.note_type != "midi" {
-            return Err("Note type must be 'midi' for MIDI validation".to_string());
+    /// Validate MIDI note parameters and effects parameters if this note has effects
+    pub fn validate_effects(&self) -> Result<(), String> {
+        if !self.has_effects() {
+            return Ok(());
         }
 
-        // MIDI note validation
-        if let Some(note) = self.note {
-            if note > 127 {
-                return Err(format!("MIDI note must be 0-127, got {}", note));
+        // Validate effects chain
+        if let Some(effects) = &self.effects {
+            for (i, effect) in effects.iter().enumerate() {
+                if let Err(e) = self.validate_single_effect(effect) {
+                    return Err(format!("Effect {} in chain: {}", i + 1, e));
+                }
             }
         }
 
-        if let Some(velocity) = self.velocity {
-            if velocity > 127 {
-                return Err(format!("MIDI velocity must be 0-127, got {}", velocity));
+        // Validate effects preset (use actual library presets)
+        if let Some(preset) = &self.effects_preset {
+            use crate::expressive::EffectsPresetLibrary;
+            let library = EffectsPresetLibrary::new();
+            if library.get_preset(preset).is_none() {
+                let valid_presets: Vec<String> =
+                    library.get_preset_names().into_iter().cloned().collect();
+                return Err(format!(
+                    "Invalid effects preset '{}'. Valid presets: {:?}",
+                    preset, valid_presets
+                ));
             }
         }
 
-        if self.channel > 15 {
-            return Err(format!("MIDI channel must be 0-15, got {}", self.channel));
-        }
+        Ok(())
+    }
 
-        if self.duration <= 0.0 {
-            return Err(format!("Duration must be positive, got {}", self.duration));
-        }
-
-        if self.start_time < 0.0 {
+    /// Validate a single effect configuration
+    fn validate_single_effect(&self, effect: &EffectConfig) -> Result<(), String> {
+        // Validate intensity
+        if !(0.0..=1.0).contains(&effect.intensity) {
             return Err(format!(
-                "Start time must be non-negative, got {}",
-                self.start_time
+                "Effect intensity {} is out of range (0.0-1.0)",
+                effect.intensity
             ));
         }
 
-        // Optional parameter validation
-        if let Some(instrument) = self.instrument {
-            if instrument > 127 {
-                return Err(format!("MIDI instrument must be 0-127, got {}", instrument));
+        // Validate effect-specific parameters
+        match &effect.effect {
+            EffectType::Reverb {
+                room_size,
+                dampening,
+                wet_level,
+                pre_delay,
+            } => {
+                if !(0.0..=1.0).contains(room_size) {
+                    return Err(format!(
+                        "Reverb room_size {} is out of range (0.0-1.0)",
+                        room_size
+                    ));
+                }
+                if !(0.0..=1.0).contains(dampening) {
+                    return Err(format!(
+                        "Reverb dampening {} is out of range (0.0-1.0)",
+                        dampening
+                    ));
+                }
+                if !(0.0..=1.0).contains(wet_level) {
+                    return Err(format!(
+                        "Reverb wet_level {} is out of range (0.0-1.0)",
+                        wet_level
+                    ));
+                }
+                if !(0.0..=0.2).contains(pre_delay) {
+                    return Err(format!(
+                        "Reverb pre_delay {} is out of range (0.0-0.2 seconds)",
+                        pre_delay
+                    ));
+                }
             }
-        }
-
-        if let Some(reverb) = self.reverb {
-            if reverb > 127 {
-                return Err(format!("MIDI reverb must be 0-127, got {}", reverb));
+            EffectType::Delay {
+                delay_time,
+                feedback,
+                wet_level,
+                sync_tempo: _,
+            } => {
+                if !(0.001..=3.0).contains(delay_time) {
+                    return Err(format!(
+                        "Delay delay_time {} is out of range (0.001-3.0 seconds)",
+                        delay_time
+                    ));
+                }
+                if !(0.0..=0.95).contains(feedback) {
+                    return Err(format!(
+                        "Delay feedback {} is out of range (0.0-0.95)",
+                        feedback
+                    ));
+                }
+                if !(0.0..=1.0).contains(wet_level) {
+                    return Err(format!(
+                        "Delay wet_level {} is out of range (0.0-1.0)",
+                        wet_level
+                    ));
+                }
             }
-        }
-
-        if let Some(chorus) = self.chorus {
-            if chorus > 127 {
-                return Err(format!("MIDI chorus must be 0-127, got {}", chorus));
+            EffectType::Chorus {
+                rate,
+                depth,
+                feedback,
+                stereo_width,
+            } => {
+                if !(0.1..=20.0).contains(rate) {
+                    return Err(format!(
+                        "Chorus rate {} is out of range (0.1-20.0 Hz)",
+                        rate
+                    ));
+                }
+                if !(0.0..=1.0).contains(depth) {
+                    return Err(format!("Chorus depth {} is out of range (0.0-1.0)", depth));
+                }
+                if !(0.0..=0.9).contains(feedback) {
+                    return Err(format!(
+                        "Chorus feedback {} is out of range (0.0-0.9)",
+                        feedback
+                    ));
+                }
+                if !(0.0..=1.0).contains(stereo_width) {
+                    return Err(format!(
+                        "Chorus stereo_width {} is out of range (0.0-1.0)",
+                        stereo_width
+                    ));
+                }
             }
-        }
-
-        if let Some(volume) = self.volume {
-            if volume > 127 {
-                return Err(format!("MIDI volume must be 0-127, got {}", volume));
+            EffectType::Filter {
+                filter_type: _,
+                cutoff,
+                resonance,
+                envelope_amount,
+            } => {
+                if !(20.0..=20000.0).contains(cutoff) {
+                    return Err(format!(
+                        "Filter cutoff {} is out of range (20-20000 Hz)",
+                        cutoff
+                    ));
+                }
+                if !(0.0..=20.0).contains(resonance) {
+                    return Err(format!(
+                        "Filter resonance {} is out of range (0.0-20.0)",
+                        resonance
+                    ));
+                }
+                if !(-1.0..=1.0).contains(envelope_amount) {
+                    return Err(format!(
+                        "Filter envelope_amount {} is out of range (-1.0 to 1.0)",
+                        envelope_amount
+                    ));
+                }
             }
-        }
-
-        if let Some(pan) = self.pan {
-            if pan > 127 {
-                return Err(format!("MIDI pan must be 0-127, got {}", pan));
+            EffectType::Compressor {
+                threshold,
+                ratio,
+                attack,
+                release,
+            } => {
+                if !(-60.0..=0.0).contains(threshold) {
+                    return Err(format!(
+                        "Compressor threshold {} is out of range (-60.0 to 0.0 dB)",
+                        threshold
+                    ));
+                }
+                if !(1.0..=50.0).contains(ratio) {
+                    return Err(format!(
+                        "Compressor ratio {} is out of range (1.0-50.0)",
+                        ratio
+                    ));
+                }
+                if !(0.0001..=2.0).contains(attack) {
+                    return Err(format!(
+                        "Compressor attack {} is out of range (0.0001-2.0 seconds)",
+                        attack
+                    ));
+                }
+                if !(0.001..=20.0).contains(release) {
+                    return Err(format!(
+                        "Compressor release {} is out of range (0.001-20.0 seconds)",
+                        release
+                    ));
+                }
             }
-        }
-
-        if let Some(balance) = self.balance {
-            if balance > 127 {
-                return Err(format!("MIDI balance must be 0-127, got {}", balance));
-            }
-        }
-
-        if let Some(expression) = self.expression {
-            if expression > 127 {
-                return Err(format!("MIDI expression must be 0-127, got {}", expression));
-            }
-        }
-
-        if let Some(sustain) = self.sustain {
-            if sustain > 127 {
-                return Err(format!("MIDI sustain must be 0-127, got {}", sustain));
+            EffectType::Distortion {
+                drive,
+                tone,
+                output_level,
+            } => {
+                if !(0.0..=20.0).contains(drive) {
+                    return Err(format!(
+                        "Distortion drive {} is out of range (0.0-20.0)",
+                        drive
+                    ));
+                }
+                if !(0.0..=1.0).contains(tone) {
+                    return Err(format!(
+                        "Distortion tone {} is out of range (0.0-1.0)",
+                        tone
+                    ));
+                }
+                if !(0.0..=3.0).contains(output_level) {
+                    return Err(format!(
+                        "Distortion output_level {} is out of range (0.0-3.0)",
+                        output_level
+                    ));
+                }
             }
         }
 

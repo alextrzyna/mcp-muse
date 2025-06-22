@@ -32,6 +32,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.2)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
 
         // Sweep Up
@@ -65,6 +66,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.4)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_empty_signature_effects(),
         });
     }
 }

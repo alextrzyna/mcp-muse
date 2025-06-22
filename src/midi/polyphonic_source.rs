@@ -3,7 +3,7 @@ use rodio::Source;
 use std::time::Duration;
 
 use crate::expressive::{PolyphonicVoiceManager, R2D2Expression, R2D2Voice, SynthParams};
-use crate::midi::{parser::MidiNote, SimpleNote};
+use crate::midi::SimpleNote;
 
 /// Event for scheduling synthesis notes in real-time
 #[derive(Debug, Clone)]
@@ -58,52 +58,6 @@ pub struct RealtimePolyphonicAudioSource {
 }
 
 impl RealtimePolyphonicAudioSource {
-    pub fn new(
-        midi_notes: Vec<MidiNote>,
-        synthesis_events: Vec<RealtimeSynthEvent>,
-        r2d2_events: Vec<RealtimeR2D2Event>,
-        total_duration: Duration,
-    ) -> Result<Self> {
-        let sample_rate = 44100;
-        let dt = 1.0 / sample_rate as f32;
-
-        // Create MIDI synthesizer source if there are MIDI notes
-        let oxisynth_source = if !midi_notes.is_empty() {
-            Some(
-                super::player::OxiSynthSource::new(midi_notes, total_duration)
-                    .map_err(|e| anyhow::anyhow!("Failed to create OxiSynth source: {}", e))?,
-            )
-        } else {
-            None
-        };
-
-        // Create voice manager
-        let voice_manager = PolyphonicVoiceManager::new(sample_rate as f32);
-
-        // Create R2D2 voice
-        let r2d2_voice = R2D2Voice::new();
-
-        tracing::info!(
-            "Created RealtimePolyphonicAudioSource with {} synthesis events, {} R2D2 events",
-            synthesis_events.len(),
-            r2d2_events.len()
-        );
-
-        Ok(Self {
-            voice_manager,
-            oxisynth_source,
-            synthesis_events,
-            r2d2_events,
-            r2d2_voice,
-            current_r2d2_samples: None,
-            r2d2_sample_position: 0,
-            sample_rate,
-            current_sample: 0,
-            total_duration,
-            dt,
-        })
-    }
-
     /// Process events that should start at the current time
     fn process_scheduled_events(&mut self) {
         let current_time = self.current_sample as f64 / self.sample_rate as f64;
@@ -194,7 +148,7 @@ impl RealtimePolyphonicAudioSource {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Synthesis type is required"))?;
 
-        // Parse synthesis type (simplified version)
+        // Parse synthesis type (comprehensive version)
         let synth_type = match synth_type_str.as_str() {
             "sine" => SynthType::Sine,
             "square" => SynthType::Square {
@@ -209,7 +163,52 @@ impl RealtimePolyphonicAudioSource {
                 modulator_freq: note.synth_modulator_freq.unwrap_or(440.0),
                 modulation_index: note.synth_modulation_index.unwrap_or(1.0),
             },
-            // Add more types as needed
+            // Drum synthesis types
+            "kick" => SynthType::Kick {
+                punch: 0.8,
+                sustain: 0.3,
+                click_freq: 60.0,
+                body_freq: 40.0,
+            },
+            "snare" => SynthType::Snare {
+                snap: 0.7,
+                buzz: 0.5,
+                tone_freq: 200.0,
+                noise_amount: 0.8,
+            },
+            "hihat" => SynthType::HiHat {
+                metallic: 0.7,
+                decay: 0.1,
+                brightness: 0.8,
+            },
+            "cymbal" => SynthType::Cymbal {
+                size: 0.5,
+                metallic: 0.8,
+                strike_intensity: 0.7,
+            },
+            // Sound effects synthesis types
+            "swoosh" => SynthType::Swoosh {
+                direction: 0.0,
+                intensity: 0.7,
+                frequency_sweep: (200.0, 2000.0),
+            },
+            "zap" => SynthType::Zap {
+                energy: 0.8,
+                decay: 0.2,
+                harmonic_content: 0.6,
+            },
+            "chime" => SynthType::Chime {
+                fundamental: 440.0,
+                harmonic_count: 8,
+                decay: 0.3,
+                inharmonicity: 0.1,
+            },
+            "burst" => SynthType::Burst {
+                center_freq: 1000.0,
+                bandwidth: 500.0,
+                intensity: 0.7,
+                shape: 0.5,
+            },
             _ => {
                 return Err(anyhow::anyhow!(
                     "Unknown synthesis type: {}",
@@ -218,15 +217,25 @@ impl RealtimePolyphonicAudioSource {
             }
         };
 
-        // Determine frequency
+        // Determine frequency (drums need specific frequencies, not musical pitches)
         let frequency = if let Some(synth_freq) = note.synth_frequency {
             synth_freq
         } else if let Some(midi_note) = note.note {
             // Convert MIDI note to frequency
             440.0 * 2.0_f32.powf((midi_note as f32 - 69.0) / 12.0)
         } else {
-            // Fallback frequency
-            440.0
+            // Use appropriate frequencies for drum types
+            match synth_type_str.as_str() {
+                "kick" => 60.0,     // Low fundamental for kick drum
+                "snare" => 200.0,   // Mid-range for snare body
+                "hihat" => 8000.0,  // High frequency for hi-hat metallic sound
+                "cymbal" => 4000.0, // Upper-mid for cymbal brightness
+                "swoosh" => 1000.0, // Mid-range for swoosh effects
+                "zap" => 800.0,     // Upper-mid for zap energy
+                "chime" => 880.0,   // Musical frequency for chimes
+                "burst" => 1000.0,  // Mid-range for burst
+                _ => 440.0,         // Fallback for other synthesis types
+            }
         };
 
         // Create envelope
@@ -283,6 +292,58 @@ impl RealtimePolyphonicAudioSource {
                     effect_type: EffectType::Delay { delay_time },
                     intensity: delay,
                 });
+            }
+        }
+
+        // Process universal effects from the new effects system
+        if let Some(universal_effects) = &note.effects {
+            for effect_config in universal_effects {
+                if effect_config.enabled {
+                    // Convert EffectConfig to EffectParams for audio processing
+                    match &effect_config.effect {
+                        crate::midi::EffectType::Reverb {
+                            room_size: _,
+                            dampening: _,
+                            wet_level: _,
+                            pre_delay: _,
+                        } => {
+                            effects.push(EffectParams {
+                                effect_type: EffectType::Reverb,
+                                intensity: effect_config.intensity,
+                            });
+                        }
+                        crate::midi::EffectType::Delay {
+                            delay_time,
+                            feedback: _,
+                            wet_level: _,
+                            sync_tempo: _,
+                        } => {
+                            effects.push(EffectParams {
+                                effect_type: EffectType::Delay {
+                                    delay_time: *delay_time,
+                                },
+                                intensity: effect_config.intensity,
+                            });
+                        }
+                        crate::midi::EffectType::Chorus {
+                            rate: _,
+                            depth: _,
+                            feedback: _,
+                            stereo_width: _,
+                        } => {
+                            effects.push(EffectParams {
+                                effect_type: EffectType::Chorus,
+                                intensity: effect_config.intensity,
+                            });
+                        }
+                        // Note: Filter, Compressor, Distortion are not yet implemented in EffectParams
+                        // They would need to be added to the EffectType enum in the expressive module
+                        _ => {
+                            // For now, skip unsupported effect types
+                            // In the future, these would be implemented in the audio processing chain
+                        }
+                    }
+                }
             }
         }
 

@@ -65,6 +65,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.15)],
             },
             variations,
+            signature_effects: PresetLibrary::create_signature_effects_for_bass(),
         });
 
         // 2. TB-303 Acid Bass - Acid house foundation
@@ -111,6 +112,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.1)],
             },
             variations: tb303_variations,
+            signature_effects: PresetLibrary::create_signature_effects_for_acid_bass(),
         });
 
         // 3. ARP Odyssey Bass - Biting character
@@ -140,6 +142,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.08)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_vintage_warmth(),
         });
 
         // 4. Jupiter Bass - Rich Jupiter-8 bass
@@ -173,6 +176,7 @@ impl PresetLibrary {
                 ],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
 
         // DIGITAL/FM BASSES (5 presets)
@@ -209,6 +213,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.12)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
 
         // 6. DX7 Slap Bass - Authentic "Bass 1" ROM 1A 15 recreation
@@ -263,6 +268,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.05)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
 
         // MODERN/HYBRID BASSES (7 presets)
@@ -294,6 +300,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.15)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
 
         // 8. Square Bass - Pulse width bass
@@ -333,6 +340,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.12)],
             },
             variations: square_variations,
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
 
         // SPECIALTY BASSES (5 presets)
@@ -365,6 +373,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.05)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
 
         // 10. Rubber Bass - Elastic character with portamento effect
@@ -397,6 +406,7 @@ impl PresetLibrary {
                 ],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_modern_clarity(),
         });
     }
 }

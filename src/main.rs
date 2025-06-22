@@ -9,7 +9,7 @@ mod midi;
 mod server;
 mod setup;
 
-use crate::midi::{SimpleNote, SimpleSequence};
+use crate::midi::{MidiPlayer, SimpleNote, SimpleSequence};
 
 /// Determines the log directory, with fallback to current directory if creation fails
 fn determine_log_directory(preferred_dir: PathBuf) -> PathBuf {
@@ -103,6 +103,9 @@ pub enum Commands {
     /// Test volume-corrected presets
     #[command(name = "test-volumes")]
     TestVolumes,
+
+    #[command(name = "test-effects")]
+    TestEffects,
 }
 
 #[tokio::main]
@@ -135,6 +138,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::TestVolumes) => {
             test_volume_consistency().await?;
+        }
+        Some(Commands::TestEffects) => {
+            test_effects_system().await?;
         }
         None => {
             // Default behavior: start the MCP server
@@ -454,7 +460,7 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
         sequence.notes.len()
     );
 
-    player.play_polyphonic(sequence)?;
+    player.play_enhanced_mixed(sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     // Test 3: Fast Arpeggios and Voice Stealing
@@ -486,7 +492,7 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
         sequence.notes.len()
     );
 
-    player.play_polyphonic(sequence)?;
+    player.play_enhanced_mixed(sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     // Test 4: Mixed Audio Modes
@@ -541,7 +547,7 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
         sequence.notes.len()
     );
 
-    player.play_polyphonic(sequence)?;
+    player.play_enhanced_mixed(sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
     println!("\n{}", "=".repeat(60));
@@ -962,6 +968,8 @@ impl Default for SimpleNote {
             synth_delay_time: None,
             synth_grain_size: None,
             synth_texture_roughness: None,
+            effects: None,
+            effects_preset: None,
         }
     }
 }
@@ -1179,6 +1187,229 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "If any drums were silent or too quiet, there may be synthesis issues to investigate."
     );
+
+    Ok(())
+}
+
+/// Test the new effects system with dramatic examples
+async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
+    println!("🎛️ TESTING EFFECTS SYSTEM 🎛️");
+    println!("Listen for the difference between dry and processed sound!\n");
+
+    let player = MidiPlayer::new()?;
+    let test_note = 60; // Middle C
+    let test_velocity = 100;
+    let test_duration = 3.0; // Longer to hear effects
+
+    // 1. DRY SOUND (no effects)
+    println!("🎵 1. DRY PIANO (no effects)");
+    let dry_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            instrument: Some(1), // Bright Acoustic Piano
+            start_time: 0.0,
+            duration: test_duration,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(dry_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+
+    // 2. MASSIVE REVERB (much more dramatic)
+    println!("🏛️ 2. SAME PIANO with MASSIVE REVERB");
+    let reverb_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            instrument: Some(1),
+            start_time: 0.0,
+            duration: test_duration,
+            effects: Some(vec![crate::midi::EffectConfig {
+                effect: crate::midi::EffectType::Reverb {
+                    room_size: 1.0, // Maximum room size
+                    dampening: 0.1, // Minimal dampening
+                    wet_level: 0.8, // Very wet signal
+                    pre_delay: 0.1, // Long pre-delay
+                },
+                intensity: 1.0, // Maximum intensity
+                enabled: true,
+            }]),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(reverb_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await; // Longer to hear reverb tail
+
+    // 3. HEAVY CHORUS (very obvious modulation)
+    println!("🌊 3. SAME PIANO with HEAVY CHORUS");
+    let chorus_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            instrument: Some(1),
+            start_time: 0.0,
+            duration: test_duration,
+            effects: Some(vec![crate::midi::EffectConfig {
+                effect: crate::midi::EffectType::Chorus {
+                    rate: 3.0,         // Fast modulation
+                    depth: 0.9,        // Deep modulation
+                    feedback: 0.7,     // High feedback
+                    stereo_width: 1.0, // Maximum stereo width
+                },
+                intensity: 1.0, // Maximum intensity
+                enabled: true,
+            }]),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(chorus_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+
+    // 4. OBVIOUS DISTORTION
+    println!("🔥 4. SAME PIANO with HEAVY DISTORTION");
+    let distortion_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            instrument: Some(1),
+            start_time: 0.0,
+            duration: test_duration,
+            effects: Some(vec![crate::midi::EffectConfig {
+                effect: crate::midi::EffectType::Distortion {
+                    drive: 5.0,        // Maximum drive
+                    tone: 0.8,         // Bright tone
+                    output_level: 0.7, // Compensate for distortion
+                },
+                intensity: 1.0, // Maximum intensity
+                enabled: true,
+            }]),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(distortion_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+
+    // 5. EXTREME DELAY (very obvious repeats)
+    println!("⚡ 5. SAME PIANO with EXTREME DELAY");
+    let delay_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            note: Some(test_note),
+            velocity: Some(test_velocity),
+            instrument: Some(1),
+            start_time: 0.0,
+            duration: 1.0, // Shorter note to hear delays clearly
+            effects: Some(vec![crate::midi::EffectConfig {
+                effect: crate::midi::EffectType::Delay {
+                    delay_time: 0.4, // Clear 400ms delay
+                    feedback: 0.8,   // High feedback for multiple repeats
+                    wet_level: 0.9,  // Very wet signal
+                    sync_tempo: false,
+                },
+                intensity: 1.0, // Maximum intensity
+                enabled: true,
+            }]),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(delay_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await; // Longer to hear delay repeats
+
+    // 6. PRESET WITH SIGNATURE EFFECTS
+    println!("🎛️ 6. TB-303 ACID BASS with signature effects (resonant filter + delay)");
+    let acid_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("TB-303 Acid".to_string()),
+            note: Some(48), // Lower bass note
+            velocity: Some(127),
+            start_time: 0.0,
+            duration: test_duration,
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(acid_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+
+    // 7. EFFECTS PRESET TEST - Testing if effects_preset parameter works
+    println!("🎛️ 7. EFFECTS PRESET TEST - Testing concert_hall preset");
+    let effects_preset_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            note: Some(60),      // C4
+            instrument: Some(1), // Bright Piano
+            velocity: Some(90),
+            start_time: 0.0,
+            duration: 3.0,
+            effects_preset: Some("concert_hall".to_string()),
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(effects_preset_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
+
+    // 8. PRESET COMPARISON - Subtle vs No Effects
+    println!("🎼 8. PRESET COMPARISON - Pad with vs without signature effects");
+
+    // First: Pad without signature effects
+    println!("   🔇 JP-8 Strings (NO signature effects)");
+    let dry_pad_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("JP-8 Strings".to_string()),
+            note: Some(60), // C4
+            velocity: Some(80),
+            start_time: 0.0,
+            duration: 4.0,
+            effects: Some(vec![]), // Override to disable signature effects
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(dry_pad_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4500)).await;
+
+    // Then: Same pad WITH signature effects
+    println!("   🎨 JP-8 Strings (WITH subtle signature effects)");
+    let wet_pad_sequence = SimpleSequence {
+        notes: vec![SimpleNote {
+            preset_name: Some("JP-8 Strings".to_string()),
+            note: Some(60), // C4
+            velocity: Some(80),
+            start_time: 0.0,
+            duration: 4.0,
+            // No effects override - will use preset's signature effects
+            ..Default::default()
+        }],
+        tempo: 120,
+    };
+    player.play_enhanced_mixed(wet_pad_sequence)?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(4500)).await;
+
+    println!("\n✅ Effects test complete!");
+    println!("🎧 You should have heard differences between:");
+    println!("   • DRY piano (clean original sound)");
+    println!("   • MASSIVE REVERB (huge spatial effect)");
+    println!("   • HEAVY CHORUS (wobbling/modulation)");
+    println!("   • HEAVY DISTORTION (gritty/overdriven)");
+    println!("   • EXTREME DELAY (clear repeating echoes)");
+    println!("   • Preset signature effects");
+    println!("   • Pad comparison: dry vs. subtle signature effects");
+    println!();
+    println!("🎭 PRESET SIGNATURE EFFECTS are now active on:");
+    println!("   • All PAD presets (subtle reverb + chorus)");
+    println!("   • All LEAD presets (delay + chorus)");
+    println!("   • All KEYS presets (room reverb)");
+    println!("   • BASS presets (compression + clarity filtering)");
+    println!();
+    println!("🔊 If you didn't hear clear differences, please check:");
+    println!("   • Audio system volume");
+    println!("   • Speaker/headphone quality");
+    println!("   • System audio effects or EQ that might mask changes");
 
     Ok(())
 }

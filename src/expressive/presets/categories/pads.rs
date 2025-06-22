@@ -56,6 +56,7 @@ impl PresetLibrary {
                 ],
             },
             variations: jp8_variations,
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 2. OB Brass - Oberheim brass section
@@ -93,6 +94,7 @@ impl PresetLibrary {
                 ],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 3. Analog Wash - Atmospheric texture
@@ -130,6 +132,7 @@ impl PresetLibrary {
                 ],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // DIGITAL/HYBRID PADS (10 presets)
@@ -172,6 +175,7 @@ impl PresetLibrary {
                 ],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 5. Crystal Pad - Bright, clean texture
@@ -204,6 +208,7 @@ impl PresetLibrary {
                 ],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // ATMOSPHERIC PADS (10 presets)
@@ -240,6 +245,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.8)], // Heavy reverb for space
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 7. Dark Pad - Mysterious character
@@ -269,6 +275,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.6)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 8. Choir Pad - Vocal atmosphere
@@ -302,6 +309,7 @@ impl PresetLibrary {
                 ], // Choir-like effects
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 9. Wind Pad - Breathy texture
@@ -333,6 +341,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.8)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
 
         // 10. Dream Pad - Surreal character
@@ -371,6 +380,7 @@ impl PresetLibrary {
                 ], // Maximum dreaminess
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_pad(),
         });
     }
 }
