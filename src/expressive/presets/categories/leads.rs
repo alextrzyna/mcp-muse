@@ -31,6 +31,7 @@ impl PresetLibrary {
                 effects: vec![PresetLibrary::create_reverb(0.25)],
             },
             variations: HashMap::new(),
+            signature_effects: PresetLibrary::create_signature_effects_for_lead(),
         });
     }
 }

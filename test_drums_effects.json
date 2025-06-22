@@ -1,0 +1,33 @@
+{
+  "notes": [
+    {
+      "synth_type": "kick",
+      "start_time": 0,
+      "duration": 0.2,
+      "velocity": 127,
+      "effects_preset": "studio"
+    },
+    {
+      "synth_type": "snare", 
+      "start_time": 0.5,
+      "duration": 0.2,
+      "velocity": 120,
+      "effects_preset": "concert_hall"
+    },
+    {
+      "synth_type": "hihat",
+      "start_time": 1.0,
+      "duration": 0.1,
+      "velocity": 100,
+      "effects_preset": "vintage"
+    },
+    {
+      "synth_type": "cymbal",
+      "start_time": 1.5,
+      "duration": 1.0,
+      "velocity": 110,
+      "effects_preset": "ambient"
+    }
+  ],
+  "tempo": 120
+}
