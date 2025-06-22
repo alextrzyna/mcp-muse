@@ -1191,90 +1191,6 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_determine_log_directory_success() {
-        // Test successful directory creation
-        let temp_dir = std::env::temp_dir().join("mcp-muse-test-success");
-
-        // Clean up first
-        let _ = fs::remove_dir_all(&temp_dir);
-
-        let result = determine_log_directory(temp_dir.clone());
-
-        assert_eq!(result, temp_dir);
-        assert!(temp_dir.exists());
-
-        // Clean up
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_determine_log_directory_fallback() {
-        // Test fallback to current directory when creation fails
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            let readonly_parent = std::env::temp_dir().join("mcp-muse-readonly-test");
-            let impossible_dir = readonly_parent.join("subdir").join("impossible");
-
-            // Clean up first
-            let _ = fs::remove_dir_all(&readonly_parent);
-
-            // Create parent and make it read-only
-            fs::create_dir_all(&readonly_parent).expect("Failed to create readonly parent");
-            let mut perms = fs::metadata(&readonly_parent).unwrap().permissions();
-            perms.set_mode(0o444); // Read-only
-            fs::set_permissions(&readonly_parent, perms)
-                .expect("Failed to set read-only permissions");
-
-            let result = determine_log_directory(impossible_dir);
-
-            // Should fallback to current directory
-            assert_eq!(result, PathBuf::from("."));
-
-            // Clean up
-            let mut perms = fs::metadata(&readonly_parent).unwrap().permissions();
-            perms.set_mode(0o755); // Restore write permissions
-            let _ = fs::set_permissions(&readonly_parent, perms);
-            let _ = fs::remove_dir_all(&readonly_parent);
-        }
-
-        #[cfg(not(unix))]
-        {
-            // For non-Unix systems, just test that fallback returns current directory
-            // when given an impossible path
-            let impossible_dir = PathBuf::from("/impossible/path/that/should/not/exist/ever");
-            let result = determine_log_directory(impossible_dir);
-            assert_eq!(result, PathBuf::from("."));
-        }
-    }
-
-    #[test]
-    fn test_determine_log_directory_already_exists() {
-        // Test when directory already exists
-        let temp_dir = std::env::temp_dir().join("mcp-muse-test-exists");
-
-        // Clean up first, then create
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).expect("Failed to create test directory");
-
-        let result = determine_log_directory(temp_dir.clone());
-
-        assert_eq!(result, temp_dir);
-        assert!(temp_dir.exists());
-
-        // Clean up
-        let _ = fs::remove_dir_all(&temp_dir);
-    }
-}
-
 /// Test the new effects system with dramatic examples
 async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎛️ TESTING EFFECTS SYSTEM 🎛️");
@@ -1496,4 +1412,88 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
     println!("   • System audio effects or EQ that might mask changes");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_determine_log_directory_success() {
+        // Test successful directory creation
+        let temp_dir = std::env::temp_dir().join("mcp-muse-test-success");
+
+        // Clean up first
+        let _ = fs::remove_dir_all(&temp_dir);
+
+        let result = determine_log_directory(temp_dir.clone());
+
+        assert_eq!(result, temp_dir);
+        assert!(temp_dir.exists());
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_determine_log_directory_fallback() {
+        // Test fallback to current directory when creation fails
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let readonly_parent = std::env::temp_dir().join("mcp-muse-readonly-test");
+            let impossible_dir = readonly_parent.join("subdir").join("impossible");
+
+            // Clean up first
+            let _ = fs::remove_dir_all(&readonly_parent);
+
+            // Create parent and make it read-only
+            fs::create_dir_all(&readonly_parent).expect("Failed to create readonly parent");
+            let mut perms = fs::metadata(&readonly_parent).unwrap().permissions();
+            perms.set_mode(0o444); // Read-only
+            fs::set_permissions(&readonly_parent, perms)
+                .expect("Failed to set read-only permissions");
+
+            let result = determine_log_directory(impossible_dir);
+
+            // Should fallback to current directory
+            assert_eq!(result, PathBuf::from("."));
+
+            // Clean up
+            let mut perms = fs::metadata(&readonly_parent).unwrap().permissions();
+            perms.set_mode(0o755); // Restore write permissions
+            let _ = fs::set_permissions(&readonly_parent, perms);
+            let _ = fs::remove_dir_all(&readonly_parent);
+        }
+
+        #[cfg(not(unix))]
+        {
+            // For non-Unix systems, just test that fallback returns current directory
+            // when given an impossible path
+            let impossible_dir = PathBuf::from("/impossible/path/that/should/not/exist/ever");
+            let result = determine_log_directory(impossible_dir);
+            assert_eq!(result, PathBuf::from("."));
+        }
+    }
+
+    #[test]
+    fn test_determine_log_directory_already_exists() {
+        // Test when directory already exists
+        let temp_dir = std::env::temp_dir().join("mcp-muse-test-exists");
+
+        // Clean up first, then create
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("Failed to create test directory");
+
+        let result = determine_log_directory(temp_dir.clone());
+
+        assert_eq!(result, temp_dir);
+        assert!(temp_dir.exists());
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
