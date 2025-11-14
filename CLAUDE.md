@@ -23,6 +23,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo run -- server` - Explicitly start MCP server
 - `./target/release/mcp-muse --setup` - Production setup command
 
+### Logging and Debugging
+- **Log Location** (cross-platform):
+  - **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
+  - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
+  - **Windows**: `%APPDATA%/mcp-muse/mcp-muse.log`
+- **View Logs**: `tail -f ~/Library/Application\ Support/mcp-muse/mcp-muse.log` (macOS)
+- **When Cursor runs the server**: Logs are captured by Cursor and may not appear in the file
+- **Log Level**: TRACE (all events logged, see src/main.rs:50)
+
 ## Architecture Overview
 
 ### Core Components
