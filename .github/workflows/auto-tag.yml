@@ -17,6 +17,8 @@ jobs:
   auto-tag:
     name: Create CalVer Tag
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     # Skip if commit message contains [skip-release] or is a version bump commit
     if: "!contains(github.event.head_commit.message, '[skip-release]') && !contains(github.event.head_commit.message, 'chore: bump version')"
 
