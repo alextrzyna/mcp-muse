@@ -75,12 +75,21 @@ jobs:
 
       - name: Update Cargo.toml version
         if: steps.check_tag.outputs.exists == 'false'
+        id: update_version
         run: |
           sed -i 's/^version = ".*"/version = "${{ steps.calver.outputs.version }}"/' Cargo.toml
-          echo "📝 Updated Cargo.toml to version ${{ steps.calver.outputs.version }}"
+
+          # Check if there are any changes
+          if git diff --quiet Cargo.toml; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  Cargo.toml already at version ${{ steps.calver.outputs.version }}"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "📝 Updated Cargo.toml to version ${{ steps.calver.outputs.version }}"
+          fi
 
       - name: Commit version bump
-        if: steps.check_tag.outputs.exists == 'false'
+        if: steps.check_tag.outputs.exists == 'false' && steps.update_version.outputs.has_changes == 'true'
         run: |
           git add Cargo.toml
           git commit -m "chore: bump version to ${{ steps.calver.outputs.version }} [skip-release]"
