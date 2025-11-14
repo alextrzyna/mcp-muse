@@ -376,11 +376,29 @@ Examples:
                                 },
                                 "start_time": {
                                     "type": "number",
-                                    "description": "⏰ Start time in seconds. Use 0.0 for simultaneous notes (chords), incremental timing for melodies"
+                                    "description": "⏰ Start time in seconds. Use 0.0 for simultaneous notes (chords), incremental timing for melodies. DEPRECATED: Consider using musical_time for better sync."
                                 },
                                 "duration": {
                                     "type": "number",
-                                    "description": "⏳ Note duration in seconds. Try: 0.25=16th, 0.5=8th, 1.0=quarter, 2.0=half, 4.0=whole note"
+                                    "description": "⏳ Note duration in seconds. Try: 0.25=16th, 0.5=8th, 1.0=quarter, 2.0=half, 4.0=whole note. DEPRECATED: Consider using musical_duration for better sync."
+                                },
+                                "musical_time": {
+                                    "type": "object",
+                                    "description": "🎼 Musical timing (bar.beat.tick) - Alternative to start_time for precise timing",
+                                    "properties": {
+                                        "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
+                                        "beat": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Beat within bar (1-4)"},
+                                        "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
+                                    },
+                                    "required": ["bar", "beat", "tick"]
+                                },
+                                "musical_duration": {
+                                    "type": "object",
+                                    "description": "🎵 Musical duration - Alternative to duration for precise timing",
+                                    "oneOf": [
+                                        {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
+                                        {"type": "string", "enum": ["whole", "half", "quarter", "eighth", "sixteenth", "triplet"], "description": "Note values"}
+                                    ]
                                 },
                                 "channel": {
                                     "type": "integer",
@@ -698,7 +716,10 @@ Examples:
                                     "enum": ["studio", "concert_hall", "vintage", "ambient", "live_stage", "tight_mix", "dreamy", "spacious", "analog_warmth", "retro_echo", "psychedelic", "distorted", "filtered", "lush_chorus"]
                                 }
                             },
-                            "required": ["start_time", "duration"],
+                            "anyOf": [
+                                {"required": ["start_time", "duration"]},
+                                {"required": ["musical_time", "musical_duration"]}
+                            ],
                             "additionalProperties": false
                         }
                     },
