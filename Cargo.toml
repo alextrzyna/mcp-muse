@@ -1,7 +1,16 @@
 [package]
 name = "mcp-muse"
-version = "0.1.0"
+version = "2025.11.0"
 edition = "2024"
+authors = ["Alex Trzyna"]
+description = "MCP server providing authentic 16-bit SNES gaming sounds, R2D2 expressive emotions, and professional music synthesis for AI agents"
+license = "MIT"
+repository = "https://github.com/alextrzyna/mcp-muse"
+homepage = "https://github.com/alextrzyna/mcp-muse"
+documentation = "https://github.com/alextrzyna/mcp-muse#readme"
+readme = "README.md"
+keywords = ["mcp", "audio", "midi", "synthesizer", "music"]
+categories = ["multimedia::audio", "command-line-utilities"]
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

@@ -87,13 +87,30 @@
 
 ## Installation
 
-### Prerequisites
+### Method 1: Install from crates.io (Recommended)
 
-- Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- Audio output device (speakers/headphones)
-- ~150MB disk space for SoundFont
+The easiest way to install MCP-Muse:
 
-### From Source
+```bash
+cargo install mcp-muse
+```
+
+This will download and install the latest stable release. Then proceed to [Quick Start](#quick-start) below.
+
+### Method 2: Download Pre-built Binary
+
+Download the latest binary for your platform from [GitHub Releases](https://github.com/alextrzyna/mcp-muse/releases):
+
+- **Linux**: `mcp-muse-linux-x86_64.tar.gz`
+- **macOS (Intel)**: `mcp-muse-macos-x86_64.tar.gz`
+- **macOS (Apple Silicon)**: `mcp-muse-macos-aarch64.tar.gz`
+- **Windows**: `mcp-muse-windows-x86_64.zip`
+
+Extract the archive and add the binary to your PATH, or specify the full path in your MCP configuration.
+
+### Method 3: Build from Source
+
+For development or latest features:
 
 ```bash
 git clone https://github.com/alextrzyna/mcp-muse.git
@@ -101,13 +118,29 @@ cd mcp-muse
 cargo build --release
 ```
 
+The binary will be available at `./target/release/mcp-muse`.
+
+### Prerequisites
+
+- Rust 1.70+ (install via [rustup](https://rustup.rs/)) - only needed for cargo install or building from source
+- Audio output device (speakers/headphones)
+- ~150MB disk space for SoundFont (auto-downloaded during setup)
+
 ## Quick Start
 
 ### 1. Run Setup
 
-For **Cursor**:
+For **Cursor** (choose based on your installation method):
+
 ```bash
+# If installed via cargo:
+mcp-muse --setup
+
+# If built from source:
 ./target/release/mcp-muse --setup
+
+# If using downloaded binary:
+/path/to/mcp-muse --setup
 ```
 
 This **interactively** guides you through:
@@ -504,6 +537,10 @@ cargo run -- --setup  # Setup with SoundFont download
 cargo run             # Run MCP server
 ```
 
+### Versioning
+
+This project uses [CalVer](https://calver.org/) versioning in the format `YYYY.MM.PATCH` (e.g., `2025.11.0`). Releases are automatically created when changes are merged to the main branch. See [VERSIONING.md](VERSIONING.md) for details.
+
 ## Troubleshooting
 
 ### Audio Issues
@@ -529,8 +566,9 @@ cargo run             # Run MCP server
 
 **Setup issues:**
 ```bash
-# Re-run setup to re-download SoundFont
-./target/release/mcp-muse --setup
+# Re-run setup to re-download SoundFont (adjust command based on installation method)
+mcp-muse --setup                      # If installed via cargo
+./target/release/mcp-muse --setup     # If built from source
 
 # Check SoundFont exists and size
 ls -la assets/FluidR3_GM.sf2  # Should be ~142MB
