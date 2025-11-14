@@ -295,7 +295,9 @@ impl MidiPlayer {
             }
 
             // Convert musical_time to start_time if present
-            if note.start_time.is_none() && let Some(musical_time) = &note.musical_time {
+            if note.start_time.is_none()
+                && let Some(musical_time) = &note.musical_time
+            {
                 // Use the MusicalTime::to_seconds method
                 // Assuming 4/4 time signature (4 beats per bar) and 480 ticks per beat
                 let tempo = sequence.tempo;
@@ -312,7 +314,9 @@ impl MidiPlayer {
             }
 
             // Convert musical_duration to duration if present
-            if note.duration.is_none() && let Some(ref musical_duration) = note.musical_duration {
+            if note.duration.is_none()
+                && let Some(ref musical_duration) = note.musical_duration
+            {
                 let tempo = sequence.tempo;
                 let seconds_per_beat = 60.0 / tempo as f64;
 
