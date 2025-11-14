@@ -958,6 +958,9 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     // Handle the result
     match playback_result {
         Ok(()) => {
+            // Leak the player to keep audio stream alive for non-blocking playback
+            Box::leak(Box::new(player));
+            tracing::info!("Player leaked to keep audio alive (non-blocking)");
             let mode_description = match (has_midi, has_r2d2, has_synthesis, has_presets) {
                 (true, true, true, true) => {
                     "🎵🤖🎛️🎹 Ultimate audio sequence playback started successfully! MIDI music, R2D2 expressions, custom synthesis, and classic preset sounds are now playing in perfect synchronization."
@@ -1331,10 +1334,10 @@ fn handle_play_sequence_tool(arguments: Value, id: Option<Value>) -> JsonRpcResp
         };
     }
 
-    // Create MIDI player and play the resolved sequence
+    // Create MIDI player
     let player = match MidiPlayer::new() {
         Ok(p) => {
-            tracing::info!("Successfully created MIDI player for sequence playback");
+            tracing::info!("Successfully created MIDI player");
             p
         }
         Err(e) => {
@@ -1365,6 +1368,10 @@ fn handle_play_sequence_tool(arguments: Value, id: Option<Value>) -> JsonRpcResp
 
     match player.play_enhanced_mixed(resolved_sequence) {
         Ok(()) => {
+            // Leak the player to keep audio stream alive for non-blocking playback
+            Box::leak(Box::new(player));
+            tracing::info!("Player leaked to keep audio alive (non-blocking)");
+
             let composition_description = match (individual_notes_count > 0, pattern_count > 0) {
                 (true, true) => format!(
                     "🎼🎵 Enhanced sequence playback started successfully! Playing {} individual notes plus {} pattern references (expanded to {} total notes) in perfect synchronization.",

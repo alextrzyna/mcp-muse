@@ -38,3 +38,6 @@ Thumbs.db
 *.sf3
 assets/*.sf2
 assets/*.sf3
+
+# Claude Code local settings
+.claude/

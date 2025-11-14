@@ -488,17 +488,11 @@ impl MidiPlayer {
         // Set volume to ensure it's audible
         self.sink.set_volume(1.0);
 
-        tracing::info!("Playback started - volume: {}", self.sink.volume());
-
-        // Wait for playback to complete
-        let wait_time = total_time + Duration::from_millis(200);
         tracing::info!(
-            "Waiting {:.2}s for enhanced mixed playback to complete...",
-            wait_time.as_secs_f64()
+            "Playback started (non-blocking) - volume: {}, duration: {:.2}s",
+            self.sink.volume(),
+            total_time.as_secs_f64()
         );
-
-        std::thread::sleep(wait_time);
-        tracing::info!("Enhanced mixed sequence playback completed");
 
         Ok(())
     }
