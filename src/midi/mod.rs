@@ -52,15 +52,15 @@ impl MusicalTime {
 
     /// Quantize to nearest grid position
     #[allow(dead_code)]
-    pub fn quantize(&self, grid_division: u32, ticks_per_beat: u32) -> Self {
+    pub fn quantize(&self, grid_division: u32, ticks_per_beat: u32, beats_per_bar: u32) -> Self {
         let ticks_per_division = ticks_per_beat / grid_division;
         let quantized_tick =
             ((self.tick as f64 / ticks_per_division as f64).round() as u32) * ticks_per_division;
 
         if quantized_tick >= ticks_per_beat {
             // Overflow to next beat
-            if self.beat >= 4 {
-                // Assuming 4/4 time
+            if self.beat >= beats_per_bar {
+                // Overflow to next bar
                 Self {
                     bar: self.bar + 1,
                     beat: 1,
