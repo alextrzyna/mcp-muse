@@ -299,7 +299,10 @@ fn setup_cursor_config() {
                 match serde_json::from_str(&content) {
                     Ok(value) => value,
                     Err(e) => {
-                        eprintln!("⚠️  Warning: Could not parse existing config ({}), creating backup and starting fresh", e);
+                        eprintln!(
+                            "⚠️  Warning: Could not parse existing config ({}), creating backup and starting fresh",
+                            e
+                        );
                         // Create backup of malformed config
                         let backup_path = config_path.with_extension("json.backup");
                         if let Err(backup_err) = fs::copy(&config_path, &backup_path) {
@@ -347,10 +350,10 @@ fn setup_cursor_config() {
     });
 
     // Add soundfont path to MCP config if custom path is configured
-    if let Ok(config) = SetupConfig::load() {
-        if let Some(soundfont_path) = config.soundfont_path {
-            muse_entry["soundfont_path"] = serde_json::Value::String(soundfont_path);
-        }
+    if let Ok(config) = SetupConfig::load()
+        && let Some(soundfont_path) = config.soundfont_path
+    {
+        muse_entry["soundfont_path"] = serde_json::Value::String(soundfont_path);
     }
 
     // Check if we need to update

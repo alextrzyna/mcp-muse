@@ -1,8 +1,15 @@
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
-use crate::midi::{MidiPlayer, SimpleSequence};
+use crate::midi::{ExtendedSequence, MidiPlayer, SequencePattern, SimpleSequence};
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::sync::{Arc, Mutex};
+
+// Global pattern storage for the MCP server session
+lazy_static::lazy_static! {
+    static ref PATTERN_STORE: Arc<Mutex<HashMap<String, SequencePattern>>> = Arc::new(Mutex::new(HashMap::new()));
+}
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -44,6 +51,7 @@ struct JsonRpcError {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct InitializeParams {
     #[serde(rename = "protocolVersion")]
     #[allow(dead_code)]
@@ -99,12 +107,369 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
 
     let tools = json!([
         {
+            "name": "define_sequence_pattern",
+            "description": "🎼 DEFINE REUSABLE SEQUENCE PATTERNS: Create named musical patterns that can be reused with transformations!
+
+Define drum beats, bass lines, chord progressions, and melodic phrases once, then reuse them throughout your composition with different instruments, transpositions, and timing. Perfect for:
+
+• 🥁 DRUM PATTERNS: Create classic beat patterns that repeat throughout a song
+• 🎸 BASS LINES: Define groovy bass patterns that can be transposed to different keys  
+• 🎹 CHORD PROGRESSIONS: Set up harmonic sequences that can be used with different instruments
+• 🎵 MELODIC MOTIFS: Create memorable musical phrases that can be varied and developed
+
+**Pattern Features:**
+• **Transposition**: Shift patterns up/down by semitones for different keys
+• **Instrument Override**: Play the same pattern with different instruments
+• **Velocity/Duration Scaling**: Adjust intensity and timing dynamically
+• **Repetition**: Repeat patterns multiple times with spacing control
+• **Channel Routing**: Route patterns to specific MIDI channels
+
+**Usage Examples:**
+• House Beat: Define a kick-snare-hat pattern, then use it throughout your track
+• Chord Progression: Define a I-V-vi-IV progression, transpose it to different keys
+• Bass Groove: Create a funky bass line, then transpose it for chorus sections
+• Melody Hook: Define a catchy melody, then play it with different instruments
+
+This tool stores patterns in memory for the current session and makes composition much more efficient!",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "🏷️ Pattern name/identifier (e.g., 'house_beat', 'chord_prog_1', 'funky_bass')"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "📝 Optional description of what this pattern represents"
+                    },
+                    "notes": {
+                        "type": "array",
+                        "description": "🎵 Array of notes that make up this pattern",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "note": {"type": "integer", "minimum": 0, "maximum": 127},
+                                "velocity": {"type": "integer", "minimum": 0, "maximum": 127},
+                                "start_time": {"type": "number", "description": "⚠️ DEPRECATED: Use musical_time for better sync"},
+                                "duration": {"type": "number", "description": "⚠️ DEPRECATED: Use musical_duration for better sync"},
+                                "musical_time": {
+                                    "type": "object",
+                                    "description": "🎼 Musical timing (bar.beat.tick) - RECOMMENDED for perfect sync!",
+                                    "properties": {
+                                        "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
+                                        "beat": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Beat within bar (1-4)"},
+                                        "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
+                                    },
+                                    "required": ["bar", "beat", "tick"]
+                                },
+                                "musical_duration": {
+                                    "type": "object",
+                                    "description": "🎵 Musical duration - RECOMMENDED for perfect sync!",
+                                    "oneOf": [
+                                        {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
+                                        {"type": "string", "enum": ["whole", "half", "quarter", "eighth", "sixteenth", "triplet"], "description": "Note values"}
+                                    ]
+                                },
+                                "channel": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
+                                "instrument": {"type": "integer", "minimum": 0, "maximum": 127},
+                                "note_type": {"type": "string", "enum": ["midi", "r2d2"], "default": "midi"},
+                                "r2d2_emotion": {"type": "string", "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]},
+                                "r2d2_intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                                "r2d2_complexity": {"type": "integer", "minimum": 1, "maximum": 5},
+                                "synth_type": {"type": "string"},
+                                "preset_name": {"type": "string"},
+                                "preset_category": {"type": "string"}
+                            },
+                            "anyOf": [
+                                {"required": ["start_time", "duration"]},
+                                {"required": ["musical_time", "musical_duration"]}
+                            ]
+                        }
+                    },
+                    "tempo": {
+                        "type": "integer",
+                        "description": "🎵 Default tempo for this pattern (can be overridden when referenced)",
+                        "minimum": 60,
+                        "maximum": 200,
+                        "default": 120
+                    },
+                    "pattern_bars": {
+                        "type": "number",
+                        "description": "🎼 Pattern length in bars (ensures perfect looping!) - RECOMMENDED for sync",
+                        "minimum": 0.25,
+                        "maximum": 16.0,
+                        "default": 4.0
+                    },
+                    "beats_per_bar": {
+                        "type": "integer",
+                        "description": "🎶 Time signature - beats per bar (4 for 4/4 time)",
+                        "minimum": 2,
+                        "maximum": 8,
+                        "default": 4
+                    },
+                    "quantize_grid": {
+                        "type": "string",
+                        "description": "📐 Snap timing to musical grid for perfect alignment",
+                        "enum": ["off", "bar", "beat", "8th", "16th", "32nd", "triplet"],
+                        "default": "off"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "🏗️ Pattern category for organization (e.g., 'drums', 'bass', 'melody', 'chords')"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "description": "🏷️ Tags for searching/filtering patterns",
+                        "items": {"type": "string"}
+                    }
+                },
+                "required": ["name", "notes"]
+            }
+        },
+        {
+            "name": "play_sequence",
+            "description": "🎼🎵 ENHANCED SEQUENCE PLAYER: Play music using both individual notes AND reusable sequence patterns with PERFECT MUSICAL TIMING!
+
+This enhanced tool combines the power of individual note specification with the efficiency of pattern references, plus a revolutionary bar-based timing system that ensures everything stays perfectly in sync!
+
+**🎯 MUSICAL TIMING REVOLUTION:**
+• **Bar-Based Positioning**: Use start_bar instead of seconds for perfect alignment
+• **Smart Bar Arrays**: Specify exact bars where patterns should play [1, 5, 9, 13]
+• **Auto-Alignment**: Patterns automatically snap to bar boundaries 
+• **No More Drift**: Drum patterns stay locked to basslines and chord progressions
+• **Professional Results**: Create music that sounds like it was made in a studio
+
+**🎭 PATTERN FEATURES:**
+• **Pattern References**: Reference previously defined patterns by name
+• **Real-time Transformations**: Transpose, change instruments, scale velocity/duration
+• **Intelligent Repetition**: Repeat patterns with musical spacing (in bars, not seconds!)
+• **Channel Routing**: Route patterns to specific MIDI channels
+• **Mixed Composition**: Combine individual notes with pattern references seamlessly
+
+**🎸 TRANSFORMATION OPTIONS:**
+• **Transpose** (-12 to +12 semitones): Shift patterns to different keys
+• **Instrument Override**: Use the same pattern with different instruments
+• **Velocity Scale** (0.1-2.0): Make patterns softer or more intense
+• **Duration Scale** (0.1-4.0): Make patterns faster/slower, staccato/legato
+• **Channel Override**: Route to specific MIDI channels
+• **Bar-Based Repetition**: Repeat patterns every N bars with perfect timing
+• **Beat Offset**: Start patterns on specific beats within bars
+
+**✨ TIMING IMPROVEMENTS:**
+• **No More Pattern Drift**: Bar-based timing keeps everything synchronized
+• **Professional Arrangements**: Easily create verse-chorus structures
+• **Perfect Loops**: 4-bar patterns stay perfectly aligned
+• **Dynamic Arrangements**: Play patterns on specific bars for complex compositions
+
+**🎵 COMPOSITION EXAMPLES:**
+
+**🎼 Perfect Verse-Chorus Structure (Bar-Based):**
+```json
+{
+  \"patterns\": [
+    {\"pattern_name\": \"drum_beat\", \"start_bar\": 1, \"repeat_count\": 16, \"align_to_bars\": true},
+    {\"pattern_name\": \"bass_line\", \"start_bar\": 1, \"repeat_count\": 8},
+    {\"pattern_name\": \"chord_prog\", \"start_bar\": 1, \"instrument_override\": 1},
+    {\"pattern_name\": \"chord_prog\", \"start_bar\": 9, \"transpose\": 2, \"instrument_override\": 73}
+  ]
+}
+```
+
+**🎹 Smart Bar Placement:**
+```json
+{
+  \"patterns\": [
+    {\"pattern_name\": \"drums\", \"bars\": [1, 3, 5, 7, 9, 11, 13, 15]},
+    {\"pattern_name\": \"bass\", \"bars\": [2, 4, 6, 8, 10, 12, 14, 16]},
+    {\"pattern_name\": \"chords\", \"bars\": [5, 13], \"velocity_scale\": 0.8}
+  ]
+}
+```
+
+**🎸 Dynamic Musical Variations:**
+```json
+{
+  \"patterns\": [
+    {\"pattern_name\": \"melody\", \"start_bar\": 1, \"velocity_scale\": 0.7},
+    {\"pattern_name\": \"melody\", \"start_bar\": 5, \"transpose\": 5, \"velocity_scale\": 1.2},
+    {\"pattern_name\": \"melody\", \"start_bar\": 9, \"transpose\": -3, \"duration_scale\": 0.5}
+  ]
+}
+```
+
+**🥁 Professional Drum Arrangement:**
+```json
+{
+  \"patterns\": [
+    {\"pattern_name\": \"kick_pattern\", \"start_bar\": 1, \"repeat_count\": 16},
+    {\"pattern_name\": \"snare_pattern\", \"start_bar\": 2, \"repeat_count\": 8, \"repeat_spacing_bars\": 1},
+    {\"pattern_name\": \"hihat_pattern\", \"bars\": [1, 2, 3, 4, 9, 10, 11, 12]}
+  ]
+}
+```
+
+**🎯 WHEN TO USE WHICH TOOL:**
+• **play_sequence** (THIS TOOL): Full songs, complex compositions, repeating patterns, professional arrangements
+• **define_sequence_pattern**: Create reusable patterns (drum beats, bass lines, chord progressions, melodies)  
+• **play_notes**: Quick sounds, single instruments, R2D2 expressions, sound effects, simple melodies
+• **list_patterns**: Browse available patterns for reference
+
+This tool makes composition much more efficient by allowing you to define musical elements once and reuse them with variations throughout your piece!",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "array",
+                        "description": "🎵 Individual notes (same format as play_notes tool)",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "note": {"type": "integer", "minimum": 0, "maximum": 127},
+                                "velocity": {"type": "integer", "minimum": 0, "maximum": 127},
+                                "start_time": {"type": "number"},
+                                "duration": {"type": "number"},
+                                "channel": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
+                                "instrument": {"type": "integer", "minimum": 0, "maximum": 127},
+                                "note_type": {"type": "string", "enum": ["midi", "r2d2"], "default": "midi"}
+                            },
+                            "required": ["start_time", "duration"]
+                        }
+                    },
+                    "patterns": {
+                        "type": "array",
+                        "description": "🎼 Pattern references with transformations",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "pattern_name": {
+                                    "type": "string",
+                                    "description": "🏷️ Name of the pattern to reference"
+                                },
+                                "start_time_offset": {
+                                    "type": "number",
+                                    "description": "⏰ DEPRECATED: Use start_bar for perfect sync!",
+                                    "default": 0
+                                },
+                                "start_bar": {
+                                    "type": "integer",
+                                    "description": "🎼 RECOMMENDED: Start at specific bar number (1-based) - ensures perfect alignment!",
+                                    "minimum": 1,
+                                    "maximum": 256
+                                },
+                                "start_beat": {
+                                    "type": "integer",
+                                    "description": "🎵 Start on specific beat within the bar (1-4 for 4/4 time)",
+                                    "minimum": 1,
+                                    "maximum": 8,
+                                    "default": 1
+                                },
+                                "bars": {
+                                    "type": "array",
+                                    "description": "🎯 SMART ARRANGEMENT: Play pattern on specific bars only (e.g., [1, 5, 9, 13])",
+                                    "items": {"type": "integer", "minimum": 1, "maximum": 256}
+                                },
+                                "transpose": {
+                                    "type": "integer",
+                                    "description": "🎵 Transpose by semitones (-12 to +12): -12=octave down, 0=original, +7=fifth up, +12=octave up",
+                                    "minimum": -12,
+                                    "maximum": 12,
+                                    "default": 0
+                                },
+                                "instrument_override": {
+                                    "type": "integer",
+                                    "description": "🎹 Override instrument for all MIDI notes in pattern",
+                                    "minimum": 0,
+                                    "maximum": 127
+                                },
+                                "velocity_scale": {
+                                    "type": "number",
+                                    "description": "🔊 Scale all velocities (0.1-2.0): 0.5=softer, 1.0=original, 1.5=louder",
+                                    "minimum": 0.1,
+                                    "maximum": 2.0,
+                                    "default": 1.0
+                                },
+                                "duration_scale": {
+                                    "type": "number",
+                                    "description": "⏳ Scale all durations (0.1-4.0): 0.5=staccato, 1.0=original, 2.0=legato",
+                                    "minimum": 0.1,
+                                    "maximum": 4.0,
+                                    "default": 1.0
+                                },
+                                "channel_override": {
+                                    "type": "integer",
+                                    "description": "📻 Override MIDI channel for all notes in pattern",
+                                    "minimum": 0,
+                                    "maximum": 15
+                                },
+                                "repeat_count": {
+                                    "type": "integer",
+                                    "description": "🔄 Number of times to repeat this pattern (ignored if 'bars' specified)",
+                                    "minimum": 1,
+                                    "maximum": 64,
+                                    "default": 1
+                                },
+                                "repeat_spacing_bars": {
+                                    "type": "number",
+                                    "description": "🎼 RECOMMENDED: Spacing between repeats in bars (musical spacing)",
+                                    "minimum": 0,
+                                    "maximum": 16,
+                                    "default": 0
+                                },
+                                "align_to_bars": {
+                                    "type": "boolean",
+                                    "description": "📐 Align pattern to bar boundaries for perfect sync",
+                                    "default": true
+                                }
+                            },
+                            "required": ["pattern_name"]
+                        }
+                    },
+                    "tempo": {
+                        "type": "integer",
+                        "description": "🎵 Tempo in BPM for the entire sequence",
+                        "minimum": 60,
+                        "maximum": 200,
+                        "default": 120
+                    }
+                },
+                "anyOf": [
+                    {"required": ["notes"]},
+                    {"required": ["patterns"]}
+                ]
+            }
+        },
+        {
+            "name": "list_patterns",
+            "description": "📋 LIST SEQUENCE PATTERNS: View all defined sequence patterns in the current session.
+
+Shows all available patterns with their names, descriptions, categories, and basic info. Perfect for:
+• 🔍 **Discovery**: See what patterns are available for use
+• 📊 **Organization**: Review patterns by category (drums, bass, melody, etc.)
+• 🏷️ **Reference**: Get pattern names for use in play_sequence tool
+• 📝 **Documentation**: See pattern descriptions and metadata
+
+Returns a formatted list of all stored patterns with their key information.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        },
+        {
             "name": "play_notes",
             "description": "🎮🤖🎛️ UNIVERSAL AUDIO ENGINE: The ultimate all-in-one tool for MIDI music, R2D2 expressions, and custom synthesis!
 
 🎵 MIDI MUSIC: 128 GM instruments, authentic SNES gaming sounds, professional effects chain
 🤖 R2D2 EXPRESSIONS: 9 emotions, ring modulation synthesis, authentic robotic vocalizations  
 🎛️ CUSTOM SYNTHESIS: 19 synthesis types, professional drum sounds, 6-effect audio processing
+
+⚡ **FOR COMPLEX COMPOSITIONS**: Use the **define_sequence_pattern** and **play_sequence** tools instead! They offer:
+• 🔄 Reusable patterns (drum beats, bass lines, chord progressions)
+• 🎼 Musical timing with bar-based alignment (no more timing drift!)
+• 🎭 Pattern transformations (transpose, instrument changes, repetition)
+• 🎯 Professional composition workflow for full songs and complex pieces
+
+💡 **THIS TOOL IS PERFECT FOR**: Quick sounds, single instruments, simple melodies, R2D2 expressions, and sound effects.
 
 💡 QUICK EXAMPLES:
 • Victory Fanfare: [{\"note\": 60, \"instrument\": 56, \"velocity\": 120, \"duration\": 1.0}]
@@ -689,6 +1054,9 @@ fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse
 
     match tool_params.name.as_str() {
         "play_notes" => handle_play_notes_tool(tool_params.arguments, id),
+        "define_sequence_pattern" => handle_define_pattern_tool(tool_params.arguments, id),
+        "play_sequence" => handle_play_sequence_tool(tool_params.arguments, id),
+        "list_patterns" => handle_list_patterns_tool(id),
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -858,21 +1226,51 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
     match playback_result {
         Ok(()) => {
             let mode_description = match (has_midi, has_r2d2, has_synthesis, has_presets) {
-                (true, true, true, true) => "🎵🤖🎛️🎹 Ultimate audio sequence playback started successfully! MIDI music, R2D2 expressions, custom synthesis, and classic preset sounds are now playing in perfect synchronization.",
-                (true, true, true, false) => "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization.",
-                (true, true, false, true) => "🎵🤖🎹 Mixed MIDI, R2D2, and preset sequence playback started successfully! Traditional music, robotic expressions, and vintage synthesizer sounds are now playing together.",
-                (true, false, true, true) => "🎵🎛️🎹 Mixed MIDI, synthesis, and preset sequence playback started successfully! Traditional music, custom synthesis, and classic sounds are now playing together.",
-                (false, true, true, true) => "🤖🎛️🎹 Mixed R2D2, synthesis, and preset sequence playback started successfully! Robotic expressions, custom synthesis, and vintage sounds are now playing in synchronization.",
-                (true, false, true, false) => "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together.",
-                (false, true, true, false) => "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization.",
-                (true, true, false, false) => "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization.",
-                (true, false, false, true) => "🎵🎹 Mixed MIDI and preset sequence playback started successfully! Traditional music and classic synthesizer sounds are now playing together.",
-                (false, true, false, true) => "🤖🎹 Mixed R2D2 and preset sequence playback started successfully! Robotic expressions and vintage synthesizer sounds are now playing together.",
-                (false, false, true, true) => "🎛️🎹 Mixed synthesis and preset sequence playback started successfully! Custom synthesis and classic vintage sounds are now playing together.",
-                (false, true, false, false) => "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing.",
-                (false, false, true, false) => "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing.",
-                (false, false, false, true) => "🎹 Classic synthesizer preset sequence playback started successfully! Authentic vintage synthesizer sounds are now playing.",
-                _ => "🎵 Pure MIDI sequence playback started successfully! The music is now playing.",
+                (true, true, true, true) => {
+                    "🎵🤖🎛️🎹 Ultimate audio sequence playback started successfully! MIDI music, R2D2 expressions, custom synthesis, and classic preset sounds are now playing in perfect synchronization."
+                }
+                (true, true, true, false) => {
+                    "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization."
+                }
+                (true, true, false, true) => {
+                    "🎵🤖🎹 Mixed MIDI, R2D2, and preset sequence playback started successfully! Traditional music, robotic expressions, and vintage synthesizer sounds are now playing together."
+                }
+                (true, false, true, true) => {
+                    "🎵🎛️🎹 Mixed MIDI, synthesis, and preset sequence playback started successfully! Traditional music, custom synthesis, and classic sounds are now playing together."
+                }
+                (false, true, true, true) => {
+                    "🤖🎛️🎹 Mixed R2D2, synthesis, and preset sequence playback started successfully! Robotic expressions, custom synthesis, and vintage sounds are now playing in synchronization."
+                }
+                (true, false, true, false) => {
+                    "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together."
+                }
+                (false, true, true, false) => {
+                    "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization."
+                }
+                (true, true, false, false) => {
+                    "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization."
+                }
+                (true, false, false, true) => {
+                    "🎵🎹 Mixed MIDI and preset sequence playback started successfully! Traditional music and classic synthesizer sounds are now playing together."
+                }
+                (false, true, false, true) => {
+                    "🤖🎹 Mixed R2D2 and preset sequence playback started successfully! Robotic expressions and vintage synthesizer sounds are now playing together."
+                }
+                (false, false, true, true) => {
+                    "🎛️🎹 Mixed synthesis and preset sequence playback started successfully! Custom synthesis and classic vintage sounds are now playing together."
+                }
+                (false, true, false, false) => {
+                    "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing."
+                }
+                (false, false, true, false) => {
+                    "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing."
+                }
+                (false, false, false, true) => {
+                    "🎹 Classic synthesizer preset sequence playback started successfully! Authentic vintage synthesizer sounds are now playing."
+                }
+                _ => {
+                    "🎵 Pure MIDI sequence playback started successfully! The music is now playing."
+                }
             };
 
             tracing::info!("Playback completed successfully");
@@ -899,6 +1297,514 @@ fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcRespons
                 error: Some(JsonRpcError {
                     code: -32603,
                     message: format!("Failed to play sequence: {}", e),
+                    data: None,
+                }),
+            }
+        }
+    }
+}
+
+fn handle_define_pattern_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+    tracing::info!(
+        "handle_define_pattern_tool called with arguments: {:?}",
+        arguments
+    );
+
+    // Parse the sequence pattern from JSON
+    let pattern: SequencePattern = match serde_json::from_value(arguments) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("Failed to parse sequence pattern: {}", e);
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Failed to parse sequence pattern: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    if pattern.notes.is_empty() {
+        tracing::warn!("Pattern notes are empty");
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: "Pattern notes cannot be empty".to_string(),
+                data: None,
+            }),
+        };
+    }
+
+    // Validate all notes in the pattern
+    for (i, note) in pattern.notes.iter().enumerate() {
+        if let Err(e) = note.validate_r2d2() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid R2D2 parameters in note {}: {}", i + 1, e),
+                    data: None,
+                }),
+            };
+        }
+
+        if let Err(e) = note.validate_synthesis() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid synthesis parameters in note {}: {}", i + 1, e),
+                    data: None,
+                }),
+            };
+        }
+
+        if let Err(e) = note.validate_preset() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid preset parameters in note {}: {}", i + 1, e),
+                    data: None,
+                }),
+            };
+        }
+    }
+
+    // Store the pattern
+    let pattern_name = pattern.name.clone();
+    match PATTERN_STORE.lock() {
+        Ok(mut store) => {
+            let pattern_info = format!(
+                "Pattern '{}' with {} notes, duration: {:.2}s",
+                pattern.name,
+                pattern.notes.len(),
+                pattern.get_pattern_duration()
+            );
+
+            let category_info = pattern
+                .category
+                .as_ref()
+                .map(|c| format!(" (category: {})", c))
+                .unwrap_or_default();
+
+            let tags_info = if !pattern.tags.is_empty() {
+                format!(" [tags: {}]", pattern.tags.join(", "))
+            } else {
+                String::new()
+            };
+
+            store.insert(pattern.name.clone(), pattern);
+            tracing::info!("Stored pattern: {}", pattern_name);
+
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: Some(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": format!("🎼 Successfully defined sequence pattern: {}{}{}
+
+📋 **Pattern Details:**
+• **Name**: {}
+• **Notes**: {} notes
+• **Duration**: {:.2} seconds
+• **Tempo**: {} BPM
+{}{}
+
+✅ Pattern is now stored and ready to use with the `play_sequence` tool!
+
+💡 **Usage Example:**
+```json
+{{
+  \"patterns\": [
+    {{\"pattern_name\": \"{}\", \"start_time_offset\": 0}}
+  ]
+}}
+```",
+                                pattern_info, category_info, tags_info,
+                                pattern_name,
+                                store.get(&pattern_name).unwrap().notes.len(),
+                                store.get(&pattern_name).unwrap().get_pattern_duration(),
+                                store.get(&pattern_name).unwrap().tempo,
+                                store.get(&pattern_name).unwrap().description.as_ref()
+                                    .map(|d| format!("\n• **Description**: {}", d))
+                                    .unwrap_or_default(),
+                                if !store.get(&pattern_name).unwrap().tags.is_empty() {
+                                    format!("\n• **Tags**: {}", store.get(&pattern_name).unwrap().tags.join(", "))
+                                } else { String::new() },
+                                pattern_name
+                            )
+                        }
+                    ]
+                })),
+                error: None,
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to lock pattern store: {}", e);
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: "Failed to store pattern due to internal error".to_string(),
+                    data: None,
+                }),
+            }
+        }
+    }
+}
+
+fn handle_play_sequence_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+    tracing::info!(
+        "handle_play_sequence_tool called with arguments: {:?}",
+        arguments
+    );
+
+    // Parse the extended sequence from JSON
+    let extended_sequence: ExtendedSequence = match serde_json::from_value(arguments) {
+        Ok(seq) => seq,
+        Err(e) => {
+            tracing::error!("Failed to parse extended sequence: {}", e);
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Failed to parse extended sequence: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    if extended_sequence.notes.is_empty() && extended_sequence.patterns.is_empty() {
+        tracing::warn!("Extended sequence has no notes or patterns");
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: "Sequence must contain either notes or pattern references".to_string(),
+                data: None,
+            }),
+        };
+    }
+
+    // Validate individual notes
+    for (i, note) in extended_sequence.notes.iter().enumerate() {
+        if let Err(e) = note.validate_r2d2() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid R2D2 parameters in note {}: {}", i + 1, e),
+                    data: None,
+                }),
+            };
+        }
+
+        if let Err(e) = note.validate_synthesis() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid synthesis parameters in note {}: {}", i + 1, e),
+                    data: None,
+                }),
+            };
+        }
+
+        if let Err(e) = note.validate_preset() {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32602,
+                    message: format!("Invalid preset parameters in note {}: {}", i + 1, e),
+                    data: None,
+                }),
+            };
+        }
+    }
+
+    // Resolve pattern references to get final sequence
+    let resolved_sequence = match PATTERN_STORE.lock() {
+        Ok(store) => match extended_sequence.resolve_patterns(&store) {
+            Ok(seq) => seq,
+            Err(e) => {
+                tracing::error!("Failed to resolve patterns: {}", e);
+                return JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id,
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32602,
+                        message: format!("Failed to resolve patterns: {}", e),
+                        data: None,
+                    }),
+                };
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to lock pattern store: {}", e);
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: "Failed to access pattern store".to_string(),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    if resolved_sequence.notes.is_empty() {
+        tracing::warn!("Resolved sequence is empty");
+        return JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code: -32602,
+                message: "Resolved sequence cannot be empty".to_string(),
+                data: None,
+            }),
+        };
+    }
+
+    // Create MIDI player and play the resolved sequence
+    let player = match MidiPlayer::new() {
+        Ok(p) => {
+            tracing::info!("Successfully created MIDI player for sequence playback");
+            p
+        }
+        Err(e) => {
+            tracing::error!("Failed to create MIDI player: {}", e);
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Failed to create MIDI player: {}", e),
+                    data: None,
+                }),
+            };
+        }
+    };
+
+    let pattern_count = extended_sequence.patterns.len();
+    let individual_notes_count = extended_sequence.notes.len();
+    let total_resolved_notes = resolved_sequence.notes.len();
+
+    tracing::info!(
+        "Playing sequence with {} pattern references, {} individual notes, {} total resolved notes",
+        pattern_count,
+        individual_notes_count,
+        total_resolved_notes
+    );
+
+    match player.play_enhanced_mixed(resolved_sequence) {
+        Ok(()) => {
+            let composition_description = match (individual_notes_count > 0, pattern_count > 0) {
+                (true, true) => format!(
+                    "🎼🎵 Enhanced sequence playback started successfully! Playing {} individual notes plus {} pattern references (expanded to {} total notes) in perfect synchronization.",
+                    individual_notes_count, pattern_count, total_resolved_notes
+                ),
+                (false, true) => format!(
+                    "🎼 Pattern-based sequence playback started successfully! Playing {} pattern references (expanded to {} total notes) with all transformations applied.",
+                    pattern_count, total_resolved_notes
+                ),
+                (true, false) => format!(
+                    "🎵 Individual note sequence playback started successfully! Playing {} notes.",
+                    individual_notes_count
+                ),
+                (false, false) => "🎵 Sequence playback started successfully!".to_string(),
+            };
+
+            tracing::info!("Enhanced sequence playback completed successfully");
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: Some(json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": composition_description
+                        }
+                    ]
+                })),
+                error: None,
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to play enhanced sequence: {}", e);
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: format!("Failed to play enhanced sequence: {}", e),
+                    data: None,
+                }),
+            }
+        }
+    }
+}
+
+fn handle_list_patterns_tool(id: Option<Value>) -> JsonRpcResponse {
+    tracing::info!("handle_list_patterns_tool called");
+
+    match PATTERN_STORE.lock() {
+        Ok(store) => {
+            if store.is_empty() {
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id,
+                    result: Some(json!({
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "📋 **Sequence Patterns**
+
+🔍 No patterns defined yet.
+
+💡 **Get Started:**
+Use the `define_sequence_pattern` tool to create reusable musical patterns that you can then reference with the `play_sequence` tool.
+
+**Example:**
+```json
+{
+  \"name\": \"house_beat\",
+  \"description\": \"Classic 4/4 house drum pattern\",
+  \"category\": \"drums\",
+  \"notes\": [
+    {\"note\": 36, \"velocity\": 120, \"start_time\": 0, \"duration\": 0.1, \"channel\": 9},
+    {\"note\": 42, \"velocity\": 80, \"start_time\": 0.25, \"duration\": 0.05, \"channel\": 9},
+    {\"note\": 38, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.1, \"channel\": 9}
+  ]
+}
+```"
+                            }
+                        ]
+                    })),
+                    error: None,
+                }
+            } else {
+                let mut patterns_by_category: std::collections::HashMap<
+                    String,
+                    Vec<&SequencePattern>,
+                > = std::collections::HashMap::new();
+
+                // Group patterns by category
+                for pattern in store.values() {
+                    let category = pattern.category.as_deref().unwrap_or("uncategorized");
+                    patterns_by_category
+                        .entry(category.to_string())
+                        .or_default()
+                        .push(pattern);
+                }
+
+                // Sort categories
+                let mut categories: Vec<_> = patterns_by_category.keys().collect();
+                categories.sort();
+
+                let mut output = String::from("📋 **Sequence Patterns**\n\n");
+                output.push_str(&format!("🎼 **{}** patterns available:\n\n", store.len()));
+
+                for category in categories {
+                    let patterns = patterns_by_category.get(category).unwrap();
+                    let category_icon = match category.as_str() {
+                        "drums" => "🥁",
+                        "bass" => "🎸",
+                        "melody" => "🎵",
+                        "chords" => "🎹",
+                        "harmony" => "🎼",
+                        "effects" => "🎛️",
+                        _ => "📝",
+                    };
+
+                    output.push_str(&format!(
+                        "## {} **{}** ({})\n",
+                        category_icon,
+                        category,
+                        patterns.len()
+                    ));
+
+                    for pattern in patterns {
+                        output.push_str(&format!(
+                            "• **{}** - {} notes, {:.1}s duration",
+                            pattern.name,
+                            pattern.notes.len(),
+                            pattern.get_pattern_duration()
+                        ));
+
+                        if let Some(desc) = &pattern.description {
+                            output.push_str(&format!("\n  *{}*", desc));
+                        }
+
+                        if !pattern.tags.is_empty() {
+                            output.push_str(&format!(" [{}]", pattern.tags.join(", ")));
+                        }
+
+                        output.push('\n');
+                    }
+                    output.push('\n');
+                }
+
+                output.push_str("💡 **Usage:** Reference these patterns in the `play_sequence` tool with transformations like transposition, instrument changes, and repetition!");
+
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id,
+                    result: Some(json!({
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": output
+                            }
+                        ]
+                    })),
+                    error: None,
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to lock pattern store: {}", e);
+            JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: -32603,
+                    message: "Failed to access pattern store".to_string(),
                     data: None,
                 }),
             }

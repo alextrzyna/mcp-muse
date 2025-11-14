@@ -166,4 +166,181 @@ If examples don't produce sound:
 ### Performance Issues
 - Keep MIDI files under 1MB for best performance
 - Use shorter sequences for real-time interaction
-- Consider reducing polyphony (simultaneous notes) 
+- Consider reducing polyphony (simultaneous notes)
+
+## Sequence Patterns Examples
+
+**New in this release!** The sequence patterns feature allows you to create reusable musical patterns and use them throughout your compositions with transformations.
+
+See [SEQUENCE_PATTERNS.md](../dev-plans/SEQUENCE_PATTERNS.md) for complete documentation.
+
+### Example 1: Creating a Drum Pattern
+
+Define a simple house beat pattern:
+
+```json
+{
+  "tool": "define_sequence_pattern",
+  "arguments": {
+    "name": "house_beat",
+    "description": "Classic 4/4 house drum pattern",
+    "category": "drums",
+    "tempo": 128,
+    "pattern_bars": 1.0,
+    "notes": [
+      {"note": 36, "velocity": 120, "start_time": 0.0, "duration": 0.1, "channel": 9},
+      {"note": 42, "velocity": 80, "start_time": 0.25, "duration": 0.05, "channel": 9},
+      {"note": 38, "velocity": 100, "start_time": 0.5, "duration": 0.1, "channel": 9},
+      {"note": 42, "velocity": 80, "start_time": 0.75, "duration": 0.05, "channel": 9}
+    ],
+    "tags": ["house", "electronic"]
+  }
+}
+```
+
+### Example 2: Using a Pattern in a Sequence
+
+Play the pattern defined above 16 times:
+
+```json
+{
+  "tool": "play_sequence",
+  "arguments": {
+    "patterns": [
+      {
+        "pattern_name": "house_beat",
+        "start_bar": 1,
+        "repeat_count": 16
+      }
+    ],
+    "tempo": 128
+  }
+}
+```
+
+### Example 3: Transposing a Bass Line
+
+Define a bass pattern, then play it in different keys:
+
+```json
+// First, define the pattern
+{
+  "tool": "define_sequence_pattern",
+  "arguments": {
+    "name": "funk_bass",
+    "category": "bass",
+    "notes": [
+      {"note": 36, "velocity": 100, "start_time": 0.0, "duration": 0.25, "instrument": 38},
+      {"note": 36, "velocity": 80, "start_time": 0.5, "duration": 0.25, "instrument": 38},
+      {"note": 38, "velocity": 90, "start_time": 1.0, "duration": 0.25, "instrument": 38}
+    ]
+  }
+}
+
+// Then use it with transposition
+{
+  "tool": "play_sequence",
+  "arguments": {
+    "patterns": [
+      {"pattern_name": "funk_bass", "start_bar": 1, "transpose": 0, "repeat_count": 4},
+      {"pattern_name": "funk_bass", "start_bar": 5, "transpose": 7, "repeat_count": 4},
+      {"pattern_name": "funk_bass", "start_bar": 9, "transpose": 5, "repeat_count": 4}
+    ],
+    "tempo": 110
+  }
+}
+```
+
+### Example 4: Combining Multiple Patterns
+
+Layer drums and bass together:
+
+```json
+{
+  "tool": "play_sequence",
+  "arguments": {
+    "patterns": [
+      {"pattern_name": "house_beat", "start_bar": 1, "repeat_count": 16},
+      {"pattern_name": "funk_bass", "start_bar": 5, "repeat_count": 12}
+    ],
+    "tempo": 120
+  }
+}
+```
+
+### Example 5: Listing All Patterns
+
+View all defined patterns in the current session:
+
+```json
+{
+  "tool": "list_patterns",
+  "arguments": {}
+}
+```
+
+### Example 6: Dynamic Variations
+
+Use velocity and duration scaling for variation:
+
+```json
+{
+  "tool": "play_sequence",
+  "arguments": {
+    "patterns": [
+      // Verse: Normal bass
+      {"pattern_name": "funk_bass", "start_bar": 1, "repeat_count": 8},
+      // Pre-chorus: Softer, longer notes
+      {"pattern_name": "funk_bass", "start_bar": 9, "velocity_scale": 0.7, "duration_scale": 1.5, "repeat_count": 4},
+      // Chorus: Louder, octave up
+      {"pattern_name": "funk_bass", "start_bar": 13, "transpose": 12, "velocity_scale": 1.3, "repeat_count": 8}
+    ],
+    "tempo": 120
+  }
+}
+```
+
+### Example 7: Mixing Patterns and Individual Notes
+
+Combine reusable patterns with one-off notes:
+
+```json
+{
+  "tool": "play_sequence",
+  "arguments": {
+    "patterns": [
+      {"pattern_name": "house_beat", "start_bar": 1, "repeat_count": 16}
+    ],
+    "notes": [
+      // Add cymbal crashes at key moments
+      {"note": 49, "velocity": 120, "start_time": 0.0, "duration": 2.0, "channel": 9},
+      {"note": 49, "velocity": 120, "start_time": 16.0, "duration": 2.0, "channel": 9},
+      // Add a melody
+      {"note": 72, "velocity": 90, "start_time": 8.0, "duration": 1.0, "instrument": 80},
+      {"note": 74, "velocity": 90, "start_time": 9.0, "duration": 1.0, "instrument": 80}
+    ],
+    "tempo": 128
+  }
+}
+```
+
+### Creative Prompts with Sequence Patterns
+
+Try these prompts with your AI:
+
+- "Create a house beat pattern and play it for 32 bars"
+- "Define a funk bass line and transpose it through different keys"
+- "Make a drum pattern for verse and a different one for chorus, then arrange them"
+- "Create a chord progression pattern and use it with variations"
+- "Build a complete 16-bar arrangement using patterns"
+- "Show me all the patterns I've created so far"
+
+### Benefits of Sequence Patterns
+
+1. **Efficiency**: Define once, use multiple times
+2. **Consistency**: Same pattern ensures consistent feel
+3. **Variation**: Easy to create variations with transformations
+4. **Organization**: Categorize and tag patterns for easy retrieval
+5. **Flexibility**: Mix patterns with individual notes
+6. **Transposition**: Easily change keys
+7. **Dynamic Control**: Scale velocity and duration on the fly 

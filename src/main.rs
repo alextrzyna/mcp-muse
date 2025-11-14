@@ -169,8 +169,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("JP-8 Strings".to_string()),
             note: Some(60), // C4
             velocity: Some(80),
-            start_time: 0.0,
-            duration: 3.0,
+            start_time: Some(0.0),
+            duration: Some(3.0),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -186,8 +188,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("DX7 E.Piano".to_string()),
             note: Some(64), // E4
             velocity: Some(90),
-            start_time: 0.0,
-            duration: 2.0,
+            start_time: Some(0.0),
+            duration: Some(2.0),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -207,8 +211,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("Minimoog Bass".to_string()),
                 note: Some(36), // C2
                 velocity: Some(100),
-                start_time: 0.0,
-                duration: 1.0,
+                start_time: Some(0.0),
+                duration: Some(1.0),
+                musical_time: None,
+                musical_duration: None,
                 channel: 0,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -217,8 +223,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("Minimoog Bass".to_string()),
                 note: Some(43), // G2
                 velocity: Some(90),
-                start_time: 1.0,
-                duration: 1.0,
+                start_time: Some(1.0),
+                duration: Some(1.0),
+                musical_time: None,
+                musical_duration: None,
                 channel: 0,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -237,8 +245,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             preset_category: Some("bass".to_string()),
             note: Some(40), // E2
             velocity: Some(110),
-            start_time: 0.0,
-            duration: 1.5,
+            start_time: Some(0.0),
+            duration: Some(1.5),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -257,8 +267,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             preset_variation: Some("squelchy".to_string()),
             note: Some(45), // A2
             velocity: Some(127),
-            start_time: 0.0,
-            duration: 2.0,
+            start_time: Some(0.0),
+            duration: Some(2.0),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -278,8 +290,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("Jupiter Bass".to_string()),
                 note: Some(36), // C2
                 velocity: Some(100),
-                start_time: 0.0,
-                duration: 2.0,
+                start_time: Some(0.0),
+                duration: Some(2.0),
+                musical_time: None,
+                musical_duration: None,
                 channel: 0,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -289,8 +303,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
                 preset_category: Some("pad".to_string()),
                 note: Some(60), // C4
                 velocity: Some(80),
-                start_time: 0.5,
-                duration: 3.0,
+                start_time: Some(0.5),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 channel: 1,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -299,8 +315,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
                 preset_category: Some("pad".to_string()),
                 note: Some(64), // E4
                 velocity: Some(75),
-                start_time: 0.5,
-                duration: 3.0,
+                start_time: Some(0.5),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 channel: 1,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -310,8 +328,10 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
                 preset_random: Some(true),
                 note: Some(72), // C5
                 velocity: Some(90),
-                start_time: 1.0,
-                duration: 1.0,
+                start_time: Some(1.0),
+                duration: Some(1.0),
+                musical_time: None,
+                musical_duration: None,
                 channel: 2,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -431,8 +451,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
 
         for &note_num in chord {
             notes.push(SimpleNote {
-                start_time,
-                duration: 3.0, // Long notes for rich overlapping
+                start_time: Some(start_time),
+                duration: Some(3.0), // Long notes for rich overlapping
+                musical_time: None,
+                musical_duration: None,
                 note: Some(note_num),
                 velocity: Some(80),
                 preset_name: Some("JP-8 Strings".to_string()),
@@ -445,8 +467,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     let bass_notes = [36, 33, 34, 43]; // C, A, Bb, G bass notes
     for (i, &start_time) in chord_times.iter().enumerate() {
         notes.push(SimpleNote {
-            start_time,
-            duration: 1.8,
+            start_time: Some(start_time),
+            duration: Some(1.8),
+            musical_time: None,
+            musical_duration: None,
             note: Some(bass_notes[i % bass_notes.len()]),
             velocity: Some(100),
             preset_name: Some("Minimoog Bass".to_string()),
@@ -476,10 +500,12 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
 
         for (i, &note_num) in arp_pattern.iter().enumerate() {
             notes.push(SimpleNote {
-                start_time: base_time + (i as f64 * 0.1), // Very fast notes every 100ms
-                duration: 0.8,                            // Long enough to create overlaps
+                start_time: Some(base_time + (i as f64 * 0.1)), // Very fast notes every 100ms
+                duration: Some(0.8),                            // Long enough to create overlaps
+                musical_time: None,
+                musical_duration: None,
                 note: Some(note_num + (sequence * 12) as u8), // Transpose each sequence
-                velocity: Some(90 + (i % 4) as u8 * 10),  // Varying velocities
+                velocity: Some(90 + (i % 4) as u8 * 10),      // Varying velocities
                 preset_name: Some("Prophet Lead".to_string()),
                 ..Default::default()
             });
@@ -502,8 +528,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
     let notes = vec![
         // MIDI drum pattern
         SimpleNote {
-            start_time: 0.0,
-            duration: 0.1,
+            start_time: Some(0.0),
+            duration: Some(0.1),
+            musical_time: None,
+            musical_duration: None,
             note: Some(36), // Kick
             velocity: Some(120),
             instrument: Some(0), // Standard kit (0-127 range)
@@ -512,8 +540,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
         },
         // Preset bass
         SimpleNote {
-            start_time: 0.0,
-            duration: 1.0,
+            start_time: Some(0.0),
+            duration: Some(1.0),
+            musical_time: None,
+            musical_duration: None,
             note: Some(48),
             velocity: Some(90),
             preset_name: Some("Jupiter Bass".to_string()),
@@ -521,8 +551,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
         },
         // R2D2 expression
         SimpleNote {
-            start_time: 0.5,
-            duration: 0.8,
+            start_time: Some(0.5),
+            duration: Some(0.8),
+            musical_time: None,
+            musical_duration: None,
             r2d2_emotion: Some("Excited".to_string()),
             r2d2_intensity: Some(0.8),
             r2d2_complexity: Some(3),
@@ -530,8 +562,10 @@ async fn test_polyphony_validation() -> Result<(), Box<dyn std::error::Error>> {
         },
         // Custom synthesis
         SimpleNote {
-            start_time: 1.0,
-            duration: 1.5,
+            start_time: Some(1.0),
+            duration: Some(1.5),
+            musical_time: None,
+            musical_duration: None,
             synth_type: Some("sawtooth".to_string()),
             synth_frequency: Some(440.0),
             synth_amplitude: Some(0.5),
@@ -578,8 +612,10 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             synth_type: Some("fm".to_string()),
             synth_frequency: Some(110.0),
             synth_amplitude: Some(0.8),
-            start_time: 0.0,
-            duration: 1.0,
+            start_time: Some(0.0),
+            duration: Some(1.0),
+            musical_time: None,
+            musical_duration: None,
             ..Default::default()
         }],
         tempo: 120,
@@ -594,8 +630,10 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("DX7 Slap Bass".to_string()),
             note: Some(48), // C3
             velocity: Some(127),
-            start_time: 0.0,
-            duration: 2.0,
+            start_time: Some(0.0),
+            duration: Some(2.0),
+            musical_time: None,
+            musical_duration: None,
             ..Default::default()
         }],
         tempo: 120,
@@ -610,8 +648,10 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("Minimoog Bass".to_string()),
             note: Some(48), // C3
             velocity: Some(127),
-            start_time: 0.0,
-            duration: 1.0,
+            start_time: Some(0.0),
+            duration: Some(1.0),
+            musical_time: None,
+            musical_duration: None,
             ..Default::default()
         }],
         tempo: 120,
@@ -626,8 +666,10 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("DX7 E.Piano".to_string()),
             note: Some(60), // C4
             velocity: Some(100),
-            start_time: 0.0,
-            duration: 2.0,
+            start_time: Some(0.0),
+            duration: Some(2.0),
+            musical_time: None,
+            musical_duration: None,
             ..Default::default()
         }],
         tempo: 120,
@@ -659,24 +701,30 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("JP-8 Strings".to_string()),
                 note: Some(60), // C4
                 velocity: Some(80),
-                start_time: 0.0,
-                duration: 3.0,
+                start_time: Some(0.0),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             SimpleNote {
                 preset_name: Some("JP-8 Strings".to_string()),
                 note: Some(64), // E4
                 velocity: Some(75),
-                start_time: 0.0,
-                duration: 3.0,
+                start_time: Some(0.0),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             SimpleNote {
                 preset_name: Some("JP-8 Strings".to_string()),
                 note: Some(67), // G4
                 velocity: Some(70),
-                start_time: 0.0,
-                duration: 3.0,
+                start_time: Some(0.0),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
         ],
@@ -693,16 +741,20 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("OB Brass".to_string()),
                 note: Some(57), // A3
                 velocity: Some(90),
-                start_time: 0.0,
-                duration: 2.5,
+                start_time: Some(0.0),
+                duration: Some(2.5),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             SimpleNote {
                 preset_name: Some("OB Brass".to_string()),
                 note: Some(62), // D4
                 velocity: Some(85),
-                start_time: 0.0,
-                duration: 2.5,
+                start_time: Some(0.0),
+                duration: Some(2.5),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
         ],
@@ -718,8 +770,10 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("D-50 Fantasia".to_string()),
             note: Some(72), // C5
             velocity: Some(100),
-            start_time: 0.0,
-            duration: 4.0,
+            start_time: Some(0.0),
+            duration: Some(4.0),
+            musical_time: None,
+            musical_duration: None,
             ..Default::default()
         }],
         tempo: 120,
@@ -734,8 +788,10 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("Space Pad".to_string()),
             note: Some(48), // C3
             velocity: Some(70),
-            start_time: 0.0,
-            duration: 6.0,
+            start_time: Some(0.0),
+            duration: Some(6.0),
+            musical_time: None,
+            musical_duration: None,
             ..Default::default()
         }],
         tempo: 120,
@@ -752,8 +808,10 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("JP-8 Strings".to_string()),
                 note: Some(48), // C3
                 velocity: Some(60),
-                start_time: 0.0,
-                duration: 6.0,
+                start_time: Some(0.0),
+                duration: Some(6.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             // OB Brass mid-range
@@ -761,8 +819,10 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("OB Brass".to_string()),
                 note: Some(60), // C4
                 velocity: Some(70),
-                start_time: 1.0,
-                duration: 4.0,
+                start_time: Some(1.0),
+                duration: Some(4.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             // D-50 Fantasia highlight
@@ -770,8 +830,10 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("D-50 Fantasia".to_string()),
                 note: Some(72), // C5
                 velocity: Some(80),
-                start_time: 2.0,
-                duration: 3.0,
+                start_time: Some(2.0),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
         ],
@@ -813,8 +875,8 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("Minimoog Bass".to_string()),
             note: Some(test_note),
             velocity: Some(test_velocity),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             ..Default::default()
         }],
         tempo: 120,
@@ -830,8 +892,8 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("JP-8 Strings".to_string()),
             note: Some(test_note),
             velocity: Some(test_velocity),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             ..Default::default()
         }],
         tempo: 120,
@@ -847,8 +909,8 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("DX7 E.Piano".to_string()),
             note: Some(test_note),
             velocity: Some(test_velocity),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             ..Default::default()
         }],
         tempo: 120,
@@ -864,8 +926,8 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("Sci-Fi Zap".to_string()),
             note: Some(test_note),
             velocity: Some(test_velocity),
-            start_time: 0.0,
-            duration: 0.5, // Shorter for zap
+            start_time: Some(0.0),
+            duration: Some(0.5), // Shorter for zap
             ..Default::default()
         }],
         tempo: 120,
@@ -882,8 +944,10 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("Minimoog Bass".to_string()),
                 note: Some(36), // C2
                 velocity: Some(100),
-                start_time: 0.0,
-                duration: 4.0,
+                start_time: Some(0.0),
+                duration: Some(4.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             // Pad layer
@@ -891,8 +955,10 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("JP-8 Strings".to_string()),
                 note: Some(60), // C4
                 velocity: Some(80),
-                start_time: 0.5,
-                duration: 3.0,
+                start_time: Some(0.5),
+                duration: Some(3.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
             // Keys melody
@@ -900,8 +966,10 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("DX7 E.Piano".to_string()),
                 note: Some(72), // C5
                 velocity: Some(90),
-                start_time: 1.0,
-                duration: 2.0,
+                start_time: Some(1.0),
+                duration: Some(2.0),
+                musical_time: None,
+                musical_duration: None,
                 ..Default::default()
             },
         ],
@@ -928,8 +996,10 @@ impl Default for SimpleNote {
         Self {
             note: None,
             velocity: None,
-            start_time: 0.0,
-            duration: 1.0,
+            start_time: Some(0.0),
+            duration: Some(1.0),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             instrument: None,
             note_type: "midi".to_string(),
@@ -989,8 +1059,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("TR-808 Kick".to_string()),
             note: Some(36), // MIDI kick note
             velocity: Some(127),
-            start_time: 0.0,
-            duration: 1.0,
+            start_time: Some(0.0),
+            duration: Some(1.0),
+            musical_time: None,
+            musical_duration: None,
             channel: 9, // MIDI drum channel
             note_type: "midi".to_string(),
             ..Default::default()
@@ -1007,8 +1079,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("TR-909 Snare".to_string()),
             note: Some(38), // MIDI snare note
             velocity: Some(120),
-            start_time: 0.0,
-            duration: 0.5,
+            start_time: Some(0.0),
+            duration: Some(0.5),
+            musical_time: None,
+            musical_duration: None,
             channel: 9,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -1025,8 +1099,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("TR-909 Hi-Hat".to_string()),
             note: Some(42), // MIDI closed hi-hat
             velocity: Some(100),
-            start_time: 0.0,
-            duration: 0.15,
+            start_time: Some(0.0),
+            duration: Some(0.15),
+            musical_time: None,
+            musical_duration: None,
             channel: 9,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -1043,8 +1119,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("Crash Cymbal".to_string()),
             note: Some(49), // MIDI crash cymbal
             velocity: Some(120),
-            start_time: 0.0,
-            duration: 2.0,
+            start_time: Some(0.0),
+            duration: Some(2.0),
+            musical_time: None,
+            musical_duration: None,
             channel: 9,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -1061,8 +1139,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("TR-808 Hi-Hat".to_string()),
             note: Some(42),
             velocity: Some(110),
-            start_time: 0.0,
-            duration: 0.08,
+            start_time: Some(0.0),
+            duration: Some(0.08),
+            musical_time: None,
+            musical_duration: None,
             channel: 9,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -1079,8 +1159,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             synth_type: Some("kick".to_string()),
             synth_frequency: Some(50.0), // Deep kick
             synth_amplitude: Some(0.9),
-            start_time: 0.0,
-            duration: 1.2,
+            start_time: Some(0.0),
+            duration: Some(1.2),
+            musical_time: None,
+            musical_duration: None,
             channel: 9,
             note_type: "midi".to_string(),
             ..Default::default()
@@ -1099,8 +1181,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-808 Kick".to_string()),
                 note: Some(36),
                 velocity: Some(127),
-                start_time: 0.0,
-                duration: 0.3,
+                start_time: Some(0.0),
+                duration: Some(0.3),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1109,8 +1193,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-808 Kick".to_string()),
                 note: Some(36),
                 velocity: Some(110),
-                start_time: 1.0,
-                duration: 0.3,
+                start_time: Some(1.0),
+                duration: Some(0.3),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1120,8 +1206,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-909 Snare".to_string()),
                 note: Some(38),
                 velocity: Some(120),
-                start_time: 0.5,
-                duration: 0.2,
+                start_time: Some(0.5),
+                duration: Some(0.2),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1130,8 +1218,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-909 Snare".to_string()),
                 note: Some(38),
                 velocity: Some(100),
-                start_time: 1.5,
-                duration: 0.2,
+                start_time: Some(1.5),
+                duration: Some(0.2),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1141,8 +1231,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-808 Hi-Hat".to_string()),
                 note: Some(42),
                 velocity: Some(90),
-                start_time: 0.25,
-                duration: 0.08,
+                start_time: Some(0.25),
+                duration: Some(0.08),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1151,8 +1243,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-808 Hi-Hat".to_string()),
                 note: Some(42),
                 velocity: Some(70),
-                start_time: 0.75,
-                duration: 0.08,
+                start_time: Some(0.75),
+                duration: Some(0.08),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1161,8 +1255,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-808 Hi-Hat".to_string()),
                 note: Some(42),
                 velocity: Some(85),
-                start_time: 1.25,
-                duration: 0.08,
+                start_time: Some(1.25),
+                duration: Some(0.08),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1171,8 +1267,10 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
                 preset_name: Some("TR-808 Hi-Hat".to_string()),
                 note: Some(42),
                 velocity: Some(65),
-                start_time: 1.75,
-                duration: 0.08,
+                start_time: Some(1.75),
+                duration: Some(0.08),
+                musical_time: None,
+                musical_duration: None,
                 channel: 9,
                 note_type: "midi".to_string(),
                 ..Default::default()
@@ -1208,8 +1306,8 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             note: Some(test_note),
             velocity: Some(test_velocity),
             instrument: Some(1), // Bright Acoustic Piano
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             ..Default::default()
         }],
         tempo: 120,
@@ -1224,8 +1322,8 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             note: Some(test_note),
             velocity: Some(test_velocity),
             instrument: Some(1),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             effects: Some(vec![crate::midi::EffectConfig {
                 effect: crate::midi::EffectType::Reverb {
                     room_size: 1.0, // Maximum room size
@@ -1250,8 +1348,8 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             note: Some(test_note),
             velocity: Some(test_velocity),
             instrument: Some(1),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             effects: Some(vec![crate::midi::EffectConfig {
                 effect: crate::midi::EffectType::Chorus {
                     rate: 3.0,         // Fast modulation
@@ -1276,8 +1374,8 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             note: Some(test_note),
             velocity: Some(test_velocity),
             instrument: Some(1),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             effects: Some(vec![crate::midi::EffectConfig {
                 effect: crate::midi::EffectType::Distortion {
                     drive: 5.0,        // Maximum drive
@@ -1301,8 +1399,8 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             note: Some(test_note),
             velocity: Some(test_velocity),
             instrument: Some(1),
-            start_time: 0.0,
-            duration: 1.0, // Shorter note to hear delays clearly
+            start_time: Some(0.0),
+            duration: Some(1.0), // Shorter note to hear delays clearly
             effects: Some(vec![crate::midi::EffectConfig {
                 effect: crate::midi::EffectType::Delay {
                     delay_time: 0.4, // Clear 400ms delay
@@ -1327,8 +1425,8 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("TB-303 Acid".to_string()),
             note: Some(48), // Lower bass note
             velocity: Some(127),
-            start_time: 0.0,
-            duration: test_duration,
+            start_time: Some(0.0),
+            duration: Some(test_duration),
             ..Default::default()
         }],
         tempo: 120,
@@ -1343,8 +1441,10 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             note: Some(60),      // C4
             instrument: Some(1), // Bright Piano
             velocity: Some(90),
-            start_time: 0.0,
-            duration: 3.0,
+            start_time: Some(0.0),
+            duration: Some(3.0),
+            musical_time: None,
+            musical_duration: None,
             effects_preset: Some("concert_hall".to_string()),
             ..Default::default()
         }],
@@ -1363,8 +1463,10 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("JP-8 Strings".to_string()),
             note: Some(60), // C4
             velocity: Some(80),
-            start_time: 0.0,
-            duration: 4.0,
+            start_time: Some(0.0),
+            duration: Some(4.0),
+            musical_time: None,
+            musical_duration: None,
             effects: Some(vec![]), // Override to disable signature effects
             ..Default::default()
         }],
@@ -1380,8 +1482,10 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             preset_name: Some("JP-8 Strings".to_string()),
             note: Some(60), // C4
             velocity: Some(80),
-            start_time: 0.0,
-            duration: 4.0,
+            start_time: Some(0.0),
+            duration: Some(4.0),
+            musical_time: None,
+            musical_duration: None,
             // No effects override - will use preset's signature effects
             ..Default::default()
         }],

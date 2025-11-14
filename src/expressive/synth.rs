@@ -196,7 +196,7 @@ impl Default for DX7Operator {
 impl ExpressiveSynth {
     /// Create a new expressive synthesizer
     pub fn new() -> Result<Self> {
-        let (_stream, _stream_handle) = OutputStream::try_default()?;
+        let _stream = rodio::OutputStreamBuilder::open_default_stream()?;
 
         Ok(ExpressiveSynth {
             sample_rate: 44100.0,
@@ -205,6 +205,7 @@ impl ExpressiveSynth {
     }
 
     /// Generate R2D2 samples without creating an audio stream (static method)
+    #[allow(dead_code)]
     pub fn generate_r2d2_samples_static(
         base_freq: f32,
         emotion_intensity: f32,
