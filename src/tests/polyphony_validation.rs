@@ -37,8 +37,10 @@ impl PolyphonyValidator {
             
             for &note_num in chord {
                 notes.push(SimpleNote {
-                    start_time,
-                    duration: 3.0, // Long notes for rich overlapping
+                    start_time: Some(start_time),
+                    duration: Some(3.0), // Long notes for rich overlapping
+                    musical_time: None,
+                    musical_duration: None,
                     note: Some(note_num),
                     velocity: Some(80),
                     preset_name: Some("JP-8 Strings".to_string()),
@@ -51,8 +53,10 @@ impl PolyphonyValidator {
         let bass_notes = [36, 33, 34, 43]; // C, A, Bb, G bass notes
         for (i, &start_time) in chord_times.iter().enumerate() {
             notes.push(SimpleNote {
-                start_time,
-                duration: 1.8,
+                start_time: Some(start_time),
+                duration: Some(1.8),
+                musical_time: None,
+                musical_duration: None,
                 note: Some(bass_notes[i % bass_notes.len()]),
                 velocity: Some(100),
                 preset_name: Some("Minimoog Bass".to_string()),
@@ -147,8 +151,10 @@ impl PolyphonyValidator {
 
         // MIDI drum pattern
         notes.push(SimpleNote {
-            start_time: 0.0,
-            duration: 0.1,
+            start_time: Some(0.0),
+            duration: Some(0.1),
+            musical_time: None,
+            musical_duration: None,
             note: Some(36), // Kick
             velocity: Some(120),
             instrument: Some(128), // Drum kit
@@ -156,8 +162,10 @@ impl PolyphonyValidator {
             ..Default::default()
         });
         notes.push(SimpleNote {
-            start_time: 0.5,
-            duration: 0.1,
+            start_time: Some(0.5),
+            duration: Some(0.1),
+            musical_time: None,
+            musical_duration: None,
             note: Some(38), // Snare
             velocity: Some(100),
             instrument: Some(128),
@@ -167,8 +175,10 @@ impl PolyphonyValidator {
 
         // Preset bass
         notes.push(SimpleNote {
-            start_time: 0.0,
+            start_time: Some(0.0),
             duration: 1.0,
+            musical_time: None,
+            musical_duration: None,
             note: Some(48),
             velocity: Some(90),
             preset_name: Some("Jupiter Bass".to_string()),
@@ -177,8 +187,10 @@ impl PolyphonyValidator {
 
         // R2D2 expression
         notes.push(SimpleNote {
-            start_time: 0.5,
-            duration: 0.8,
+            start_time: Some(0.5),
+            duration: Some(0.8),
+            musical_time: None,
+            musical_duration: None,
             r2d2_emotion: Some("Excited".to_string()),
             r2d2_intensity: Some(0.8),
             r2d2_complexity: Some(3),
@@ -187,8 +199,10 @@ impl PolyphonyValidator {
 
         // Custom synthesis
         notes.push(SimpleNote {
-            start_time: 1.0,
-            duration: 1.5,
+            start_time: Some(1.0),
+            duration: Some(1.5),
+            musical_time: None,
+            musical_duration: None,
             synth_type: Some("sawtooth".to_string()),
             synth_frequency: Some(440.0),
             synth_amplitude: Some(0.5),
@@ -219,8 +233,10 @@ impl PolyphonyValidator {
             let note_num = 60 + (i % 12) as u8; // Chromatic scale
             
             notes.push(SimpleNote {
-                start_time,
-                duration: 2.0, // Long notes to force overlap
+                start_time: Some(start_time),
+                duration: Some(2.0), // Long notes to force overlap
+                musical_time: None,
+                musical_duration: None,
                 note: Some(note_num),
                 velocity: Some(80 + (i % 20) as u8), // Varying priorities
                 preset_name: Some("Analog Wash".to_string()),

@@ -7,6 +7,7 @@ use crate::midi::SimpleNote;
 
 /// Event for scheduling synthesis notes in real-time
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RealtimeSynthEvent {
     pub start_time: f64,
     pub note: SimpleNote,
@@ -15,6 +16,7 @@ pub struct RealtimeSynthEvent {
 
 /// Event for scheduling R2D2 expressions in real-time
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RealtimeR2D2Event {
     pub start_time: f64,
     pub expression: R2D2Expression,
@@ -22,6 +24,7 @@ pub struct RealtimeR2D2Event {
 }
 
 /// Real-time polyphonic audio source with proper voice management
+#[allow(dead_code)]
 pub struct RealtimePolyphonicAudioSource {
     /// Voice manager for synthesis
     voice_manager: PolyphonicVoiceManager,
@@ -57,6 +60,7 @@ pub struct RealtimePolyphonicAudioSource {
     dt: f32,
 }
 
+#[allow(dead_code)]
 impl RealtimePolyphonicAudioSource {
     /// Process events that should start at the current time
     fn process_scheduled_events(&mut self) {
@@ -213,7 +217,7 @@ impl RealtimePolyphonicAudioSource {
                 return Err(anyhow::anyhow!(
                     "Unknown synthesis type: {}",
                     synth_type_str
-                ))
+                ));
             }
         };
 
@@ -267,32 +271,32 @@ impl RealtimePolyphonicAudioSource {
         // Create effects
         let mut effects = Vec::new();
 
-        if let Some(reverb) = note.synth_reverb {
-            if reverb > 0.0 {
-                effects.push(EffectParams {
-                    effect_type: EffectType::Reverb,
-                    intensity: reverb,
-                });
-            }
+        if let Some(reverb) = note.synth_reverb
+            && reverb > 0.0
+        {
+            effects.push(EffectParams {
+                effect_type: EffectType::Reverb,
+                intensity: reverb,
+            });
         }
 
-        if let Some(chorus) = note.synth_chorus {
-            if chorus > 0.0 {
-                effects.push(EffectParams {
-                    effect_type: EffectType::Chorus,
-                    intensity: chorus,
-                });
-            }
+        if let Some(chorus) = note.synth_chorus
+            && chorus > 0.0
+        {
+            effects.push(EffectParams {
+                effect_type: EffectType::Chorus,
+                intensity: chorus,
+            });
         }
 
-        if let Some(delay) = note.synth_delay {
-            if delay > 0.0 {
-                let delay_time = note.synth_delay_time.unwrap_or(0.25);
-                effects.push(EffectParams {
-                    effect_type: EffectType::Delay { delay_time },
-                    intensity: delay,
-                });
-            }
+        if let Some(delay) = note.synth_delay
+            && delay > 0.0
+        {
+            let delay_time = note.synth_delay_time.unwrap_or(0.25);
+            effects.push(EffectParams {
+                effect_type: EffectType::Delay { delay_time },
+                intensity: delay,
+            });
         }
 
         // Process universal effects from the new effects system
@@ -351,7 +355,7 @@ impl RealtimePolyphonicAudioSource {
             synth_type,
             frequency,
             amplitude: note.synth_amplitude.unwrap_or(0.7),
-            duration: note.duration as f32,
+            duration: note.duration.unwrap_or(1.0) as f32,
             envelope,
             filter,
             effects,
@@ -398,11 +402,11 @@ impl Iterator for RealtimePolyphonicAudioSource {
         };
 
         // Clear finished R2D2 samples
-        if let Some(ref r2d2_samples) = self.current_r2d2_samples.clone() {
-            if self.r2d2_sample_position >= r2d2_samples.len() {
-                self.current_r2d2_samples = None;
-                self.r2d2_sample_position = 0;
-            }
+        if let Some(ref r2d2_samples) = self.current_r2d2_samples.clone()
+            && self.r2d2_sample_position >= r2d2_samples.len()
+        {
+            self.current_r2d2_samples = None;
+            self.r2d2_sample_position = 0;
         }
 
         // Mix all audio sources
@@ -415,7 +419,7 @@ impl Iterator for RealtimePolyphonicAudioSource {
 }
 
 impl Source for RealtimePolyphonicAudioSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 

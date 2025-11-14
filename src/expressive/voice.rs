@@ -161,11 +161,12 @@ impl PolyphonicVoiceManager {
     /// Release a voice (trigger release phase)
     #[allow(dead_code)]
     pub fn release_voice(&mut self, voice_id: usize) {
-        if let Some(voice) = self.voices.iter_mut().find(|v| v.id == voice_id) {
-            if voice.state != VoiceState::Release && voice.state != VoiceState::Idle {
-                voice.state = VoiceState::Release;
-                tracing::debug!("Released voice {}", voice_id);
-            }
+        if let Some(voice) = self.voices.iter_mut().find(|v| v.id == voice_id)
+            && voice.state != VoiceState::Release
+            && voice.state != VoiceState::Idle
+        {
+            voice.state = VoiceState::Release;
+            tracing::debug!("Released voice {}", voice_id);
         }
     }
 

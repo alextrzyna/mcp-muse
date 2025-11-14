@@ -133,13 +133,12 @@ impl PresetLibrary {
         for tag in tags {
             if let Some(preset_names) = self.tags.get(tag) {
                 for name in preset_names {
-                    if let Some(preset) = self.presets.get(name) {
-                        if !results
+                    if let Some(preset) = self.presets.get(name)
+                        && !results
                             .iter()
                             .any(|p: &&ClassicSynthPreset| p.name == preset.name)
-                        {
-                            results.push(preset);
-                        }
+                    {
+                        results.push(preset);
                     }
                 }
             }
@@ -178,34 +177,34 @@ impl PresetLibrary {
 
     /// Apply a preset variation to get modified parameters
     pub fn apply_variation(&self, preset_name: &str, variation_name: &str) -> Option<SynthParams> {
-        if let Some(preset) = self.presets.get(preset_name) {
-            if let Some(variation) = preset.variations.get(variation_name) {
-                let mut params = preset.synth_params.clone();
+        if let Some(preset) = self.presets.get(preset_name)
+            && let Some(variation) = preset.variations.get(variation_name)
+        {
+            let mut params = preset.synth_params.clone();
 
-                // Apply parameter overrides
-                for (param_name, value) in &variation.parameter_overrides {
-                    match param_name.as_str() {
-                        "filter_cutoff" => {
-                            if let Some(ref mut filter) = params.filter {
-                                filter.cutoff = *value;
-                            }
+            // Apply parameter overrides
+            for (param_name, value) in &variation.parameter_overrides {
+                match param_name.as_str() {
+                    "filter_cutoff" => {
+                        if let Some(ref mut filter) = params.filter {
+                            filter.cutoff = *value;
                         }
-                        "filter_resonance" => {
-                            if let Some(ref mut filter) = params.filter {
-                                filter.resonance = *value;
-                            }
-                        }
-                        "attack" => params.envelope.attack = *value,
-                        "decay" => params.envelope.decay = *value,
-                        "sustain" => params.envelope.sustain = *value,
-                        "release" => params.envelope.release = *value,
-                        "amplitude" => params.amplitude = *value,
-                        _ => {} // Ignore unknown parameters
                     }
+                    "filter_resonance" => {
+                        if let Some(ref mut filter) = params.filter {
+                            filter.resonance = *value;
+                        }
+                    }
+                    "attack" => params.envelope.attack = *value,
+                    "decay" => params.envelope.decay = *value,
+                    "sustain" => params.envelope.sustain = *value,
+                    "release" => params.envelope.release = *value,
+                    "amplitude" => params.amplitude = *value,
+                    _ => {} // Ignore unknown parameters
                 }
-
-                return Some(params);
             }
+
+            return Some(params);
         }
         None
     }

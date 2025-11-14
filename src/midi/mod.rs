@@ -5,6 +5,160 @@ pub mod polyphonic_source;
 pub use player::*;
 
 use serde::{Deserialize, Deserializer, Serialize};
+use std::fmt;
+
+/// Musical time representation using bar.beat.tick notation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MusicalTime {
+    /// Bar number (1-based)
+    pub bar: u32,
+    /// Beat within the bar (1-based)
+    pub beat: u32,
+    /// Tick/subdivision within the beat (0-based, typically 0-479 for 480 PPQ)
+    pub tick: u32,
+}
+
+impl MusicalTime {
+    #[allow(dead_code)]
+    pub fn new(bar: u32, beat: u32, tick: u32) -> Self {
+        Self { bar, beat, tick }
+    }
+
+    /// Convert to absolute seconds given tempo and time signature
+    pub fn to_seconds(&self, tempo: u32, beats_per_bar: u32, ticks_per_beat: u32) -> f64 {
+        let seconds_per_beat = 60.0 / tempo as f64;
+
+        // Calculate total beats from start
+        let total_beats = ((self.bar - 1) * beats_per_bar + (self.beat - 1)) as f64
+            + (self.tick as f64 / ticks_per_beat as f64);
+
+        total_beats * seconds_per_beat
+    }
+
+    /// Create from absolute seconds
+    #[allow(dead_code)]
+    pub fn from_seconds(seconds: f64, tempo: u32, beats_per_bar: u32, ticks_per_beat: u32) -> Self {
+        let seconds_per_beat = 60.0 / tempo as f64;
+        let total_beats = seconds / seconds_per_beat;
+
+        let bar = (total_beats / beats_per_bar as f64).floor() as u32 + 1;
+        let remaining_beats = total_beats % beats_per_bar as f64;
+        let beat = remaining_beats.floor() as u32 + 1;
+        let tick = ((remaining_beats.fract() * ticks_per_beat as f64).round() as u32)
+            .min(ticks_per_beat - 1);
+
+        Self { bar, beat, tick }
+    }
+
+    /// Quantize to nearest grid position
+    #[allow(dead_code)]
+    pub fn quantize(&self, grid_division: u32, ticks_per_beat: u32, beats_per_bar: u32) -> Self {
+        let ticks_per_division = ticks_per_beat / grid_division;
+        let quantized_tick =
+            ((self.tick as f64 / ticks_per_division as f64).round() as u32) * ticks_per_division;
+
+        if quantized_tick >= ticks_per_beat {
+            // Overflow to next beat
+            if self.beat >= beats_per_bar {
+                // Overflow to next bar
+                Self {
+                    bar: self.bar + 1,
+                    beat: 1,
+                    tick: 0,
+                }
+            } else {
+                Self {
+                    bar: self.bar,
+                    beat: self.beat + 1,
+                    tick: 0,
+                }
+            }
+        } else {
+            Self {
+                bar: self.bar,
+                beat: self.beat,
+                tick: quantized_tick,
+            }
+        }
+    }
+}
+
+impl fmt::Display for MusicalTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.bar, self.beat, self.tick)
+    }
+}
+
+/// Duration in musical terms
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MusicalDuration {
+    /// Duration in bars (e.g., "4 bars")
+    Bars(f64),
+    /// Duration in beats (e.g., "2 beats")  
+    Beats(f64),
+    /// Duration in seconds (backwards compatibility)
+    Seconds(f64),
+    /// Musical note values
+    NoteValue(NoteValue),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum NoteValue {
+    #[serde(rename = "whole")]
+    Whole,
+    #[serde(rename = "half")]
+    Half,
+    #[serde(rename = "quarter")]
+    Quarter,
+    #[serde(rename = "eighth")]
+    Eighth,
+    #[serde(rename = "sixteenth")]
+    Sixteenth,
+    #[serde(rename = "triplet")]
+    Triplet,
+}
+
+impl MusicalDuration {
+    /// Convert to seconds given tempo
+    pub fn to_seconds(&self, tempo: u32, beats_per_bar: u32) -> f64 {
+        let seconds_per_beat = 60.0 / tempo as f64;
+
+        match self {
+            MusicalDuration::Bars(bars) => bars * beats_per_bar as f64 * seconds_per_beat,
+            MusicalDuration::Beats(beats) => beats * seconds_per_beat,
+            MusicalDuration::Seconds(secs) => *secs,
+            MusicalDuration::NoteValue(note) => match note {
+                NoteValue::Whole => 4.0 * seconds_per_beat,
+                NoteValue::Half => 2.0 * seconds_per_beat,
+                NoteValue::Quarter => seconds_per_beat,
+                NoteValue::Eighth => 0.5 * seconds_per_beat,
+                NoteValue::Sixteenth => 0.25 * seconds_per_beat,
+                NoteValue::Triplet => (2.0 / 3.0) * seconds_per_beat,
+            },
+        }
+    }
+}
+
+/// Quantization grid options
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum QuantizeGrid {
+    #[serde(rename = "off")]
+    #[default]
+    Off,
+    #[serde(rename = "bar")]
+    Bar,
+    #[serde(rename = "beat")]
+    Beat,
+    #[serde(rename = "8th")]
+    Eighth,
+    #[serde(rename = "16th")]
+    Sixteenth,
+    #[serde(rename = "32nd")]
+    ThirtySecond,
+    #[serde(rename = "triplet")]
+    Triplet,
+}
 
 /// Custom deserializer that converts null to None for optional fields
 fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -32,10 +186,6 @@ pub struct EffectConfig {
 
 fn default_effect_intensity() -> f32 {
     0.5
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// Effect types with their specific parameters
@@ -200,6 +350,10 @@ fn default_drive() -> f32 {
     2.0
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Simple note representation that's easy to work with
 /// Can represent both MIDI notes and R2D2 expressions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,10 +364,18 @@ pub struct SimpleNote {
     /// Velocity (0-127, where 127 = loudest) - Optional for R2D2 notes
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub velocity: Option<u8>,
-    /// Start time in seconds
-    pub start_time: f64,
-    /// Duration in seconds
-    pub duration: f64,
+    /// Start time in seconds (deprecated - use musical_time when possible)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<f64>,
+    /// Duration in seconds (deprecated - use musical_duration when possible)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+    /// Musical start time (bar.beat.tick notation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub musical_time: Option<MusicalTime>,
+    /// Musical duration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub musical_duration: Option<MusicalDuration>,
     /// MIDI channel (0-15)
     #[serde(default)]
     pub channel: u8,
@@ -395,8 +557,10 @@ impl SimpleSequence {
         self.notes.push(SimpleNote {
             note: Some(note),
             velocity: Some(velocity),
-            start_time,
-            duration,
+            start_time: Some(start_time),
+            duration: Some(duration),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             note_type: "midi".to_string(),
             instrument: None,
@@ -454,8 +618,10 @@ impl SimpleSequence {
         self.notes.push(SimpleNote {
             note: Some(note),
             velocity: Some(velocity),
-            start_time,
-            duration,
+            start_time: Some(start_time),
+            duration: Some(duration),
+            musical_time: None,
+            musical_duration: None,
             channel,
             note_type: "midi".to_string(),
             instrument: None,
@@ -514,8 +680,10 @@ impl SimpleSequence {
         self.notes.push(SimpleNote {
             note: Some(note),
             velocity: Some(velocity),
-            start_time,
-            duration,
+            start_time: Some(start_time),
+            duration: Some(duration),
+            musical_time: None,
+            musical_duration: None,
             channel,
             note_type: "midi".to_string(),
             instrument: Some(instrument),
@@ -596,8 +764,10 @@ impl SimpleSequence {
         self.notes.push(SimpleNote {
             note: None,
             velocity: None,
-            start_time,
-            duration,
+            start_time: Some(start_time),
+            duration: Some(duration),
+            musical_time: None,
+            musical_duration: None,
             channel: 0,
             note_type: "r2d2".to_string(),
             instrument: None,
@@ -643,7 +813,404 @@ impl SimpleSequence {
     }
 }
 
+/// Named sequence pattern that can be reused with transformations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequencePattern {
+    /// Pattern name/identifier
+    pub name: String,
+    /// Description of what this pattern represents
+    pub description: Option<String>,
+    /// The notes in this pattern
+    pub notes: Vec<SimpleNote>,
+    /// Default tempo for this pattern (can be overridden)
+    #[serde(default = "default_tempo")]
+    pub tempo: u32,
+    /// Pattern length in bars (ensures proper looping/alignment)
+    #[serde(default = "default_pattern_bars")]
+    pub pattern_bars: f64,
+    /// Time signature (beats per bar)
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u32,
+    /// Quantization grid for this pattern
+    #[serde(default)]
+    pub quantize_grid: QuantizeGrid,
+    /// Pattern category for organization (e.g., "drums", "bass", "melody")
+    pub category: Option<String>,
+    /// Tags for searching/filtering
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+fn default_pattern_bars() -> f64 {
+    4.0
+}
+
+fn default_beats_per_bar() -> u32 {
+    4
+}
+
+/// Reference to a sequence pattern with transformations applied
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequenceReference {
+    /// Name of the pattern to reference
+    pub pattern_name: String,
+    /// Start time offset for this pattern instance (seconds - deprecated)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time_offset: Option<f64>,
+    /// Musical start position (bar number, 1-based)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_bar: Option<u32>,
+    /// Start on specific beat within the bar (1-based)
+    #[serde(default = "default_start_beat")]
+    pub start_beat: u32,
+    /// Specific bars to play this pattern on (e.g., [1, 5, 9, 13])
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bars: Option<Vec<u32>>,
+    /// Transpose all notes by this many semitones (-12 to +12)
+    #[serde(default)]
+    pub transpose: i8,
+    /// Override instrument for all MIDI notes in this pattern
+    pub instrument_override: Option<u8>,
+    /// Scale all velocities by this factor (0.1 to 2.0)
+    #[serde(default = "default_one")]
+    pub velocity_scale: f32,
+    /// Scale all durations by this factor (0.1 to 4.0)
+    #[serde(default = "default_one")]
+    pub duration_scale: f32,
+    /// Override channel for all notes in this pattern
+    pub channel_override: Option<u8>,
+    /// Number of times to repeat this pattern (ignored if 'bars' is specified)
+    #[serde(default = "default_repeat_count")]
+    pub repeat_count: u32,
+    /// Time between repeats in bars (musical spacing)
+    #[serde(default)]
+    pub repeat_spacing_bars: f64,
+    /// Align pattern to bar boundaries
+    #[serde(default = "default_true")]
+    pub align_to_bars: bool,
+}
+
+fn default_start_beat() -> u32 {
+    1
+}
+
+fn default_repeat_count() -> u32 {
+    1
+}
+
+/// Extended sequence that supports both individual notes and pattern references
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtendedSequence {
+    /// Individual notes (existing functionality)
+    #[serde(default)]
+    pub notes: Vec<SimpleNote>,
+    /// Pattern references with transformations
+    #[serde(default)]
+    pub patterns: Vec<SequenceReference>,
+    /// Tempo in BPM (optional, defaults to 120)
+    #[serde(default = "default_tempo")]
+    pub tempo: u32,
+}
+
+impl SequencePattern {
+    #[allow(dead_code)]
+    pub fn new(name: String, notes: Vec<SimpleNote>) -> Self {
+        Self {
+            name,
+            description: None,
+            notes,
+            tempo: 120,
+            pattern_bars: 4.0,
+            beats_per_bar: 4,
+            quantize_grid: QuantizeGrid::Off,
+            category: None,
+            tags: Vec::new(),
+        }
+    }
+
+    /// Apply transformations to create a concrete sequence of notes
+    pub fn apply_reference(
+        &self,
+        reference: &SequenceReference,
+        sequence_tempo: u32,
+        sequence_beats_per_bar: u32,
+    ) -> Result<Vec<SimpleNote>, String> {
+        let mut transformed_notes = Vec::new();
+
+        // Determine where to place pattern instances
+        let placements: Vec<(u32, u32)> = if let Some(bars) = &reference.bars {
+            // Use specific bar positions
+            bars.iter()
+                .map(|&bar| (bar, reference.start_beat))
+                .collect()
+        } else if let Some(start_bar) = reference.start_bar {
+            // Use start_bar with repeat count
+            (0..reference.repeat_count)
+                .map(|i| {
+                    let bar_offset = i as f64 * (self.pattern_bars + reference.repeat_spacing_bars);
+                    ((start_bar as f64 + bar_offset) as u32, reference.start_beat)
+                })
+                .collect()
+        } else if let Some(start_offset) = reference.start_time_offset {
+            // Fallback to legacy seconds-based timing
+            return self.apply_reference_legacy(
+                reference,
+                start_offset,
+                sequence_tempo,
+                sequence_beats_per_bar,
+            );
+        } else {
+            // Default: start at bar 1
+            (0..reference.repeat_count)
+                .map(|i| {
+                    let bar_offset = i as f64 * (self.pattern_bars + reference.repeat_spacing_bars);
+                    ((1.0 + bar_offset) as u32, reference.start_beat)
+                })
+                .collect()
+        };
+
+        // Process each pattern placement
+        for (bar, beat) in placements {
+            let bar_start_time =
+                self.calculate_bar_start_time(bar, sequence_tempo, sequence_beats_per_bar);
+            let beat_offset = ((beat - 1) as f64 / sequence_beats_per_bar as f64)
+                * (60.0 / sequence_tempo as f64)
+                * sequence_beats_per_bar as f64;
+            let placement_start_time = bar_start_time + beat_offset;
+
+            for note in &self.notes {
+                let mut transformed_note = note.clone();
+
+                // Convert musical time to seconds if needed - use pattern's own tempo for internal timing
+                let note_start_offset = note.get_start_time(self.tempo, self.beats_per_bar);
+                let note_duration = note.get_duration(self.tempo, self.beats_per_bar);
+
+                // Apply timing transformation
+                if let Some(musical_time) = &transformed_note.musical_time {
+                    // Calculate the note's absolute position in the sequence
+                    // Pattern placement bar + note's relative position within pattern
+                    let note_relative_beats =
+                        (musical_time.bar - 1) * self.beats_per_bar + (musical_time.beat - 1);
+                    let note_relative_beat_fraction = musical_time.tick as f64 / 480.0; // Convert ticks to beat fraction
+
+                    let absolute_bar = bar + (note_relative_beats / sequence_beats_per_bar);
+                    let absolute_beat = beat - 1 + (note_relative_beats % sequence_beats_per_bar);
+
+                    // Ensure we don't exceed beats per bar
+                    let final_bar = absolute_bar + (absolute_beat / sequence_beats_per_bar);
+                    let final_beat = (absolute_beat % sequence_beats_per_bar) + 1;
+
+                    // Convert to seconds for now (since the player expects seconds)
+                    let absolute_beats = (final_bar - 1) as f64 * sequence_beats_per_bar as f64
+                        + (final_beat - 1) as f64
+                        + note_relative_beat_fraction;
+                    let seconds_per_beat = 60.0 / sequence_tempo as f64;
+                    transformed_note.start_time = Some(absolute_beats * seconds_per_beat);
+
+                    // Clear musical time since we're using seconds
+                    transformed_note.musical_time = None;
+                } else {
+                    // Use seconds-based timing
+                    transformed_note.start_time = Some(placement_start_time + note_start_offset);
+                }
+
+                // Apply duration scaling
+                if let Some(musical_duration) = &transformed_note.musical_duration {
+                    transformed_note.musical_duration = Some(match musical_duration {
+                        MusicalDuration::Bars(bars) => {
+                            MusicalDuration::Bars(bars * reference.duration_scale as f64)
+                        }
+                        MusicalDuration::Beats(beats) => {
+                            MusicalDuration::Beats(beats * reference.duration_scale as f64)
+                        }
+                        MusicalDuration::Seconds(secs) => {
+                            MusicalDuration::Seconds(secs * reference.duration_scale as f64)
+                        }
+                        MusicalDuration::NoteValue(_val) => MusicalDuration::Seconds(
+                            note_duration * reference.duration_scale as f64,
+                        ),
+                    });
+                } else {
+                    transformed_note.duration =
+                        Some(note_duration * reference.duration_scale as f64);
+                }
+
+                // Apply transposition to MIDI notes
+                if let Some(midi_note) = transformed_note.note {
+                    let new_note =
+                        (midi_note as i16 + reference.transpose as i16).clamp(0, 127) as u8;
+                    transformed_note.note = Some(new_note);
+                }
+
+                // Apply instrument override
+                if let Some(instrument) = reference.instrument_override {
+                    transformed_note.instrument = Some(instrument);
+                }
+
+                // Apply velocity scaling
+                if let Some(velocity) = transformed_note.velocity {
+                    let new_velocity =
+                        ((velocity as f32 * reference.velocity_scale).clamp(1.0, 127.0)) as u8;
+                    transformed_note.velocity = Some(new_velocity);
+                }
+
+                // Apply channel override
+                if let Some(channel) = reference.channel_override {
+                    transformed_note.channel = channel;
+                }
+
+                transformed_notes.push(transformed_note);
+            }
+        }
+
+        Ok(transformed_notes)
+    }
+
+    /// Legacy method for seconds-based timing
+    fn apply_reference_legacy(
+        &self,
+        reference: &SequenceReference,
+        start_offset: f64,
+        sequence_tempo: u32,
+        _sequence_beats_per_bar: u32,
+    ) -> Result<Vec<SimpleNote>, String> {
+        let mut transformed_notes = Vec::new();
+
+        for repeat in 0..reference.repeat_count {
+            let repeat_offset = repeat as f64
+                * (self.get_pattern_duration()
+                    + reference.repeat_spacing_bars
+                        * (60.0 / sequence_tempo as f64)
+                        * self.beats_per_bar as f64);
+
+            for note in &self.notes {
+                let mut transformed_note = note.clone();
+
+                let note_start = note.get_start_time(self.tempo, self.beats_per_bar);
+                let note_duration = note.get_duration(self.tempo, self.beats_per_bar);
+
+                transformed_note.start_time = Some(start_offset + repeat_offset + note_start);
+                transformed_note.duration = Some(note_duration * reference.duration_scale as f64);
+
+                // Apply other transformations...
+                if let Some(midi_note) = transformed_note.note {
+                    let new_note =
+                        (midi_note as i16 + reference.transpose as i16).clamp(0, 127) as u8;
+                    transformed_note.note = Some(new_note);
+                }
+
+                if let Some(instrument) = reference.instrument_override {
+                    transformed_note.instrument = Some(instrument);
+                }
+
+                if let Some(velocity) = transformed_note.velocity {
+                    let new_velocity =
+                        ((velocity as f32 * reference.velocity_scale).clamp(1.0, 127.0)) as u8;
+                    transformed_note.velocity = Some(new_velocity);
+                }
+
+                if let Some(channel) = reference.channel_override {
+                    transformed_note.channel = channel;
+                }
+
+                transformed_notes.push(transformed_note);
+            }
+        }
+
+        Ok(transformed_notes)
+    }
+
+    /// Calculate start time in seconds for a given bar
+    fn calculate_bar_start_time(&self, bar: u32, tempo: u32, beats_per_bar: u32) -> f64 {
+        let seconds_per_beat = 60.0 / tempo as f64;
+        (bar - 1) as f64 * beats_per_bar as f64 * seconds_per_beat
+    }
+
+    /// Calculate the total duration of this pattern in seconds
+    pub fn get_pattern_duration(&self) -> f64 {
+        // Use pattern_bars if specified, otherwise calculate from notes
+        let seconds_per_beat = 60.0 / self.tempo as f64;
+        let bar_duration = self.pattern_bars * self.beats_per_bar as f64 * seconds_per_beat;
+
+        // If we have explicit pattern_bars, use that
+        if self.pattern_bars > 0.0 {
+            bar_duration
+        } else {
+            // Fallback to calculating from notes
+            self.notes
+                .iter()
+                .map(|note| {
+                    let start = note.get_start_time(self.tempo, self.beats_per_bar);
+                    let duration = note.get_duration(self.tempo, self.beats_per_bar);
+                    start + duration
+                })
+                .fold(0.0, f64::max)
+        }
+    }
+}
+
+impl ExtendedSequence {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self {
+            notes: Vec::new(),
+            patterns: Vec::new(),
+            tempo: 120,
+        }
+    }
+
+    /// Convert to SimpleSequence by resolving all pattern references
+    pub fn resolve_patterns(
+        &self,
+        pattern_store: &std::collections::HashMap<String, SequencePattern>,
+    ) -> Result<SimpleSequence, String> {
+        let mut all_notes = self.notes.clone();
+
+        // Resolve all pattern references
+        for pattern_ref in &self.patterns {
+            let pattern = pattern_store
+                .get(&pattern_ref.pattern_name)
+                .ok_or_else(|| format!("Pattern '{}' not found", pattern_ref.pattern_name))?;
+
+            let resolved_notes = pattern.apply_reference(pattern_ref, self.tempo, 4)?; // Assuming 4/4 time for now
+            all_notes.extend(resolved_notes);
+        }
+
+        // Sort notes by start time for proper playback order
+        all_notes.sort_by(|a, b| {
+            let a_time = a.get_start_time(self.tempo, 4); // Assuming 4/4 time
+            let b_time = b.get_start_time(self.tempo, 4);
+            a_time
+                .partial_cmp(&b_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(SimpleSequence {
+            notes: all_notes,
+            tempo: self.tempo,
+        })
+    }
+}
+
 impl SimpleNote {
+    /// Get start time in seconds, converting from musical time if needed
+    pub fn get_start_time(&self, tempo: u32, beats_per_bar: u32) -> f64 {
+        if let Some(musical_time) = &self.musical_time {
+            musical_time.to_seconds(tempo, beats_per_bar, 480) // Using standard 480 PPQ
+        } else {
+            self.start_time.unwrap_or(0.0)
+        }
+    }
+
+    /// Get duration in seconds, converting from musical duration if needed
+    pub fn get_duration(&self, tempo: u32, beats_per_bar: u32) -> f64 {
+        if let Some(musical_duration) = &self.musical_duration {
+            musical_duration.to_seconds(tempo, beats_per_bar)
+        } else {
+            self.duration.unwrap_or(1.0)
+        }
+    }
+
     /// Check if this note is an R2D2 expression
     pub fn is_r2d2(&self) -> bool {
         self.note_type == "r2d2"
@@ -784,60 +1351,60 @@ impl SimpleNote {
         }
 
         // Validate frequency range if present
-        if let Some(freq) = self.synth_frequency {
-            if !(20.0..=20000.0).contains(&freq) {
-                return Err(format!(
-                    "Synthesis frequency {} is out of range (20-20000 Hz)",
-                    freq
-                ));
-            }
+        if let Some(freq) = self.synth_frequency
+            && !(20.0..=20000.0).contains(&freq)
+        {
+            return Err(format!(
+                "Synthesis frequency {} is out of range (20-20000 Hz)",
+                freq
+            ));
         }
 
         // Validate amplitude if present
-        if let Some(amp) = self.synth_amplitude {
-            if !(0.0..=1.0).contains(&amp) {
-                return Err(format!(
-                    "Synthesis amplitude {} is out of range (0.0-1.0)",
-                    amp
-                ));
-            }
+        if let Some(amp) = self.synth_amplitude
+            && !(0.0..=1.0).contains(&amp)
+        {
+            return Err(format!(
+                "Synthesis amplitude {} is out of range (0.0-1.0)",
+                amp
+            ));
         }
 
         // Validate envelope parameters
-        if let Some(attack) = self.synth_attack {
-            if !(0.0..=5.0).contains(&attack) {
-                return Err(format!(
-                    "Synthesis attack {} is out of range (0.0-5.0 seconds)",
-                    attack
-                ));
-            }
+        if let Some(attack) = self.synth_attack
+            && !(0.0..=5.0).contains(&attack)
+        {
+            return Err(format!(
+                "Synthesis attack {} is out of range (0.0-5.0 seconds)",
+                attack
+            ));
         }
 
-        if let Some(decay) = self.synth_decay {
-            if !(0.0..=5.0).contains(&decay) {
-                return Err(format!(
-                    "Synthesis decay {} is out of range (0.0-5.0 seconds)",
-                    decay
-                ));
-            }
+        if let Some(decay) = self.synth_decay
+            && !(0.0..=5.0).contains(&decay)
+        {
+            return Err(format!(
+                "Synthesis decay {} is out of range (0.0-5.0 seconds)",
+                decay
+            ));
         }
 
-        if let Some(sustain) = self.synth_sustain {
-            if !(0.0..=1.0).contains(&sustain) {
-                return Err(format!(
-                    "Synthesis sustain {} is out of range (0.0-1.0)",
-                    sustain
-                ));
-            }
+        if let Some(sustain) = self.synth_sustain
+            && !(0.0..=1.0).contains(&sustain)
+        {
+            return Err(format!(
+                "Synthesis sustain {} is out of range (0.0-1.0)",
+                sustain
+            ));
         }
 
-        if let Some(release) = self.synth_release {
-            if !(0.0..=10.0).contains(&release) {
-                return Err(format!(
-                    "Synthesis release {} is out of range (0.0-10.0 seconds)",
-                    release
-                ));
-            }
+        if let Some(release) = self.synth_release
+            && !(0.0..=10.0).contains(&release)
+        {
+            return Err(format!(
+                "Synthesis release {} is out of range (0.0-10.0 seconds)",
+                release
+            ));
         }
 
         // Validate filter parameters
@@ -852,105 +1419,105 @@ impl SimpleNote {
             }
         }
 
-        if let Some(cutoff) = self.synth_filter_cutoff {
-            if !(20.0..=20000.0).contains(&cutoff) {
-                return Err(format!(
-                    "Filter cutoff {} is out of range (20-20000 Hz)",
-                    cutoff
-                ));
-            }
+        if let Some(cutoff) = self.synth_filter_cutoff
+            && !(20.0..=20000.0).contains(&cutoff)
+        {
+            return Err(format!(
+                "Filter cutoff {} is out of range (20-20000 Hz)",
+                cutoff
+            ));
         }
 
-        if let Some(resonance) = self.synth_filter_resonance {
-            if !(0.0..=1.0).contains(&resonance) {
-                return Err(format!(
-                    "Filter resonance {} is out of range (0.0-1.0)",
-                    resonance
-                ));
-            }
+        if let Some(resonance) = self.synth_filter_resonance
+            && !(0.0..=1.0).contains(&resonance)
+        {
+            return Err(format!(
+                "Filter resonance {} is out of range (0.0-1.0)",
+                resonance
+            ));
         }
 
         // Validate effect intensities
-        if let Some(reverb) = self.synth_reverb {
-            if !(0.0..=1.0).contains(&reverb) {
-                return Err(format!(
-                    "Synthesis reverb {} is out of range (0.0-1.0)",
-                    reverb
-                ));
-            }
+        if let Some(reverb) = self.synth_reverb
+            && !(0.0..=1.0).contains(&reverb)
+        {
+            return Err(format!(
+                "Synthesis reverb {} is out of range (0.0-1.0)",
+                reverb
+            ));
         }
 
-        if let Some(chorus) = self.synth_chorus {
-            if !(0.0..=1.0).contains(&chorus) {
-                return Err(format!(
-                    "Synthesis chorus {} is out of range (0.0-1.0)",
-                    chorus
-                ));
-            }
+        if let Some(chorus) = self.synth_chorus
+            && !(0.0..=1.0).contains(&chorus)
+        {
+            return Err(format!(
+                "Synthesis chorus {} is out of range (0.0-1.0)",
+                chorus
+            ));
         }
 
-        if let Some(delay) = self.synth_delay {
-            if !(0.0..=1.0).contains(&delay) {
-                return Err(format!(
-                    "Synthesis delay {} is out of range (0.0-1.0)",
-                    delay
-                ));
-            }
+        if let Some(delay) = self.synth_delay
+            && !(0.0..=1.0).contains(&delay)
+        {
+            return Err(format!(
+                "Synthesis delay {} is out of range (0.0-1.0)",
+                delay
+            ));
         }
 
-        if let Some(delay_time) = self.synth_delay_time {
-            if !(0.0..=2.0).contains(&delay_time) {
-                return Err(format!(
-                    "Synthesis delay time {} is out of range (0.0-2.0 seconds)",
-                    delay_time
-                ));
-            }
+        if let Some(delay_time) = self.synth_delay_time
+            && !(0.0..=2.0).contains(&delay_time)
+        {
+            return Err(format!(
+                "Synthesis delay time {} is out of range (0.0-2.0 seconds)",
+                delay_time
+            ));
         }
 
         // Validate synthesis-specific parameters
-        if let Some(pulse_width) = self.synth_pulse_width {
-            if !(0.1..=0.9).contains(&pulse_width) {
-                return Err(format!(
-                    "Pulse width {} is out of range (0.1-0.9)",
-                    pulse_width
-                ));
-            }
+        if let Some(pulse_width) = self.synth_pulse_width
+            && !(0.1..=0.9).contains(&pulse_width)
+        {
+            return Err(format!(
+                "Pulse width {} is out of range (0.1-0.9)",
+                pulse_width
+            ));
         }
 
-        if let Some(mod_freq) = self.synth_modulator_freq {
-            if !(0.1..=1000.0).contains(&mod_freq) {
-                return Err(format!(
-                    "Modulator frequency {} is out of range (0.1-1000.0 Hz)",
-                    mod_freq
-                ));
-            }
+        if let Some(mod_freq) = self.synth_modulator_freq
+            && !(0.1..=1000.0).contains(&mod_freq)
+        {
+            return Err(format!(
+                "Modulator frequency {} is out of range (0.1-1000.0 Hz)",
+                mod_freq
+            ));
         }
 
-        if let Some(mod_index) = self.synth_modulation_index {
-            if !(0.0..=10.0).contains(&mod_index) {
-                return Err(format!(
-                    "Modulation index {} is out of range (0.0-10.0)",
-                    mod_index
-                ));
-            }
+        if let Some(mod_index) = self.synth_modulation_index
+            && !(0.0..=10.0).contains(&mod_index)
+        {
+            return Err(format!(
+                "Modulation index {} is out of range (0.0-10.0)",
+                mod_index
+            ));
         }
 
-        if let Some(grain_size) = self.synth_grain_size {
-            if !(0.01..=0.5).contains(&grain_size) {
-                return Err(format!(
-                    "Grain size {} is out of range (0.01-0.5 seconds)",
-                    grain_size
-                ));
-            }
+        if let Some(grain_size) = self.synth_grain_size
+            && !(0.01..=0.5).contains(&grain_size)
+        {
+            return Err(format!(
+                "Grain size {} is out of range (0.01-0.5 seconds)",
+                grain_size
+            ));
         }
 
-        if let Some(roughness) = self.synth_texture_roughness {
-            if !(0.0..=1.0).contains(&roughness) {
-                return Err(format!(
-                    "Texture roughness {} is out of range (0.0-1.0)",
-                    roughness
-                ));
-            }
+        if let Some(roughness) = self.synth_texture_roughness
+            && !(0.0..=1.0).contains(&roughness)
+        {
+            return Err(format!(
+                "Texture roughness {} is out of range (0.0-1.0)",
+                roughness
+            ));
         }
 
         Ok(())

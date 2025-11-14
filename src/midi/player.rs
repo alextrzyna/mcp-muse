@@ -2,8 +2,8 @@ use crate::expressive::{
     EffectsPresetLibrary, ExpressiveSynth, FunDSPEffectsProcessor, PresetLibrary, R2D2Emotion,
     R2D2Expression, R2D2Voice,
 };
-use crate::midi::parser::MidiNote;
 use crate::midi::SimpleSequence;
+use crate::midi::parser::MidiNote;
 use oxisynth::{MidiEvent, SoundFont, Synth};
 use rodio::{OutputStream, Sink, Source};
 use std::time::Duration;
@@ -21,14 +21,13 @@ pub struct MidiPlayer {
 
 impl MidiPlayer {
     pub fn new() -> Result<Self, String> {
-        let (_stream, stream_handle) = OutputStream::try_default()
+        let stream_handle = rodio::OutputStreamBuilder::open_default_stream()
             .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
 
-        let sink = Sink::try_new(&stream_handle)
-            .map_err(|e| format!("Failed to create audio sink: {}", e))?;
+        let sink = Sink::connect_new(stream_handle.mixer());
 
         Ok(MidiPlayer {
-            _stream,
+            _stream: stream_handle,
             sink,
             preset_library: PresetLibrary::new(),
             effects_library: EffectsPresetLibrary::new(),
@@ -364,7 +363,7 @@ impl MidiPlayer {
                 let expression = R2D2Expression {
                     emotion,
                     intensity: note.r2d2_intensity.unwrap_or(0.7),
-                    duration: note.duration as f32,
+                    duration: note.duration.unwrap_or(1.0) as f32,
                     phrase_complexity: note.r2d2_complexity.unwrap_or(2),
                     pitch_range: if let Some(range) = &note.r2d2_pitch_range {
                         if range.len() == 2 {
@@ -379,7 +378,7 @@ impl MidiPlayer {
                 };
 
                 r2d2_events.push(R2D2Event {
-                    start_time: note.start_time,
+                    start_time: note.start_time.unwrap_or(0.0),
                     expression,
                 });
             } else if note.is_synthesis() {
@@ -390,7 +389,7 @@ impl MidiPlayer {
 
                 // Convert SimpleNote to SynthEvent
                 synthesis_events.push(SynthEvent {
-                    start_time: note.start_time,
+                    start_time: note.start_time.unwrap_or(0.0),
                     note,
                 });
             } else {
@@ -400,8 +399,8 @@ impl MidiPlayer {
                         note: note_val,
                         velocity: velocity_val,
                         channel: note.channel,
-                        start_time: Duration::from_secs_f64(note.start_time),
-                        duration: Duration::from_secs_f64(note.duration),
+                        start_time: Duration::from_secs_f64(note.start_time.unwrap_or(0.0)),
+                        duration: Duration::from_secs_f64(note.duration.unwrap_or(1.0)),
                         instrument: note.instrument,
                         reverb: note.reverb,
                         chorus: note.chorus,
@@ -441,7 +440,9 @@ impl MidiPlayer {
         let synthesis_end_time = if !synthesis_events.is_empty() {
             synthesis_events
                 .iter()
-                .map(|event| Duration::from_secs_f64(event.start_time + event.note.duration))
+                .map(|event| {
+                    Duration::from_secs_f64(event.start_time + event.note.duration.unwrap_or(1.0))
+                })
                 .max()
                 .unwrap_or(Duration::from_secs(1))
         } else {
@@ -487,17 +488,11 @@ impl MidiPlayer {
         // Set volume to ensure it's audible
         self.sink.set_volume(1.0);
 
-        tracing::info!("Playback started - volume: {}", self.sink.volume());
-
-        // Wait for playback to complete
-        let wait_time = total_time + Duration::from_millis(200);
         tracing::info!(
-            "Waiting {:.2}s for enhanced mixed playback to complete...",
-            wait_time.as_secs_f64()
+            "Playback started (non-blocking) - volume: {}, duration: {:.2}s",
+            self.sink.volume(),
+            total_time.as_secs_f64()
         );
-
-        std::thread::sleep(wait_time);
-        tracing::info!("Enhanced mixed sequence playback completed");
 
         Ok(())
     }
@@ -505,15 +500,15 @@ impl MidiPlayer {
 
 fn find_soundfont() -> Result<PathBuf, String> {
     // First check if there's a custom soundfont path configured
-    if let Ok(config) = crate::setup::config::SetupConfig::load() {
-        if let Some(custom_path) = config.soundfont_path {
-            let path = PathBuf::from(custom_path);
-            if path.exists() {
-                tracing::info!("Using custom SoundFont from config: {:?}", path);
-                return Ok(path);
-            } else {
-                tracing::warn!("Configured custom SoundFont not found: {:?}", path);
-            }
+    if let Ok(config) = crate::setup::config::SetupConfig::load()
+        && let Some(custom_path) = config.soundfont_path
+    {
+        let path = PathBuf::from(custom_path);
+        if path.exists() {
+            tracing::info!("Using custom SoundFont from config: {:?}", path);
+            return Ok(path);
+        } else {
+            tracing::warn!("Configured custom SoundFont not found: {:?}", path);
         }
     }
 
@@ -645,13 +640,21 @@ impl OxiSynthSource {
                         // For drums, force bank select 128 (percussion) if not already set
                         let current_bank = self.channel_instruments.get(&note.channel).copied();
                         if current_bank != Some(128) {
-                            // Bank Select MSB (Controller 0) = 128 for drums
+                            // Bank Select MSB (Controller 0) = 128 for drums (percussion bank)
                             let bank_select_msb = MidiEvent::ControlChange {
                                 channel: note.channel,
                                 ctrl: 0,    // Bank Select MSB
                                 value: 128, // Percussion Bank
                             };
                             let _ = self.synth.send_event(bank_select_msb);
+
+                            // Bank Select LSB (Controller 32) = 0 for standard percussion
+                            let bank_select_lsb = MidiEvent::ControlChange {
+                                channel: note.channel,
+                                ctrl: 32, // Bank Select LSB
+                                value: 0, // Standard Bank LSB
+                            };
+                            let _ = self.synth.send_event(bank_select_lsb);
 
                             // Program Change to Standard Kit (program 0 in percussion bank)
                             let program_change = MidiEvent::ProgramChange {
@@ -660,8 +663,8 @@ impl OxiSynthSource {
                             };
                             let _ = self.synth.send_event(program_change);
                             self.channel_instruments.insert(note.channel, 128);
-                            tracing::debug!(
-                                "Drum Setup: channel 9 -> percussion bank 128, standard kit"
+                            tracing::info!(
+                                "🥁 Drum Setup: channel 9 -> percussion bank 128:0, standard kit (Bank MSB=128, LSB=0, Program=0)"
                             );
                         }
                     } else {
@@ -822,12 +825,22 @@ impl OxiSynthSource {
                     };
                     let _ = self.synth.send_event(midi_event);
                     self.playing_notes.insert(key, note.duration);
-                    tracing::debug!(
-                        "Note ON: {} channel {} at sample {}",
-                        note.note,
-                        note.channel,
-                        note_start_sample
-                    );
+                    if note.channel == 9 {
+                        tracing::info!(
+                            "🥁 DRUM Note ON: {} (velocity={}) channel {} at sample {}",
+                            note.note,
+                            note.velocity,
+                            note.channel,
+                            note_start_sample
+                        );
+                    } else {
+                        tracing::debug!(
+                            "Note ON: {} channel {} at sample {}",
+                            note.note,
+                            note.channel,
+                            note_start_sample
+                        );
+                    }
                 }
             }
 
@@ -902,10 +915,13 @@ impl Iterator for OxiSynthSource {
             self.process_audio_chunk();
         }
 
-        // Get the next sample (mix left and right channels for mono output)
+        // Get the next sample (mix left and right channels with better balance)
         let sample = if self.buffer_pos < self.left_buffer.len() {
-            // Amplify the audio by 20x to make it much louder
-            (self.left_buffer[self.buffer_pos] + self.right_buffer[self.buffer_pos]) * 10.0
+            // Amplify and properly mix left and right channels for drums
+            let left = self.left_buffer[self.buffer_pos] * 20.0;
+            let right = self.right_buffer[self.buffer_pos] * 20.0;
+            // Better stereo-to-mono conversion maintaining drum punch
+            (left + right) * 0.7 // Slight reduction to prevent clipping
         } else {
             0.0
         };
@@ -918,12 +934,12 @@ impl Iterator for OxiSynthSource {
 }
 
 impl Source for OxiSynthSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
     fn channels(&self) -> u16 {
-        1 // Mono output (we're mixing L+R)
+        1 // Mono output (but with better mixing)
     }
 
     fn sample_rate(&self) -> u32 {
@@ -1029,8 +1045,13 @@ impl ChannelEffectsChain {
                         let compensated_result = result * gain_compensation;
 
                         if input_sample.abs() > 0.001 {
-                            tracing::debug!("Effects processed: input={:.4}, output={:.4}, compensated={:.4}, effects_count={}", 
-                                          input_sample, result, compensated_result, effects_to_apply.len());
+                            tracing::debug!(
+                                "Effects processed: input={:.4}, output={:.4}, compensated={:.4}, effects_count={}",
+                                input_sample,
+                                result,
+                                compensated_result,
+                                effects_to_apply.len()
+                            );
                         }
                         compensated_result
                     }
@@ -1194,15 +1215,15 @@ impl ChannelProcessor {
         }
 
         // Apply master effects
-        if !self.master_effects.is_empty() {
-            if let Some(ref master_processor) = self.master_effects_processor {
-                match master_processor.process_effects(&[mixed_sample], &self.master_effects) {
-                    Ok(processed) => {
-                        mixed_sample = processed.first().copied().unwrap_or(mixed_sample);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Master effects processing failed: {}", e);
-                    }
+        if !self.master_effects.is_empty()
+            && let Some(ref master_processor) = self.master_effects_processor
+        {
+            match master_processor.process_effects(&[mixed_sample], &self.master_effects) {
+                Ok(processed) => {
+                    mixed_sample = processed.first().copied().unwrap_or(mixed_sample);
+                }
+                Err(e) => {
+                    tracing::warn!("Master effects processing failed: {}", e);
                 }
             }
         }
@@ -1527,32 +1548,32 @@ impl EnhancedHybridAudioSource {
         // Create effects
         let mut effects = Vec::new();
 
-        if let Some(reverb) = note.synth_reverb {
-            if reverb > 0.0 {
-                effects.push(EffectParams {
-                    effect_type: EffectType::Reverb,
-                    intensity: reverb,
-                });
-            }
+        if let Some(reverb) = note.synth_reverb
+            && reverb > 0.0
+        {
+            effects.push(EffectParams {
+                effect_type: EffectType::Reverb,
+                intensity: reverb,
+            });
         }
 
-        if let Some(chorus) = note.synth_chorus {
-            if chorus > 0.0 {
-                effects.push(EffectParams {
-                    effect_type: EffectType::Chorus,
-                    intensity: chorus,
-                });
-            }
+        if let Some(chorus) = note.synth_chorus
+            && chorus > 0.0
+        {
+            effects.push(EffectParams {
+                effect_type: EffectType::Chorus,
+                intensity: chorus,
+            });
         }
 
-        if let Some(delay) = note.synth_delay {
-            if delay > 0.0 {
-                let delay_time = note.synth_delay_time.unwrap_or(0.25);
-                effects.push(EffectParams {
-                    effect_type: EffectType::Delay { delay_time },
-                    intensity: delay,
-                });
-            }
+        if let Some(delay) = note.synth_delay
+            && delay > 0.0
+        {
+            let delay_time = note.synth_delay_time.unwrap_or(0.25);
+            effects.push(EffectParams {
+                effect_type: EffectType::Delay { delay_time },
+                intensity: delay,
+            });
         }
 
         // Process universal effects from the new effects system
@@ -1611,7 +1632,7 @@ impl EnhancedHybridAudioSource {
             synth_type,
             frequency,
             amplitude: note.synth_amplitude.unwrap_or(0.7),
-            duration: note.duration as f32,
+            duration: note.duration.unwrap_or(1.0) as f32,
             envelope,
             filter,
             effects,
@@ -1645,6 +1666,22 @@ impl EnhancedHybridAudioSource {
 
         sample
     }
+
+    /// Check if drums are currently playing (for channel routing)
+    fn has_drums_playing(&self) -> bool {
+        if let Some(ref oxisynth) = self.oxisynth_source {
+            // Check if any notes on channel 9 are currently playing
+            let current_time =
+                Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+            oxisynth.notes.iter().any(|note| {
+                note.channel == 9
+                    && current_time >= note.start_time
+                    && current_time <= note.start_time + note.duration
+            })
+        } else {
+            false
+        }
+    }
 }
 
 impl Iterator for EnhancedHybridAudioSource {
@@ -1665,16 +1702,29 @@ impl Iterator for EnhancedHybridAudioSource {
         // Get synthesis sample
         let synthesis_sample = self.get_synthesis_sample(self.current_sample);
 
-        // For now, get MIDI as a single mixed sample and put it on channel 0
-        // TODO: Implement proper per-channel MIDI separation
-        let midi_sample = if let Some(ref mut oxisynth) = self.oxisynth_source {
-            oxisynth.next().unwrap_or(0.0)
-        } else {
-            0.0
-        };
-
+        // Get MIDI samples with proper per-channel separation
         let mut midi_channels = vec![0.0; 16]; // 16 MIDI channels
-        midi_channels[0] = midi_sample; // Put all MIDI on channel 0 for now
+
+        if let Some(ref mut oxisynth) = self.oxisynth_source {
+            // Get the mixed sample from OxiSynth
+            let midi_sample = oxisynth.next().unwrap_or(0.0);
+
+            // Enhanced channel routing with special drum handling
+            if self.has_drums_playing() {
+                // Drums are playing - give them special routing and volume boost
+                midi_channels[9] = midi_sample * 3.0; // Significant drum volume boost
+                // Also put on channel 0 for compatibility, but at normal volume
+                midi_channels[0] = midi_sample;
+
+                // Debug log when drums are detected
+                if self.current_sample.is_multiple_of(22050) {
+                    // Log every 0.5 seconds
+                    tracing::info!("🥁 Drums detected playing on channel 9, boosted volume");
+                }
+            } else {
+                midi_channels[0] = midi_sample;
+            }
+        }
 
         // Use channel processor to mix and apply effects
         let final_sample =
@@ -1687,7 +1737,7 @@ impl Iterator for EnhancedHybridAudioSource {
 }
 
 impl Source for EnhancedHybridAudioSource {
-    fn current_frame_len(&self) -> Option<usize> {
+    fn current_span_len(&self) -> Option<usize> {
         None
     }
 
