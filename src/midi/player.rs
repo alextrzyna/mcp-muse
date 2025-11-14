@@ -295,52 +295,53 @@ impl MidiPlayer {
             }
 
             // Convert musical_time to start_time if present
-            if note.musical_time.is_some() && note.start_time.is_none() {
-                if let Some(musical_time) = &note.musical_time {
-                    // Use the MusicalTime::to_seconds method
-                    // Assuming 4/4 time signature (4 beats per bar) and 480 ticks per beat
-                    let tempo = sequence.tempo;
-                    note.start_time = Some(musical_time.to_seconds(tempo, 4, 480));
+            if note.start_time.is_none() && let Some(musical_time) = &note.musical_time {
+                // Use the MusicalTime::to_seconds method
+                // Assuming 4/4 time signature (4 beats per bar) and 480 ticks per beat
+                let tempo = sequence.tempo;
+                note.start_time = Some(musical_time.to_seconds(tempo, 4, 480));
 
-                    tracing::debug!(
-                        "Converted musical_time {{bar:{}, beat:{}, tick:{}}} to start_time={:.3}s at tempo={}",
-                        musical_time.bar, musical_time.beat, musical_time.tick,
-                        note.start_time.unwrap(), tempo
-                    );
-                }
+                tracing::debug!(
+                    "Converted musical_time {{bar:{}, beat:{}, tick:{}}} to start_time={:.3}s at tempo={}",
+                    musical_time.bar,
+                    musical_time.beat,
+                    musical_time.tick,
+                    note.start_time.unwrap(),
+                    tempo
+                );
             }
 
             // Convert musical_duration to duration if present
-            if note.musical_duration.is_some() && note.duration.is_none() {
-                if let Some(ref musical_duration) = note.musical_duration {
-                    let tempo = sequence.tempo;
-                    let seconds_per_beat = 60.0 / tempo as f64;
+            if note.duration.is_none() && let Some(ref musical_duration) = note.musical_duration {
+                let tempo = sequence.tempo;
+                let seconds_per_beat = 60.0 / tempo as f64;
 
-                    // Convert musical duration to seconds
-                    let duration_secs = match musical_duration {
-                        crate::midi::MusicalDuration::Bars(bars) => bars * 4.0 * seconds_per_beat,  // 4 beats per bar in 4/4 time
-                        crate::midi::MusicalDuration::Beats(beats) => beats * seconds_per_beat,
-                        crate::midi::MusicalDuration::Seconds(secs) => *secs,  // Already in seconds
-                        crate::midi::MusicalDuration::NoteValue(value) => {
-                            let duration_in_beats = match value {
-                                crate::midi::NoteValue::Whole => 4.0,
-                                crate::midi::NoteValue::Half => 2.0,
-                                crate::midi::NoteValue::Quarter => 1.0,
-                                crate::midi::NoteValue::Eighth => 0.5,
-                                crate::midi::NoteValue::Sixteenth => 0.25,
-                                crate::midi::NoteValue::Triplet => 2.0 / 3.0,  // Triplet quarter note
-                            };
-                            duration_in_beats * seconds_per_beat
-                        }
-                    };
+                // Convert musical duration to seconds
+                let duration_secs = match musical_duration {
+                    crate::midi::MusicalDuration::Bars(bars) => bars * 4.0 * seconds_per_beat, // 4 beats per bar in 4/4 time
+                    crate::midi::MusicalDuration::Beats(beats) => beats * seconds_per_beat,
+                    crate::midi::MusicalDuration::Seconds(secs) => *secs, // Already in seconds
+                    crate::midi::MusicalDuration::NoteValue(value) => {
+                        let duration_in_beats = match value {
+                            crate::midi::NoteValue::Whole => 4.0,
+                            crate::midi::NoteValue::Half => 2.0,
+                            crate::midi::NoteValue::Quarter => 1.0,
+                            crate::midi::NoteValue::Eighth => 0.5,
+                            crate::midi::NoteValue::Sixteenth => 0.25,
+                            crate::midi::NoteValue::Triplet => 2.0 / 3.0, // Triplet quarter note
+                        };
+                        duration_in_beats * seconds_per_beat
+                    }
+                };
 
-                    note.duration = Some(duration_secs);
+                note.duration = Some(duration_secs);
 
-                    tracing::debug!(
-                        "Converted musical_duration {:?} to duration={:.3}s at tempo={}",
-                        musical_duration, note.duration.unwrap(), tempo
-                    );
-                }
+                tracing::debug!(
+                    "Converted musical_duration {:?} to duration={:.3}s at tempo={}",
+                    musical_duration,
+                    note.duration.unwrap(),
+                    tempo
+                );
             }
 
             processed_notes.push(note);
@@ -450,7 +451,11 @@ impl MidiPlayer {
 
                     tracing::info!(
                         "🎵 MIDI Note scheduled: note={}, velocity={}, start_time={:.3}s, duration={:.3}s, instrument={:?}",
-                        note_val, velocity_val, start_time_secs, duration_secs, note.instrument
+                        note_val,
+                        velocity_val,
+                        start_time_secs,
+                        duration_secs,
+                        note.instrument
                     );
 
                     midi_notes.push(MidiNote {
