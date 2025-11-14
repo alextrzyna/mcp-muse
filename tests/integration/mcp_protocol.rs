@@ -127,25 +127,25 @@ fn test_mcp_tools_list() {
         play_notes_tool["description"]
             .as_str()
             .unwrap()
-            .contains("UNIVERSAL AUDIO ENGINE")
+            .contains("quick sounds")
     );
     assert!(
         play_notes_tool["description"]
             .as_str()
             .unwrap()
-            .contains("MIDI music")
+            .contains("MIDI")
     );
     assert!(
         play_notes_tool["description"]
             .as_str()
             .unwrap()
-            .contains("R2D2 expressions")
+            .contains("R2D2")
     );
     assert!(
         play_notes_tool["description"]
             .as_str()
             .unwrap()
-            .contains("custom synthesis")
+            .contains("synthesis")
     );
 
     // Verify structure of both tools

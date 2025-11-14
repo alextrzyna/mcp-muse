@@ -32,3 +32,9 @@ Thumbs.db
 # Added by cargo
 
 /target
+
+# Audio assets (large files downloaded at setup time)
+*.sf2
+*.sf3
+assets/*.sf2
+assets/*.sf3

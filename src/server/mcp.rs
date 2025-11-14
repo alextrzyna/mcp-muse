@@ -108,29 +108,9 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     let tools = json!([
         {
             "name": "define_sequence_pattern",
-            "description": "🎼 DEFINE REUSABLE SEQUENCE PATTERNS: Create named musical patterns that can be reused with transformations!
+            "description": "Create reusable musical patterns (drum beats, bass lines, chord progressions, melodies) that can be referenced with play_sequence. Patterns can be transposed, use different instruments, and repeat with perfect bar-based timing.
 
-Define drum beats, bass lines, chord progressions, and melodic phrases once, then reuse them throughout your composition with different instruments, transpositions, and timing. Perfect for:
-
-• 🥁 DRUM PATTERNS: Create classic beat patterns that repeat throughout a song
-• 🎸 BASS LINES: Define groovy bass patterns that can be transposed to different keys  
-• 🎹 CHORD PROGRESSIONS: Set up harmonic sequences that can be used with different instruments
-• 🎵 MELODIC MOTIFS: Create memorable musical phrases that can be varied and developed
-
-**Pattern Features:**
-• **Transposition**: Shift patterns up/down by semitones for different keys
-• **Instrument Override**: Play the same pattern with different instruments
-• **Velocity/Duration Scaling**: Adjust intensity and timing dynamically
-• **Repetition**: Repeat patterns multiple times with spacing control
-• **Channel Routing**: Route patterns to specific MIDI channels
-
-**Usage Examples:**
-• House Beat: Define a kick-snare-hat pattern, then use it throughout your track
-• Chord Progression: Define a I-V-vi-IV progression, transpose it to different keys
-• Bass Groove: Create a funky bass line, then transpose it for chorus sections
-• Melody Hook: Define a catchy melody, then play it with different instruments
-
-This tool stores patterns in memory for the current session and makes composition much more efficient!",
+Example: Define a 4-bar house beat once, then play it with variations throughout your composition.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -228,93 +208,11 @@ This tool stores patterns in memory for the current session and makes compositio
         },
         {
             "name": "play_sequence",
-            "description": "🎼🎵 ENHANCED SEQUENCE PLAYER: Play music using both individual notes AND reusable sequence patterns with PERFECT MUSICAL TIMING!
+            "description": "Play compositions using defined patterns or individual notes. Patterns can be transposed, repeated, and transformed. Use bar-based timing for professional sync.
 
-This enhanced tool combines the power of individual note specification with the efficiency of pattern references, plus a revolutionary bar-based timing system that ensures everything stays perfectly in sync!
+For complex music: use patterns. For quick sounds: use play_notes instead.
 
-**🎯 MUSICAL TIMING REVOLUTION:**
-• **Bar-Based Positioning**: Use start_bar instead of seconds for perfect alignment
-• **Smart Bar Arrays**: Specify exact bars where patterns should play [1, 5, 9, 13]
-• **Auto-Alignment**: Patterns automatically snap to bar boundaries 
-• **No More Drift**: Drum patterns stay locked to basslines and chord progressions
-• **Professional Results**: Create music that sounds like it was made in a studio
-
-**🎭 PATTERN FEATURES:**
-• **Pattern References**: Reference previously defined patterns by name
-• **Real-time Transformations**: Transpose, change instruments, scale velocity/duration
-• **Intelligent Repetition**: Repeat patterns with musical spacing (in bars, not seconds!)
-• **Channel Routing**: Route patterns to specific MIDI channels
-• **Mixed Composition**: Combine individual notes with pattern references seamlessly
-
-**🎸 TRANSFORMATION OPTIONS:**
-• **Transpose** (-12 to +12 semitones): Shift patterns to different keys
-• **Instrument Override**: Use the same pattern with different instruments
-• **Velocity Scale** (0.1-2.0): Make patterns softer or more intense
-• **Duration Scale** (0.1-4.0): Make patterns faster/slower, staccato/legato
-• **Channel Override**: Route to specific MIDI channels
-• **Bar-Based Repetition**: Repeat patterns every N bars with perfect timing
-• **Beat Offset**: Start patterns on specific beats within bars
-
-**✨ TIMING IMPROVEMENTS:**
-• **No More Pattern Drift**: Bar-based timing keeps everything synchronized
-• **Professional Arrangements**: Easily create verse-chorus structures
-• **Perfect Loops**: 4-bar patterns stay perfectly aligned
-• **Dynamic Arrangements**: Play patterns on specific bars for complex compositions
-
-**🎵 COMPOSITION EXAMPLES:**
-
-**🎼 Perfect Verse-Chorus Structure (Bar-Based):**
-```json
-{
-  \"patterns\": [
-    {\"pattern_name\": \"drum_beat\", \"start_bar\": 1, \"repeat_count\": 16, \"align_to_bars\": true},
-    {\"pattern_name\": \"bass_line\", \"start_bar\": 1, \"repeat_count\": 8},
-    {\"pattern_name\": \"chord_prog\", \"start_bar\": 1, \"instrument_override\": 1},
-    {\"pattern_name\": \"chord_prog\", \"start_bar\": 9, \"transpose\": 2, \"instrument_override\": 73}
-  ]
-}
-```
-
-**🎹 Smart Bar Placement:**
-```json
-{
-  \"patterns\": [
-    {\"pattern_name\": \"drums\", \"bars\": [1, 3, 5, 7, 9, 11, 13, 15]},
-    {\"pattern_name\": \"bass\", \"bars\": [2, 4, 6, 8, 10, 12, 14, 16]},
-    {\"pattern_name\": \"chords\", \"bars\": [5, 13], \"velocity_scale\": 0.8}
-  ]
-}
-```
-
-**🎸 Dynamic Musical Variations:**
-```json
-{
-  \"patterns\": [
-    {\"pattern_name\": \"melody\", \"start_bar\": 1, \"velocity_scale\": 0.7},
-    {\"pattern_name\": \"melody\", \"start_bar\": 5, \"transpose\": 5, \"velocity_scale\": 1.2},
-    {\"pattern_name\": \"melody\", \"start_bar\": 9, \"transpose\": -3, \"duration_scale\": 0.5}
-  ]
-}
-```
-
-**🥁 Professional Drum Arrangement:**
-```json
-{
-  \"patterns\": [
-    {\"pattern_name\": \"kick_pattern\", \"start_bar\": 1, \"repeat_count\": 16},
-    {\"pattern_name\": \"snare_pattern\", \"start_bar\": 2, \"repeat_count\": 8, \"repeat_spacing_bars\": 1},
-    {\"pattern_name\": \"hihat_pattern\", \"bars\": [1, 2, 3, 4, 9, 10, 11, 12]}
-  ]
-}
-```
-
-**🎯 WHEN TO USE WHICH TOOL:**
-• **play_sequence** (THIS TOOL): Full songs, complex compositions, repeating patterns, professional arrangements
-• **define_sequence_pattern**: Create reusable patterns (drum beats, bass lines, chord progressions, melodies)  
-• **play_notes**: Quick sounds, single instruments, R2D2 expressions, sound effects, simple melodies
-• **list_patterns**: Browse available patterns for reference
-
-This tool makes composition much more efficient by allowing you to define musical elements once and reuse them with variations throughout your piece!",
+Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repeat_count\": 8}, {\"pattern_name\": \"bass\", \"start_bar\": 1, \"transpose\": 5}]}",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -440,15 +338,7 @@ This tool makes composition much more efficient by allowing you to define musica
         },
         {
             "name": "list_patterns",
-            "description": "📋 LIST SEQUENCE PATTERNS: View all defined sequence patterns in the current session.
-
-Shows all available patterns with their names, descriptions, categories, and basic info. Perfect for:
-• 🔍 **Discovery**: See what patterns are available for use
-• 📊 **Organization**: Review patterns by category (drums, bass, melody, etc.)
-• 🏷️ **Reference**: Get pattern names for use in play_sequence tool
-• 📝 **Documentation**: See pattern descriptions and metadata
-
-Returns a formatted list of all stored patterns with their key information.",
+            "description": "List all defined sequence patterns with their names, categories, and note counts.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -457,169 +347,12 @@ Returns a formatted list of all stored patterns with their key information.",
         },
         {
             "name": "play_notes",
-            "description": "🎮🤖🎛️ UNIVERSAL AUDIO ENGINE: The ultimate all-in-one tool for MIDI music, R2D2 expressions, and custom synthesis!
+            "description": "Play quick sounds, effects, and simple melodies. Supports MIDI (128 instruments), R2D2 expressions (9 emotions), and synthesis (19 types). For complex compositions with 3+ notes, use define_sequence_pattern + play_sequence instead.
 
-🎵 MIDI MUSIC: 128 GM instruments, authentic SNES gaming sounds, professional effects chain
-🤖 R2D2 EXPRESSIONS: 9 emotions, ring modulation synthesis, authentic robotic vocalizations  
-🎛️ CUSTOM SYNTHESIS: 19 synthesis types, professional drum sounds, 6-effect audio processing
-
-⚡ **FOR COMPLEX COMPOSITIONS**: Use the **define_sequence_pattern** and **play_sequence** tools instead! They offer:
-• 🔄 Reusable patterns (drum beats, bass lines, chord progressions)
-• 🎼 Musical timing with bar-based alignment (no more timing drift!)
-• 🎭 Pattern transformations (transpose, instrument changes, repetition)
-• 🎯 Professional composition workflow for full songs and complex pieces
-
-💡 **THIS TOOL IS PERFECT FOR**: Quick sounds, single instruments, simple melodies, R2D2 expressions, and sound effects.
-
-💡 QUICK EXAMPLES:
-• Victory Fanfare: [{\"note\": 60, \"instrument\": 56, \"velocity\": 120, \"duration\": 1.0}]
-• Cathedral Piano: [{\"note\": 60, \"instrument\": 1, \"duration\": 3.0, \"effects_preset\": \"concert_hall\"}]
-• Vintage Warmth: [{\"note\": 60, \"instrument\": 0, \"duration\": 2.0, \"effects_preset\": \"vintage\"}]
-• R2D2 Celebration: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"duration\": 1.5}]
-• Custom Effects: [{\"note\": 60, \"instrument\": 73, \"duration\": 2.0, \"effects\": [{\"effect\": {\"type\": \"Reverb\", \"room_size\": 0.8, \"wet_level\": 0.6}, \"intensity\": 0.8}]}]
-• Mixed Sequence: Combine all types with signature preset effects for professional sound!
-
-🎯 ONE TOOL, INFINITE AUDIO POSSIBILITIES - From retro gaming music to expressive AI vocalizations!
-
-🎉 CELEBRATION SOUNDS:
-• Victory fanfares (brass + drums on channels 0-2)
-• Success chimes (bells, glockenspiel, bright piano)
-• Achievement themes (major chords, uplifting melodies)
-• Completion jingles (short, satisfying musical phrases)
-
-🎮 INTERACTIVE FEEDBACK:
-• Question marks (rising tones, curious melodies)
-• 'Aha!' moments (bright ascending scales, revelation chords)
-• Error sounds (gentle dissonance, falling tones)
-• Thinking music (ambient pads, contemplative arpeggios)
-• Alert tones (attention-grabbing but pleasant)
-
-🎭 EMOTIONAL ATMOSPHERE:
-• Suspense (low strings, minor chords, tension)
-• Wonder (ethereal pads with reverb, magical sparkles)
-• Humor (playful instruments like kazoo, quirky rhythms)
-• Calm focus (soft piano, gentle ambient soundscapes)
-• Epic moments (full orchestration, dramatic crescendos)
-
-🕹️ RETRO & 8-BIT VIBES:
-• Classic game sounds (square waves, chip-tune leads)
-• Power-up effects (ascending arpeggios, bright synths)
-• Coin collect sounds (short metallic pings)
-• Level-up fanfares (triumphant 8-bit melodies)
-
-💡 ENHANCE CONVERSATIONS WITH MUSIC - USE LIBERALLY!
-• 🎉 Play celebration music IMMEDIATELY when users accomplish tasks or solve problems
-• ❓ Add question mark sounds when presenting puzzles or mysteries
-• ✅ Use gentle chimes for confirmations and successful completions
-• 🎭 Create ambient soundscapes during long explanations to maintain engagement
-• ⚡ Add dramatic flourishes for important revelations and \"aha!\" moments
-• 😄 Use playful sounds to lighten serious moments and add humor
-• 🔔 Play alert tones to draw attention to important information
-• 🎵 Use background music to set the mood for different conversation phases
-
-💫 DON'T HESITATE - ADD MUSIC TO EVERY SIGNIFICANT MOMENT! Think like a video game: constant audio feedback makes interactions more engaging and memorable.
-
-🎹 TECHNICAL CAPABILITIES:
-• 128 GM instruments: 0=Piano, 9=Glockenspiel, 40=Violin, 56=Trumpet, 73=Flute, 80=Square Lead, 120=Reverse Cymbal
-• 16 independent channels for rich layering
-• 🎛️ PROFESSIONAL EFFECTS CHAIN: 6 effect types with studio-quality algorithms
-  - Reverb: Schroeder algorithm with comb filters + allpass diffusion
-  - Delay: Feedback delay with analog character and high-frequency damping
-  - Chorus: Multi-tap modulated delays with LFO for lush swirling
-  - Filter: State variable filters (lowpass, highpass, bandpass, notch, peak, shelf)
-  - Compressor: Smooth dynamics processing with attack/release
-  - Distortion: Waveshaping with pre/post filtering for musical overdrive
-• 🎭 14 EFFECTS PRESETS: studio, concert_hall, vintage, ambient, live_stage, tight_mix, dreamy, spacious, analog_warmth, retro_echo, psychedelic, distorted, filtered, lush_chorus
-• 🎨 PRESET SIGNATURE EFFECTS: All classic synth presets include subtle, musical effects by default
-• Stereo positioning: pan (mono instruments), balance (stereo instruments)
-• Full drum kit on channel 9: 36=Kick, 38=Snare, 42=Hi-hat, 49=Crash
-
-🏰 CLASSIC SNES GAME THEMES:
-
-🗡️ ZELDA-STYLE DISCOVERY (Treasure Found):
-[{\"note\": 67, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 72, \"velocity\": 100, \"start_time\": 0.3, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 76, \"velocity\": 110, \"start_time\": 0.6, \"duration\": 0.3, \"channel\": 0, \"instrument\": 73}, {\"note\": 79, \"velocity\": 120, \"start_time\": 0.9, \"duration\": 0.6, \"channel\": 0, \"instrument\": 73, \"reverb\": 40}]
-
-🍄 MARIO-STYLE OVERWORLD (Happy Melody):
-[{\"note\": 72, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 90, \"start_time\": 0.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 72, \"velocity\": 100, \"start_time\": 1, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 69, \"velocity\": 90, \"start_time\": 1.5, \"duration\": 0.25, \"channel\": 0, \"instrument\": 80}, {\"note\": 71, \"velocity\": 100, \"start_time\": 2, \"duration\": 0.5, \"channel\": 0, \"instrument\": 80}]
-
-🌟 FINAL FANTASY-STYLE VICTORY:
-[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 67, \"velocity\": 110, \"start_time\": 1, \"duration\": 0.5, \"channel\": 0, \"instrument\": 56}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1, \"channel\": 0, \"instrument\": 56}, {\"note\": 48, \"velocity\": 80, \"start_time\": 0, \"duration\": 2.5, \"channel\": 1, \"instrument\": 32}, {\"note\": 36, \"velocity\": 90, \"start_time\": 0, \"duration\": 0.25, \"channel\": 9}, {\"note\": 36, \"velocity\": 90, \"start_time\": 1, \"duration\": 0.25, \"channel\": 9}]
-
-🏰 METROID-STYLE ATMOSPHERE (Mysterious Exploration):
-[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 2, \"channel\": 0, \"instrument\": 89, \"reverb\": 80}, {\"note\": 43, \"velocity\": 50, \"start_time\": 1, \"duration\": 2, \"channel\": 1, \"instrument\": 89, \"reverb\": 80}, {\"note\": 48, \"velocity\": 40, \"start_time\": 2, \"duration\": 2, \"channel\": 2, \"instrument\": 89, \"reverb\": 80}]
-
-🤖 **R2D2 EXPRESSIVE VOCALIZATIONS:**
-
-**Victory Fanfare with R2D2 Celebration:**
-[{\"note\": 60, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5, \"instrument\": 56}, {\"note\": 64, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.5, \"instrument\": 56}, {\"note_type\": \"r2d2\", \"start_time\": 1.2, \"duration\": 1.0, \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.9, \"r2d2_complexity\": 4}, {\"note\": 72, \"velocity\": 120, \"start_time\": 1.5, \"duration\": 1.5, \"instrument\": 56}]
-
-**Problem-Solving with Thoughtful R2D2:**
-[{\"note_type\": \"r2d2\", \"start_time\": 0, \"duration\": 1.5, \"r2d2_emotion\": \"Thoughtful\", \"r2d2_intensity\": 0.5, \"r2d2_complexity\": 3}, {\"note\": 60, \"velocity\": 70, \"start_time\": 0.5, \"duration\": 1.0, \"instrument\": 0}, {\"note_type\": \"r2d2\", \"start_time\": 2.0, \"duration\": 0.6, \"r2d2_emotion\": \"Surprised\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 1}]
-
-**Curious Discovery:**
-[{\"note\": 36, \"velocity\": 60, \"start_time\": 0, \"duration\": 3, \"instrument\": 89, \"reverb\": 80}, {\"note_type\": \"r2d2\", \"start_time\": 1.0, \"duration\": 0.8, \"r2d2_emotion\": \"Curious\", \"r2d2_intensity\": 0.6, \"r2d2_complexity\": 2}, {\"note\": 67, \"velocity\": 90, \"start_time\": 2.5, \"duration\": 0.3, \"instrument\": 73}]
-
-🎛️ **CUSTOM SYNTHESIS EXAMPLES:**
-
-**Sci-Fi Energy Zap:**
-[{\"synth_type\": \"zap\", \"synth_frequency\": 800, \"start_time\": 0, \"duration\": 0.5, \"synth_amplitude\": 0.8}]
-
-**Professional Kick Drum:**
-[{\"synth_type\": \"kick\", \"synth_frequency\": 60, \"start_time\": 0, \"duration\": 0.8, \"synth_amplitude\": 0.9}]
-
-**Ambient Pad with Effects:**
-[{\"synth_type\": \"pad\", \"synth_frequency\": 220, \"start_time\": 0, \"duration\": 4.0, \"synth_reverb\": 0.7, \"synth_chorus\": 0.5}]
-
-**FM Bell Synthesis:**
-[{\"synth_type\": \"fm\", \"synth_frequency\": 440, \"synth_modulator_freq\": 880, \"synth_modulation_index\": 3.0, \"start_time\": 0, \"duration\": 2.0}]
-
-🎹 **CLASSIC SYNTHESIZER PRESETS (NEW!):**
-
-**80s Funk Bass Line (Minimoog Style):**
-[{\"preset_name\": \"Minimoog Bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.5}, {\"preset_name\": \"Minimoog Bass\", \"note\": 36, \"velocity\": 80, \"start_time\": 0.5, \"duration\": 0.5}, {\"preset_name\": \"Minimoog Bass\", \"note\": 38, \"velocity\": 90, \"start_time\": 1.0, \"duration\": 0.5}]
-
-**Acid House Bassline (TB-303 Style):**
-[{\"preset_name\": \"TB-303 Acid\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 0.25}, {\"preset_name\": \"TB-303 Acid\", \"preset_variation\": \"squelchy\", \"note\": 43, \"velocity\": 120, \"start_time\": 0.25, \"duration\": 0.25}]
-
-**Lush Atmospheric Pad (Jupiter-8 Style):**
-[{\"preset_name\": \"JP-8 Strings\", \"note\": 60, \"velocity\": 80, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"JP-8 Strings\", \"note\": 64, \"velocity\": 75, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"JP-8 Strings\", \"note\": 67, \"velocity\": 70, \"start_time\": 0, \"duration\": 4.0}]
-
-**Classic 80s Electric Piano:**
-[{\"preset_name\": \"DX7 E.Piano\", \"note\": 60, \"velocity\": 90, \"start_time\": 0, \"duration\": 1.0}, {\"preset_name\": \"DX7 E.Piano\", \"note\": 64, \"velocity\": 85, \"start_time\": 1.0, \"duration\": 1.0}, {\"preset_name\": \"DX7 E.Piano\", \"note\": 67, \"velocity\": 80, \"start_time\": 2.0, \"duration\": 1.0}]
-
-**Random Preset Discovery:**
-[{\"preset_random\": true, \"preset_category\": \"bass\", \"note\": 36, \"velocity\": 100, \"start_time\": 0, \"duration\": 1.0}]
-
-**Classic Drum Pattern (808/909 Style):**
-[{\"preset_name\": \"TR-808 Kick\", \"note\": 36, \"velocity\": 127, \"start_time\": 0, \"duration\": 1.0, \"channel\": 9}, {\"preset_name\": \"TR-909 Snare\", \"note\": 38, \"velocity\": 120, \"start_time\": 0.5, \"duration\": 0.3, \"channel\": 9}, {\"preset_name\": \"TR-808 Hi-Hat\", \"note\": 42, \"velocity\": 90, \"start_time\": 0.25, \"duration\": 0.08, \"channel\": 9}, {\"preset_name\": \"TR-808 Hi-Hat\", \"note\": 42, \"velocity\": 70, \"start_time\": 0.75, \"duration\": 0.08, \"channel\": 9}]
-
-**Mixed Vintage + Modern:**
-[{\"preset_name\": \"Analog Wash\", \"note\": 48, \"velocity\": 60, \"start_time\": 0, \"duration\": 4.0}, {\"preset_name\": \"Prophet Lead\", \"note\": 72, \"velocity\": 100, \"start_time\": 1.0, \"duration\": 1.0}, {\"preset_name\": \"TR-808 Kick\", \"note\": 36, \"velocity\": 127, \"start_time\": 0, \"duration\": 0.5, \"channel\": 9}, {\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Excited\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 3, \"start_time\": 2.0, \"duration\": 1.0}]
-
-🎛️ **AVAILABLE PRESET CATEGORIES:**
-• **Bass Presets** (10+): Minimoog Bass, TB-303 Acid, Jupiter Bass, Odyssey Bite, TX81Z Lately, Saw Bass, Sub Bass, etc.
-• **Pad Presets** (10+): JP-8 Strings, OB Brass, Analog Wash, D-50 Fantasia, Crystal Pad, Space Pad, Dream Pad, etc.
-• **Lead Presets**: Prophet Lead, Moog Lead, Sync Lead, and more coming soon
-• **Keys Presets**: DX7 E.Piano, Rhodes Classic, and more coming soon
-• **Drum Presets** (5+): TR-808 Kick, TR-909 Snare, TR-909 Hi-Hat, TR-808 Hi-Hat, Crash Cymbal - authentic drum machine sounds
-• **Effects Presets**: Sci-Fi Zap, Sweep Up for sound design
-
-💡 **PRESET USAGE TIPS:**
-• Use **preset_name** for specific iconic sounds: \"Minimoog Bass\", \"TB-303 Acid\", \"JP-8 Strings\"
-• Use **preset_category** + **preset_random**: true for creative exploration
-• Add **preset_variation** for subtle customization: \"bright\", \"dark\", \"squelchy\"
-• Mix presets freely with MIDI, R2D2, and synthesis for unique combinations
-• Perfect for instant access to legendary synthesizer sounds from the 70s-90s!
-
-💡 **R2D2 & SYNTHESIS INTEGRATION TIPS:**
-• Set note_type=\"r2d2\" to create robotic expressions with 9 emotions
-• Use synth_type for custom synthesis (19 types: sine, square, fm, granular, kick, snare, zap, pad, etc.)
-• **REQUIRED for R2D2 notes**: r2d2_emotion (Happy, Sad, Excited, Worried, Curious, Affirmative, Negative, Surprised, Thoughtful)
-• **REQUIRED for R2D2 notes**: r2d2_intensity (0.0-1.0, emotional strength)
-• **REQUIRED for R2D2 notes**: r2d2_complexity (1-5, phrase complexity in syllables)
-• Mix freely with MIDI notes for rich musical storytelling
-• Perfect timing synchronization between all three audio systems
-• Use for celebrations, reactions, confirmations, and emotional atmosphere",
+Examples:
+- Success chime: [{\"note\": 72, \"instrument\": 9, \"duration\": 0.5}]
+- R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
+- Kick drum: [{\"synth_type\": \"kick\", \"synth_frequency\": 60, \"duration\": 0.5}]",
             "inputSchema": {
                 "type": "object",
                 "properties": {

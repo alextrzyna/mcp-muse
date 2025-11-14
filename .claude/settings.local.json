@@ -42,7 +42,12 @@
       "Bash(cargo update:*)",
       "Bash(cargo install:*)",
       "Bash(cargo upgrade:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(unzip:*)",
+      "Bash(/Users/alex/source/mcp-muse/assets/FluidR3_GM.sf2)",
+      "Bash(/Users/alex/source/mcp-muse/target/release/mcp-muse test-presets:*)",
+      "Bash(cat:*)"
     ],
     "deny": []
   }
