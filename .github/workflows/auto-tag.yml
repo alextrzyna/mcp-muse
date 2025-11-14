@@ -1,0 +1,104 @@
+name: Auto Tag with CalVer
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - '.github/workflows/**'
+      - 'VERSIONING.md'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  auto-tag:
+    name: Create CalVer Tag
+    runs-on: ubuntu-latest
+    # Skip if commit message contains [skip-release] or is a version bump commit
+    if: "!contains(github.event.head_commit.message, '[skip-release]') && !contains(github.event.head_commit.message, 'chore: bump version')"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Calculate next CalVer version
+        id: calver
+        run: |
+          # Get current year and month
+          YEAR=$(date +%Y)
+          MONTH=$(date +%m)
+
+          # Remove leading zero from month for version format
+          MONTH_NO_ZERO=$((10#$MONTH))
+
+          # Find the latest tag for this year-month
+          LATEST_TAG=$(git tag -l "v${YEAR}.${MONTH_NO_ZERO}.*" | sort -V | tail -n 1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            # No tag exists for this month, start with patch 0
+            PATCH=0
+          else
+            # Extract patch number and increment
+            PATCH=$(echo $LATEST_TAG | sed -E "s/v${YEAR}\.${MONTH_NO_ZERO}\.([0-9]+)/\1/")
+            PATCH=$((PATCH + 1))
+          fi
+
+          # Create new version
+          NEW_VERSION="${YEAR}.${MONTH_NO_ZERO}.${PATCH}"
+          NEW_TAG="v${NEW_VERSION}"
+
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          echo "📦 Next version: ${NEW_VERSION}"
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          if git rev-parse "${{ steps.calver.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️  Tag ${{ steps.calver.outputs.tag }} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Tag ${{ steps.calver.outputs.tag }} is new"
+          fi
+
+      - name: Update Cargo.toml version
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ steps.calver.outputs.version }}"/' Cargo.toml
+          echo "📝 Updated Cargo.toml to version ${{ steps.calver.outputs.version }}"
+
+      - name: Commit version bump
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git add Cargo.toml
+          git commit -m "chore: bump version to ${{ steps.calver.outputs.version }} [skip-release]"
+          git push origin main
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git tag -a "${{ steps.calver.outputs.tag }}" -m "Release ${{ steps.calver.outputs.tag }}"
+          git push origin "${{ steps.calver.outputs.tag }}"
+          echo "🚀 Created and pushed tag ${{ steps.calver.outputs.tag }}"
+
+      - name: Output release info
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          echo "### 🎉 Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.calver.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** ${{ steps.calver.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The release workflow will now build binaries and publish to crates.io" >> $GITHUB_STEP_SUMMARY

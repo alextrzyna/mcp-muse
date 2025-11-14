@@ -98,6 +98,22 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          name: "MCP-Muse ${{ github.ref_name }}"
+          body: |
+            ## 🎮 MCP-Muse Release ${{ github.ref_name }}
+
+            ### Installation Options
+
+            **Via Cargo:**
+            ```bash
+            cargo install mcp-muse
+            ```
+
+            **Via Binary Download:**
+            Download the appropriate binary for your platform below.
+
+            ### What's Changed
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
