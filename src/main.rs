@@ -60,7 +60,7 @@ fn init_logging() {
 #[derive(Parser, Debug)]
 #[command(
     author = "mcp-muse team",
-    version = "0.1.0",
+    version,
     about = "🎵 Universal Audio Engine: MIDI Music, R2D2 Expressions & Custom Synthesis"
 )]
 struct Args {
