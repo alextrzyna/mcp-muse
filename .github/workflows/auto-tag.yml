@@ -92,10 +92,11 @@ jobs:
 
       - name: Commit version bump
         if: steps.check_tag.outputs.exists == 'false' && steps.update_version.outputs.has_changes == 'true'
+        continue-on-error: true
         run: |
           git add Cargo.toml
           git commit -m "chore: bump version to ${{ steps.calver.outputs.version }} [skip-release]"
-          git push origin main
+          git push origin main || echo "⚠️ Could not push version bump (branch protection), continuing with tag creation"
 
       - name: Create and push tag
         if: steps.check_tag.outputs.exists == 'false'
