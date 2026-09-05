@@ -107,6 +107,10 @@ fn init_logging() {
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Run setup (same as the `setup` subcommand)
+    #[arg(long)]
+    setup: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -149,7 +153,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let args = Args::parse();
 
-    match args.command {
+    let command = if args.setup {
+        Some(Commands::Setup)
+    } else {
+        args.command
+    };
+
+    match command {
         Some(Commands::Server { name: _ }) => {
             tracing::info!("Starting MCP MIDI Server (stdio mode)...");
             server::run_stdio_server();

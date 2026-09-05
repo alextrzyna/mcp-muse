@@ -51,7 +51,7 @@
 - **🎮 Authentic SNES Gaming Sounds** - 128 GM instruments with FluidR3_GM for classic 16-bit console tone
 - **🤖 R2D2 Expressive Emotions** - 9 distinct robotic vocalizations (Happy, Excited, Curious, Worried, etc.)
 - **🎹 Classic Synthesizer Presets** - 29 authentic vintage recreations (Minimoog Bass, TB-303 Acid, Jupiter Pads, TR-808 Drums, etc.)
-- **🎛️ Custom Synthesis Engine** - 19 synthesis types including FM, Granular, Professional Drums, Sound Effects
+- **🎛️ Custom Synthesis Engine** - 20 synthesis types including FM, Granular, Professional Drums, Sound Effects
 
 ### 🏆 **Comprehensive Audio Features**
 - **Mixed Mode Magic** - All 4 audio systems work together in perfect synchronization
@@ -76,12 +76,12 @@
 - 🎮 **16-Bit SNES Sound**: Authentic retro gaming audio using FluidR3_GM SoundFont
 - 🤖 **R2D2 Expressions**: 9 distinct robotic emotions with ring modulation synthesis
 - 🎹 **Classic Synthesizer Presets**: 29 authentic vintage recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
-- 🎛️ **Custom Synthesis Engine**: 19 advanced synthesis types (FM, Granular, Professional Drums, etc.)
+- 🎛️ **Custom Synthesis Engine**: 20 synthesis types (FM, DX7-style FM, Granular, drums, effects)
 - 🎭 **Universal Mixed Mode**: All 4 audio systems work together in perfect synchronization
 - 🏆 **185+ Sound Options**: Massive audio vocabulary (128 GM + 9 R2D2 + 29 Presets + 20 Synthesis)
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
-- 🔌 **Single Tool Integration**: One unified `play_notes` tool for all audio capabilities
-- 🎚️ **Professional Effects**: Per-channel effects processing with intelligent limiting and gain compensation
+- 🔌 **Six Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `list_sounds`, `stop_playback`
+- 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per note, stereo output
 - ⚙️ **Zero Setup**: Automatic SoundFont download and multi-engine configuration
 - 🧪 **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
 
@@ -134,13 +134,13 @@ For **Cursor** (choose based on your installation method):
 
 ```bash
 # If installed via cargo:
-mcp-muse --setup
+mcp-muse setup
 
 # If built from source:
-./target/release/mcp-muse --setup
+./target/release/mcp-muse setup
 
 # If using downloaded binary:
-/path/to/mcp-muse --setup
+/path/to/mcp-muse setup
 ```
 
 This **interactively** guides you through:
@@ -483,8 +483,8 @@ Use `effects_preset` for quick professional-quality effects:
 - **🎮 OxiSynth Engine**: Pure Rust SoundFont synthesis for authentic SNES gaming sounds (✅ **Tested**)
 - **🤖 ExpressiveSynth Engine**: Ring modulation synthesis for R2D2-style vocalizations (✅ **Tested**)  
 - **🎹 Classic Preset Engine**: 29 authentic vintage synthesizer recreations (✅ **Tested**)
-- **🎛️ Custom Synthesis Engine**: 19 advanced synthesis types with professional algorithms (✅ **Tested**)
-- **🔄 EnhancedHybridAudioSource**: Unified playback with per-channel effects and intelligent limiting (✅ **Tested**)
+- **🎛️ Custom Synthesis Engine**: 20 synthesis types with band-limited oscillators, a state-variable filter and DX7 operator routing (✅ **Tested**)
+- **🔄 EnhancedHybridAudioSource**: Stereo mixer with stateful effects chains and a soft clipper (✅ **Tested**)
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
@@ -494,8 +494,13 @@ Use `effects_preset` for quick professional-quality effects:
 - **Real-Time Performance**: Zero latency issues, instant musical reactions
 - **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
 
-### **Unified AI Conversation Tool**
-- **`play_notes`**: Universal JSON interface supporting all 4 audio systems in single sequences (✅ **Fully Tested**)
+### **Tools**
+- **`play_notes`**: Universal JSON interface supporting all 4 audio systems in single sequences
+- **`define_sequence_pattern` / `play_sequence` / `list_patterns`**: reusable bar-based patterns with transposition, repeats and time signature
+- **`list_sounds`**: catalog of presets, GM instruments, drum keys, synthesis types, R2D2 emotions and effects
+- **`stop_playback`**: silence everything currently playing
+
+Playback tools return immediately with the expected duration. Failures the agent can act on (unknown preset, missing pattern) come back as `isError` results.
 
 ### **Tool Schema**
 
@@ -533,7 +538,7 @@ cargo build --release
 
 ### Development Mode
 ```bash
-cargo run -- --setup  # Setup with SoundFont download
+cargo run -- setup    # Setup with SoundFont download
 cargo run             # Run MCP server
 ```
 
@@ -567,8 +572,8 @@ This project uses [CalVer](https://calver.org/) versioning in the format `YYYY.M
 **Setup issues:**
 ```bash
 # Re-run setup to re-download SoundFont (adjust command based on installation method)
-mcp-muse --setup                      # If installed via cargo
-./target/release/mcp-muse --setup     # If built from source
+mcp-muse setup                        # If installed via cargo
+./target/release/mcp-muse setup       # If built from source
 
 # Check SoundFont exists and size
 ls -la assets/FluidR3_GM.sf2  # Should be ~142MB
@@ -600,7 +605,7 @@ rm ~/.local/share/mcp-muse/config.json
 rm ~/Library/Application\ Support/mcp-muse/config.json
 # Windows:
 del %APPDATA%\mcp-muse\config.json
-./target/release/mcp-muse --setup
+./target/release/mcp-muse setup
 ```
 
 ## License
