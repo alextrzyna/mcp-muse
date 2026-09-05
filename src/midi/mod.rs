@@ -209,18 +209,99 @@ where
     Ok(opt)
 }
 
-/// Universal effect configuration for all audio sources
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Universal effect configuration for all audio sources.
+///
+/// Serialized flat: `{"type": "reverb", "room_size": 0.7, "intensity": 0.6}`.
+/// Deserialization also accepts the older nested form
+/// `{"effect": {"type": "Reverb", ...}, "intensity": 0.6}` and PascalCase
+/// or camelCase names for `type` and `filter_type`.
+#[derive(Debug, Clone, Serialize)]
 pub struct EffectConfig {
     /// Effect type and parameters
     #[serde(flatten)]
     pub effect: EffectType,
     /// Effect intensity/mix level (0.0-1.0)
-    #[serde(default = "default_effect_intensity")]
     pub intensity: f32,
     /// Whether this effect is enabled
-    #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+/// The strict flat representation; `EffectConfig` normalizes into this.
+#[derive(Deserialize)]
+struct EffectConfigRepr {
+    #[serde(flatten)]
+    effect: EffectType,
+    #[serde(default = "default_effect_intensity")]
+    intensity: f32,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+/// "LowPass" / "lowPass" / "lowpass" / "low_pass" → "low_pass".
+fn normalize_variant_name(raw: &str, snake_variants: &[&str]) -> String {
+    let squashed: String = raw
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    snake_variants
+        .iter()
+        .find(|v| v.replace('_', "") == squashed)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+const EFFECT_TYPE_NAMES: [&str; 6] = [
+    "reverb",
+    "delay",
+    "chorus",
+    "filter",
+    "compressor",
+    "distortion",
+];
+const FILTER_TYPE_NAMES: [&str; 7] = [
+    "low_pass",
+    "high_pass",
+    "band_pass",
+    "notch",
+    "peak",
+    "low_shelf",
+    "high_shelf",
+];
+
+impl<'de> Deserialize<'de> for EffectConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut value = serde_json::Value::deserialize(deserializer)?;
+        let Some(object) = value.as_object_mut() else {
+            return Err(serde::de::Error::custom("effect must be an object"));
+        };
+
+        // Nested form: hoist the inner "effect" object's fields to the top level.
+        if let Some(serde_json::Value::Object(inner)) = object.remove("effect") {
+            for (k, v) in inner {
+                object.entry(k).or_insert(v);
+            }
+        }
+        if let Some(serde_json::Value::String(t)) = object.get("type") {
+            let normalized = normalize_variant_name(t, &EFFECT_TYPE_NAMES);
+            object.insert("type".into(), serde_json::Value::String(normalized));
+        }
+        if let Some(serde_json::Value::String(t)) = object.get("filter_type") {
+            let normalized = normalize_variant_name(t, &FILTER_TYPE_NAMES);
+            object.insert("filter_type".into(), serde_json::Value::String(normalized));
+        }
+
+        let repr: EffectConfigRepr =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(EffectConfig {
+            effect: repr.effect,
+            intensity: repr.intensity,
+            enabled: repr.enabled,
+        })
+    }
 }
 
 fn default_effect_intensity() -> f32 {
@@ -1742,6 +1823,42 @@ impl SimpleNote {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effect_config_accepts_flat_snake_case() {
+        let e: EffectConfig =
+            serde_json::from_str(r#"{"type": "reverb", "room_size": 0.7, "intensity": 0.6}"#)
+                .unwrap();
+        assert!(matches!(e.effect, EffectType::Reverb { room_size, .. } if room_size == 0.7));
+        assert_eq!(e.intensity, 0.6);
+        assert!(e.enabled);
+    }
+
+    #[test]
+    fn effect_config_accepts_nested_pascal_case_from_the_old_schema() {
+        let e: EffectConfig = serde_json::from_str(
+            r#"{"effect": {"type": "Filter", "filter_type": "LowPass", "cutoff": 800.0}, "intensity": 0.4}"#,
+        )
+        .unwrap();
+        match e.effect {
+            EffectType::Filter {
+                filter_type: FilterType::LowPass,
+                cutoff,
+                ..
+            } => assert_eq!(cutoff, 800.0),
+            other => panic!("unexpected {other:?}"),
+        }
+        let e: EffectConfig =
+            serde_json::from_str(r#"{"type": "Distortion", "drive": 2.0}"#).unwrap();
+        assert!(matches!(e.effect, EffectType::Distortion { .. }));
+        assert_eq!(e.intensity, 0.5, "intensity defaults");
+    }
+
+    #[test]
+    fn effect_config_rejects_unknown_type_with_a_clear_message() {
+        let err = serde_json::from_str::<EffectConfig>(r#"{"type": "flanger"}"#).unwrap_err();
+        assert!(err.to_string().contains("flanger"), "{err}");
+    }
 
     #[test]
     fn musical_duration_number_is_bars_and_string_is_note_value() {

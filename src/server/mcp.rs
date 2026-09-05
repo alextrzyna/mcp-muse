@@ -165,6 +165,315 @@ fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcRespon
     )
 }
 
+/// JSON schema for one note, shared by play_notes, define_sequence_pattern
+/// and play_sequence so the three tools cannot drift apart.
+fn note_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "note": {
+                "type": "integer",
+                "description": "🎵 MIDI note number: 60=C4(middle C), 64=E4, 67=G4. Range: C0(12) to G9(127). Use chromatic scales: C=0,2,4,5,7,9,11 pattern",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "velocity": {
+                "type": "integer",
+                "description": "🔊 Note attack velocity (intensity): 40=soft, 80=medium, 110=forte, 127=maximum. Affects both volume and timbre",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "start_time": {
+                "type": "number",
+                "description": "⏰ Start time in seconds. Use 0.0 for simultaneous notes (chords), incremental timing for melodies. DEPRECATED: Consider using musical_time for better sync."
+            },
+            "duration": {
+                "type": "number",
+                "description": "⏳ Note duration in seconds. Try: 0.25=16th, 0.5=8th, 1.0=quarter, 2.0=half, 4.0=whole note. DEPRECATED: Consider using musical_duration for better sync."
+            },
+            "musical_time": {
+                "type": "object",
+                "description": "🎼 Musical timing (bar.beat.tick) - Alternative to start_time for precise timing",
+                "properties": {
+                    "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
+                    "beat": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Beat within bar (1-based, up to beats_per_bar)"},
+                    "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
+                },
+                "required": ["bar", "beat", "tick"]
+            },
+            "musical_duration": {
+                "description": "🎵 Musical duration - Alternative to duration for precise timing",
+                "oneOf": [
+                    {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
+                    {"type": "string", "enum": ["whole", "half", "quarter", "eighth", "sixteenth", "triplet"], "description": "Note values"}
+                ]
+            },
+            "channel": {
+                "type": "integer",
+                "description": "📻 MIDI channel (0-15): Use different channels for different instruments in complex arrangements. Each channel can have unique instrument/effects",
+                "minimum": 0,
+                "maximum": 15
+            },
+            "instrument": {
+                "type": "integer",
+                "description": "🎹 GM Instrument: 0=Piano, 1=Bright Piano, 25=Steel Guitar, 40=Violin, 42=Cello, 56=Trumpet, 60=French Horn, 68=Oboe, 73=Flute, 80=Square Lead, 104=Sitar. Use variety for rich orchestration!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "reverb": {
+                "type": "integer",
+                "description": "🏛️ Reverb depth (0-127): Simulates acoustic spaces. Try 0=dry, 30=small room, 60=hall, 100=cathedral. Essential for realistic orchestral sound!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "chorus": {
+                "type": "integer",
+                "description": "✨ Chorus depth (0-127): Adds shimmer and richness. Try 0=off, 30=subtle, 60=lush, 100=ethereal. Great for strings, pads, and vocals!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "volume": {
+                "type": "integer",
+                "description": "🔊 Channel volume (0-127): Master volume per channel. Use for mixing balance - lead melody at 100-127, accompaniment at 60-90, bass at 80-100",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "pan": {
+                "type": "integer",
+                "description": "↔️ Pan position (0-127): For MONO instruments like trumpet, flute. 0=hard left, 64=center, 127=hard right. Create stereo width in arrangements!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "balance": {
+                "type": "integer",
+                "description": "⚖️ Balance control (0-127): For STEREO instruments like piano, strings. 0=left, 64=center, 127=right. Use this instead of pan for piano!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "expression": {
+                "type": "integer",
+                "description": "🎭 Expression control (0-127): Dynamic musical expression beyond velocity. 40=pianissimo, 80=normal, 110=forte, 127=fortissimo. Creates emotional phrasing!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "sustain": {
+                "type": "integer",
+                "description": "🎹 Sustain pedal (0-127): Piano-style sustain. 0=off (staccato), 127=on (legato). Use for flowing passages and rich harmonic resonance!",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "note_type": {
+                "type": "string",
+                "description": "🎭 Note type: 'midi' for musical notes, 'r2d2' for robotic expressions. Defaults to 'midi'",
+                "enum": ["midi", "r2d2"],
+                "default": "midi"
+            },
+            "r2d2_emotion": {
+                "type": "string",
+                "description": "🤖 R2D2 emotion when note_type='r2d2': Choose from 9 distinct emotional expressions. **REQUIRED when note_type='r2d2'**",
+                "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]
+            },
+            "r2d2_intensity": {
+                "type": "number",
+                "description": "🔥 R2D2 emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic. **REQUIRED when note_type='r2d2'**",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "r2d2_complexity": {
+                "type": "integer",
+                "description": "🗣️ R2D2 phrase complexity (1-5 syllables): 1=simple beep, 3=conversational, 5=complex phrase. **REQUIRED when note_type='r2d2'**",
+                "minimum": 1,
+                "maximum": 5
+            },
+            "r2d2_pitch_range": {
+                "type": "array",
+                "description": "🎵 R2D2 frequency range [min_hz, max_hz]: [200,600]=low, [300,800]=normal, [400,1000]=high",
+                "items": {
+                    "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+            },
+            "r2d2_context": {
+                "type": "string",
+                "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
+            },
+            "synth_type": {
+                "type": "string",
+                "description": "🎛️ Synthesis type: 'sine', 'square', 'sawtooth', 'triangle', 'noise', 'fm', 'granular', 'wavetable', 'kick', 'snare', 'hihat', 'cymbal', 'swoosh', 'zap', 'chime', 'burst', 'pad', 'texture', 'drone' (optional)"
+            },
+            "synth_frequency": {
+                "type": "number",
+                "description": "🎵 Synthesis frequency in Hz (20-20000, optional, overrides MIDI note if present)",
+                "minimum": 20,
+                "maximum": 20000
+            },
+            "synth_amplitude": {
+                "type": "number",
+                "description": "🔊 Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "synth_attack": {
+                "type": "number",
+                "description": "⚡ Attack time in seconds (0.0-5.0, optional)",
+                "minimum": 0.0,
+                "maximum": 5.0
+            },
+            "synth_decay": {
+                "type": "number",
+                "description": "📉 Decay time in seconds (0.0-5.0, optional)",
+                "minimum": 0.0,
+                "maximum": 5.0
+            },
+            "synth_sustain": {
+                "type": "number",
+                "description": "🎹 Sustain level (0.0-1.0, optional)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "synth_release": {
+                "type": "number",
+                "description": "🌊 Release time in seconds (0.0-10.0, optional)",
+                "minimum": 0.0,
+                "maximum": 10.0
+            },
+            "synth_filter_type": {
+                "type": "string",
+                "description": "🎚️ Filter type: 'lowpass', 'highpass', 'bandpass' (optional)",
+                "enum": ["lowpass", "highpass", "bandpass"]
+            },
+            "synth_filter_cutoff": {
+                "type": "number",
+                "description": "🔧 Filter cutoff frequency in Hz (20-20000, optional)",
+                "minimum": 20,
+                "maximum": 20000
+            },
+            "synth_filter_resonance": {
+                "type": "number",
+                "description": "✨ Filter resonance (0.0-1.0, optional)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "synth_reverb": {
+                "type": "number",
+                "description": "🏛️ Synthesis reverb intensity (0.0-1.0, optional)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "synth_chorus": {
+                "type": "number",
+                "description": "✨ Synthesis chorus intensity (0.0-1.0, optional)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "synth_delay": {
+                "type": "number",
+                "description": "🔄 Synthesis delay intensity (0.0-1.0, optional)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "synth_delay_time": {
+                "type": "number",
+                "description": "⏰ Synthesis delay time in seconds (0.0-2.0, optional)",
+                "minimum": 0.0,
+                "maximum": 2.0
+            },
+            "synth_pulse_width": {
+                "type": "number",
+                "description": "📊 Pulse width for square wave (0.1-0.9, optional)",
+                "minimum": 0.1,
+                "maximum": 0.9
+            },
+            "synth_modulator_freq": {
+                "type": "number",
+                "description": "🌀 FM modulator frequency in Hz (0.1-1000.0, optional)",
+                "minimum": 0.1,
+                "maximum": 1000.0
+            },
+            "synth_modulation_index": {
+                "type": "number",
+                "description": "🎛️ FM modulation index (0.0-10.0, optional)",
+                "minimum": 0.0,
+                "maximum": 10.0
+            },
+            "synth_grain_size": {
+                "type": "number",
+                "description": "🌾 Granular grain size in seconds (0.01-0.5, optional)",
+                "minimum": 0.01,
+                "maximum": 0.5
+            },
+            "synth_texture_roughness": {
+                "type": "number",
+                "description": "🎨 Texture roughness (0.0-1.0, optional)",
+                "minimum": 0.0,
+                "maximum": 1.0
+            },
+            "preset_name": {
+                "type": "string",
+                "description": "🎹 Classic synthesizer preset name: Load specific authentic vintage preset (e.g., 'Minimoog Bass', 'TB-303 Acid', 'Jupiter Bass', 'Prophet Lead', 'DX7 E.Piano'). Use for instant access to iconic synthesizer sounds!"
+            },
+            "preset_category": {
+                "type": "string",
+                "description": "🎭 Preset category: pick a random preset from 'bass', 'pad', 'lead', 'keys', 'drums' or 'effects'. Call list_sounds to see every preset by name.",
+                "enum": ["bass", "pad", "lead", "keys", "drums", "effects"]
+            },
+            "preset_variation": {
+                "type": "string",
+                "description": "🎨 Preset variation: Apply subtle variation to base preset (e.g., 'bright', 'dark', 'squelchy'). Great for customizing classic sounds to fit your music!"
+            },
+            "preset_random": {
+                "type": "boolean",
+                "description": "🎲 Random preset selection: Set to true to randomly select a preset. Optionally combine with preset_category to limit random selection to specific category. Perfect for creative inspiration!"
+            },
+            "effects": {
+                "type": "array",
+                "description": "🎛️ Effects chain applied to this note in order (overrides a preset's signature effects). Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["reverb", "delay", "chorus", "filter", "compressor", "distortion"], "description": "Effect type (required)"},
+                        "intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.5, "description": "Wet/dry mix: 0.3=subtle, 0.6=moderate, 1.0=maximum"},
+                        "enabled": {"type": "boolean", "default": true},
+                        "room_size": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: 0.1=closet, 0.5=studio, 0.8=hall, 1.0=cathedral (default 0.5)"},
+                        "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: high-frequency damping 0=bright, 1=dark (default 0.3)"},
+                        "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb/delay: wet amount (default 0.3)"},
+                        "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "reverb: seconds before the reverb starts (default 0.02)"},
+                        "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds; 0.125=8th at 120 BPM, 0.25=quarter (default 0.25)"},
+                        "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "delay/chorus: repeat amount (delay default 0.4, chorus default 0.2)"},
+                        "sync_tempo": {"type": "boolean", "description": "delay: reserved"},
+                        "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "chorus: LFO Hz (default 1.5)"},
+                        "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: modulation depth (default 0.3)"},
+                        "stereo_width": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: reserved"},
+                        "filter_type": {"type": "string", "enum": ["low_pass", "high_pass", "band_pass", "notch", "peak", "low_shelf", "high_shelf"], "description": "filter: response (default low_pass)"},
+                        "cutoff": {"type": "number", "minimum": 20.0, "maximum": 20000.0, "description": "filter: Hz (default 1000)"},
+                        "resonance": {"type": "number", "minimum": 0.1, "maximum": 20.0, "description": "filter: Q (default 1.0)"},
+                        "envelope_amount": {"type": "number", "minimum": -1.0, "maximum": 1.0, "description": "filter: reserved"},
+                        "threshold": {"type": "number", "minimum": -60.0, "maximum": 0.0, "description": "compressor: dB (default -12)"},
+                        "ratio": {"type": "number", "minimum": 1.0, "maximum": 20.0, "description": "compressor: 2=subtle, 4=moderate, 8=heavy (default 4)"},
+                        "attack": {"type": "number", "minimum": 0.001, "maximum": 0.1, "description": "compressor: seconds (default 0.01)"},
+                        "release": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "compressor: seconds (default 0.1)"},
+                        "drive": {"type": "number", "minimum": 0.0, "maximum": 5.0, "description": "distortion: 1=warm, 2.5=crunch, 5=heavy (default 2)"},
+                        "tone": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "distortion: 0=dark, 1=bright (default 0.5)"},
+                        "output_level": {"type": "number", "minimum": 0.1, "maximum": 2.0, "description": "distortion: output gain (default 1.0)"}
+                    },
+                    "required": ["type"]
+                }
+            },
+            "effects_preset": {
+                "type": "string",
+                "description": "🎭 EFFECTS PRESET: Apply curated effect combinations. Choose from professional presets: 'studio' (clean + subtle reverb), 'concert_hall' (spacious reverb), 'vintage' (analog warmth), 'ambient' (lush atmospheric), 'live_stage' (punchy compression), 'tight_mix' (controlled dynamics), 'dreamy' (soft ethereal), 'spacious' (wide reverb), 'analog_warmth' (tube character), 'retro_echo' (tape delay), 'psychedelic' (wild modulation), 'distorted' (aggressive), 'filtered' (prominent filtering), 'lush_chorus' (rich modulation). Effects presets provide instant professional sound character!",
+                "enum": ["studio", "concert_hall", "vintage", "ambient", "live_stage", "tight_mix", "dreamy", "spacious", "analog_warmth", "retro_echo", "psychedelic", "distorted", "filtered", "lush_chorus"]
+            }
+        },
+        "anyOf": [
+            {"required": ["start_time", "duration"]},
+            {"required": ["musical_time", "musical_duration"]}
+        ],
+        "additionalProperties": false
+    })
+}
+
 fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling tools/list request");
 
@@ -188,45 +497,7 @@ Example: Define a 4-bar house beat once, then play it with variations throughout
                     "notes": {
                         "type": "array",
                         "description": "🎵 Array of notes that make up this pattern",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "note": {"type": "integer", "minimum": 0, "maximum": 127},
-                                "velocity": {"type": "integer", "minimum": 0, "maximum": 127},
-                                "start_time": {"type": "number", "description": "⚠️ DEPRECATED: Use musical_time for better sync"},
-                                "duration": {"type": "number", "description": "⚠️ DEPRECATED: Use musical_duration for better sync"},
-                                "musical_time": {
-                                    "type": "object",
-                                    "description": "🎼 Musical timing (bar.beat.tick) - RECOMMENDED for perfect sync!",
-                                    "properties": {
-                                        "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
-                                        "beat": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Beat within bar (1-based, up to beats_per_bar)"},
-                                        "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
-                                    },
-                                    "required": ["bar", "beat", "tick"]
-                                },
-                                "musical_duration": {
-                                    "description": "🎵 Musical duration - RECOMMENDED for perfect sync!",
-                                    "oneOf": [
-                                        {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
-                                        {"type": "string", "enum": ["whole", "half", "quarter", "eighth", "sixteenth", "triplet"], "description": "Note values"}
-                                    ]
-                                },
-                                "channel": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
-                                "instrument": {"type": "integer", "minimum": 0, "maximum": 127},
-                                "note_type": {"type": "string", "enum": ["midi", "r2d2"], "default": "midi"},
-                                "r2d2_emotion": {"type": "string", "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]},
-                                "r2d2_intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                                "r2d2_complexity": {"type": "integer", "minimum": 1, "maximum": 5},
-                                "synth_type": {"type": "string"},
-                                "preset_name": {"type": "string"},
-                                "preset_category": {"type": "string"}
-                            },
-                            "anyOf": [
-                                {"required": ["start_time", "duration"]},
-                                {"required": ["musical_time", "musical_duration"]}
-                            ]
-                        }
+                        "items": note_schema()
                     },
                     "tempo": {
                         "type": "integer",
@@ -281,19 +552,7 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                     "notes": {
                         "type": "array",
                         "description": "🎵 Individual notes (same format as play_notes tool)",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "note": {"type": "integer", "minimum": 0, "maximum": 127},
-                                "velocity": {"type": "integer", "minimum": 0, "maximum": 127},
-                                "start_time": {"type": "number"},
-                                "duration": {"type": "number"},
-                                "channel": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
-                                "instrument": {"type": "integer", "minimum": 0, "maximum": 127},
-                                "note_type": {"type": "string", "enum": ["midi", "r2d2"], "default": "midi"}
-                            },
-                            "required": ["start_time", "duration"]
-                        }
+                        "items": note_schema()
                     },
                     "patterns": {
                         "type": "array",
@@ -453,368 +712,7 @@ Examples:
                     "notes": {
                         "type": "array",
                         "description": "Array of notes to play",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "note": {
-                                    "type": "integer",
-                                    "description": "🎵 MIDI note number: 60=C4(middle C), 64=E4, 67=G4. Range: C0(12) to G9(127). Use chromatic scales: C=0,2,4,5,7,9,11 pattern",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "velocity": {
-                                    "type": "integer",
-                                    "description": "🔊 Note attack velocity (intensity): 40=soft, 80=medium, 110=forte, 127=maximum. Affects both volume and timbre",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "start_time": {
-                                    "type": "number",
-                                    "description": "⏰ Start time in seconds. Use 0.0 for simultaneous notes (chords), incremental timing for melodies. DEPRECATED: Consider using musical_time for better sync."
-                                },
-                                "duration": {
-                                    "type": "number",
-                                    "description": "⏳ Note duration in seconds. Try: 0.25=16th, 0.5=8th, 1.0=quarter, 2.0=half, 4.0=whole note. DEPRECATED: Consider using musical_duration for better sync."
-                                },
-                                "musical_time": {
-                                    "type": "object",
-                                    "description": "🎼 Musical timing (bar.beat.tick) - Alternative to start_time for precise timing",
-                                    "properties": {
-                                        "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
-                                        "beat": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Beat within bar (1-based, up to beats_per_bar)"},
-                                        "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
-                                    },
-                                    "required": ["bar", "beat", "tick"]
-                                },
-                                "musical_duration": {
-                                    "description": "🎵 Musical duration - Alternative to duration for precise timing",
-                                    "oneOf": [
-                                        {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
-                                        {"type": "string", "enum": ["whole", "half", "quarter", "eighth", "sixteenth", "triplet"], "description": "Note values"}
-                                    ]
-                                },
-                                "channel": {
-                                    "type": "integer",
-                                    "description": "📻 MIDI channel (0-15): Use different channels for different instruments in complex arrangements. Each channel can have unique instrument/effects",
-                                    "minimum": 0,
-                                    "maximum": 15
-                                },
-                                "instrument": {
-                                    "type": "integer",
-                                    "description": "🎹 GM Instrument: 0=Piano, 1=Bright Piano, 25=Steel Guitar, 40=Violin, 42=Cello, 56=Trumpet, 60=French Horn, 68=Oboe, 73=Flute, 80=Square Lead, 104=Sitar. Use variety for rich orchestration!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "reverb": {
-                                    "type": "integer",
-                                    "description": "🏛️ Reverb depth (0-127): Simulates acoustic spaces. Try 0=dry, 30=small room, 60=hall, 100=cathedral. Essential for realistic orchestral sound!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "chorus": {
-                                    "type": "integer",
-                                    "description": "✨ Chorus depth (0-127): Adds shimmer and richness. Try 0=off, 30=subtle, 60=lush, 100=ethereal. Great for strings, pads, and vocals!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "volume": {
-                                    "type": "integer",
-                                    "description": "🔊 Channel volume (0-127): Master volume per channel. Use for mixing balance - lead melody at 100-127, accompaniment at 60-90, bass at 80-100",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "pan": {
-                                    "type": "integer",
-                                    "description": "↔️ Pan position (0-127): For MONO instruments like trumpet, flute. 0=hard left, 64=center, 127=hard right. Create stereo width in arrangements!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "balance": {
-                                    "type": "integer",
-                                    "description": "⚖️ Balance control (0-127): For STEREO instruments like piano, strings. 0=left, 64=center, 127=right. Use this instead of pan for piano!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "expression": {
-                                    "type": "integer",
-                                    "description": "🎭 Expression control (0-127): Dynamic musical expression beyond velocity. 40=pianissimo, 80=normal, 110=forte, 127=fortissimo. Creates emotional phrasing!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "sustain": {
-                                    "type": "integer",
-                                    "description": "🎹 Sustain pedal (0-127): Piano-style sustain. 0=off (staccato), 127=on (legato). Use for flowing passages and rich harmonic resonance!",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "note_type": {
-                                    "type": "string",
-                                    "description": "🎭 Note type: 'midi' for musical notes, 'r2d2' for robotic expressions. Defaults to 'midi'",
-                                    "enum": ["midi", "r2d2"],
-                                    "default": "midi"
-                                },
-                                "r2d2_emotion": {
-                                    "type": "string",
-                                    "description": "🤖 R2D2 emotion when note_type='r2d2': Choose from 9 distinct emotional expressions. **REQUIRED when note_type='r2d2'**",
-                                    "enum": ["Happy", "Sad", "Excited", "Worried", "Curious", "Affirmative", "Negative", "Surprised", "Thoughtful"]
-                                },
-                                "r2d2_intensity": {
-                                    "type": "number",
-                                    "description": "🔥 R2D2 emotional intensity (0.0-1.0): 0.3=subtle, 0.6=moderate, 0.9=dramatic. **REQUIRED when note_type='r2d2'**",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "r2d2_complexity": {
-                                    "type": "integer",
-                                    "description": "🗣️ R2D2 phrase complexity (1-5 syllables): 1=simple beep, 3=conversational, 5=complex phrase. **REQUIRED when note_type='r2d2'**",
-                                    "minimum": 1,
-                                    "maximum": 5
-                                },
-                                "r2d2_pitch_range": {
-                                    "type": "array",
-                                    "description": "🎵 R2D2 frequency range [min_hz, max_hz]: [200,600]=low, [300,800]=normal, [400,1000]=high",
-                                    "items": {
-                                        "type": "number"
-                                    },
-                                    "minItems": 2,
-                                    "maxItems": 2
-                                },
-                                "r2d2_context": {
-                                    "type": "string",
-                                    "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
-                                },
-                                "synth_type": {
-                                    "type": "string",
-                                    "description": "🎛️ Synthesis type: 'sine', 'square', 'sawtooth', 'triangle', 'noise', 'fm', 'granular', 'wavetable', 'kick', 'snare', 'hihat', 'cymbal', 'swoosh', 'zap', 'chime', 'burst', 'pad', 'texture', 'drone' (optional)"
-                                },
-                                "synth_frequency": {
-                                    "type": "number",
-                                    "description": "🎵 Synthesis frequency in Hz (20-20000, optional, overrides MIDI note if present)",
-                                    "minimum": 20,
-                                    "maximum": 20000
-                                },
-                                "synth_amplitude": {
-                                    "type": "number",
-                                    "description": "🔊 Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "synth_attack": {
-                                    "type": "number",
-                                    "description": "⚡ Attack time in seconds (0.0-5.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 5.0
-                                },
-                                "synth_decay": {
-                                    "type": "number",
-                                    "description": "📉 Decay time in seconds (0.0-5.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 5.0
-                                },
-                                "synth_sustain": {
-                                    "type": "number",
-                                    "description": "🎹 Sustain level (0.0-1.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "synth_release": {
-                                    "type": "number",
-                                    "description": "🌊 Release time in seconds (0.0-10.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 10.0
-                                },
-                                "synth_filter_type": {
-                                    "type": "string",
-                                    "description": "🎚️ Filter type: 'lowpass', 'highpass', 'bandpass' (optional)",
-                                    "enum": ["lowpass", "highpass", "bandpass"]
-                                },
-                                "synth_filter_cutoff": {
-                                    "type": "number",
-                                    "description": "🔧 Filter cutoff frequency in Hz (20-20000, optional)",
-                                    "minimum": 20,
-                                    "maximum": 20000
-                                },
-                                "synth_filter_resonance": {
-                                    "type": "number",
-                                    "description": "✨ Filter resonance (0.0-1.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "synth_reverb": {
-                                    "type": "number",
-                                    "description": "🏛️ Synthesis reverb intensity (0.0-1.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "synth_chorus": {
-                                    "type": "number",
-                                    "description": "✨ Synthesis chorus intensity (0.0-1.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "synth_delay": {
-                                    "type": "number",
-                                    "description": "🔄 Synthesis delay intensity (0.0-1.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "synth_delay_time": {
-                                    "type": "number",
-                                    "description": "⏰ Synthesis delay time in seconds (0.0-2.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 2.0
-                                },
-                                "synth_pulse_width": {
-                                    "type": "number",
-                                    "description": "📊 Pulse width for square wave (0.1-0.9, optional)",
-                                    "minimum": 0.1,
-                                    "maximum": 0.9
-                                },
-                                "synth_modulator_freq": {
-                                    "type": "number",
-                                    "description": "🌀 FM modulator frequency in Hz (0.1-1000.0, optional)",
-                                    "minimum": 0.1,
-                                    "maximum": 1000.0
-                                },
-                                "synth_modulation_index": {
-                                    "type": "number",
-                                    "description": "🎛️ FM modulation index (0.0-10.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 10.0
-                                },
-                                "synth_grain_size": {
-                                    "type": "number",
-                                    "description": "🌾 Granular grain size in seconds (0.01-0.5, optional)",
-                                    "minimum": 0.01,
-                                    "maximum": 0.5
-                                },
-                                "synth_texture_roughness": {
-                                    "type": "number",
-                                    "description": "🎨 Texture roughness (0.0-1.0, optional)",
-                                    "minimum": 0.0,
-                                    "maximum": 1.0
-                                },
-                                "preset_name": {
-                                    "type": "string",
-                                    "description": "🎹 Classic synthesizer preset name: Load specific authentic vintage preset (e.g., 'Minimoog Bass', 'TB-303 Acid', 'Jupiter Bass', 'Prophet Lead', 'DX7 E.Piano'). Use for instant access to iconic synthesizer sounds!"
-                                },
-                                "preset_category": {
-                                    "type": "string",
-                                    "description": "🎭 Preset category: pick a random preset from 'bass', 'pad', 'lead', 'keys', 'drums' or 'effects'. Call list_sounds to see every preset by name.",
-                                    "enum": ["bass", "pad", "lead", "keys", "drums", "effects"]
-                                },
-                                "preset_variation": {
-                                    "type": "string",
-                                    "description": "🎨 Preset variation: Apply subtle variation to base preset (e.g., 'bright', 'dark', 'squelchy'). Great for customizing classic sounds to fit your music!"
-                                },
-                                "preset_random": {
-                                    "type": "boolean",
-                                    "description": "🎲 Random preset selection: Set to true to randomly select a preset. Optionally combine with preset_category to limit random selection to specific category. Perfect for creative inspiration!"
-                                },
-                                "effects": {
-                                    "type": "array",
-                                    "description": "🎛️ PROFESSIONAL EFFECTS CHAIN: Apply high-quality audio effects to individual notes. Overrides preset signature effects when specified.",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "effect": {
-                                                "type": "object",
-                                                "description": "🎚️ Effect type configuration",
-                                                "oneOf": [
-                                                    {
-                                                        "type": "object",
-                                                        "description": "🏛️ REVERB: Schroeder reverb with comb filters + allpass diffusion for realistic spatial effects",
-                                                        "properties": {
-                                                            "type": {"const": "Reverb"},
-                                                            "room_size": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Room size: 0.1=closet, 0.5=studio, 0.8=concert hall, 1.0=cathedral"},
-                                                            "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "High-frequency dampening: 0.0=bright, 0.5=natural, 1.0=dark"},
-                                                            "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Reverb amount: 0.1=subtle, 0.3=moderate, 0.6=lush, 0.9=swimming"},
-                                                            "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "Pre-delay in seconds: 0.02=small room, 0.05=large hall, 0.1=stadium"}
-                                                        }
-                                                    },
-                                                    {
-                                                        "type": "object",
-                                                        "description": "🔄 DELAY: Feedback delay with analog character and high-frequency damping",
-                                                        "properties": {
-                                                            "type": {"const": "Delay"},
-                                                            "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "Delay time in seconds: 0.125=8th note @120bpm, 0.25=quarter note, 0.5=half note"},
-                                                            "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "Feedback amount: 0.2=single echo, 0.5=multiple repeats, 0.8=infinite sustain"},
-                                                            "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Delay mix: 0.2=subtle, 0.5=balanced, 0.8=delay-heavy"},
-                                                            "sync_tempo": {"type": "boolean", "description": "Sync to tempo (future feature)"}
-                                                        }
-                                                    },
-                                                    {
-                                                        "type": "object",
-                                                        "description": "🌊 CHORUS: Multi-tap modulated delays with LFO for lush, swirling effects",
-                                                        "properties": {
-                                                            "type": {"const": "Chorus"},
-                                                            "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "LFO rate in Hz: 0.5=slow swirl, 1.5=moderate, 4.0=fast vibrato"},
-                                                            "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Modulation depth: 0.3=subtle, 0.6=lush, 0.9=dramatic"},
-                                                            "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.8, "description": "Chorus feedback: 0.2=clean, 0.4=rich, 0.7=resonant"},
-                                                            "stereo_width": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Stereo width: 0.5=narrow, 0.8=wide, 1.0=maximum"}
-                                                        }
-                                                    },
-                                                    {
-                                                        "type": "object",
-                                                        "description": "🎚️ FILTER: State variable filter with all filter types",
-                                                        "properties": {
-                                                            "type": {"const": "Filter"},
-                                                            "filter_type": {"type": "string", "enum": ["LowPass", "HighPass", "BandPass", "Notch", "Peak", "LowShelf", "HighShelf"], "description": "Filter type"},
-                                                            "cutoff": {"type": "number", "minimum": 20.0, "maximum": 20000.0, "description": "Cutoff frequency in Hz"},
-                                                            "resonance": {"type": "number", "minimum": 0.1, "maximum": 20.0, "description": "Filter resonance/Q factor"},
-                                                            "envelope_amount": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Envelope modulation (future feature)"}
-                                                        }
-                                                    },
-                                                    {
-                                                        "type": "object",
-                                                        "description": "📊 COMPRESSOR: Smooth dynamics processing for punch and control",
-                                                        "properties": {
-                                                            "type": {"const": "Compressor"},
-                                                            "threshold": {"type": "number", "minimum": -60.0, "maximum": 0.0, "description": "Threshold in dB: -20=gentle, -12=moderate, -6=aggressive"},
-                                                            "ratio": {"type": "number", "minimum": 1.0, "maximum": 20.0, "description": "Compression ratio: 2=subtle, 4=moderate, 8=heavy, 20=limiter"},
-                                                            "attack": {"type": "number", "minimum": 0.001, "maximum": 0.1, "description": "Attack time in seconds: 0.001=fast, 0.01=medium, 0.1=slow"},
-                                                            "release": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "Release time in seconds: 0.05=fast, 0.2=medium, 1.0=slow"}
-                                                        }
-                                                    },
-                                                    {
-                                                        "type": "object",
-                                                        "description": "🔥 DISTORTION: Waveshaping with pre/post filtering for musical overdrive",
-                                                        "properties": {
-                                                            "type": {"const": "Distortion"},
-                                                            "drive": {"type": "number", "minimum": 0.0, "maximum": 5.0, "description": "Drive amount: 1.0=warm, 2.5=crunch, 5.0=heavy"},
-                                                            "tone": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Tone control: 0.0=dark, 0.5=neutral, 1.0=bright"},
-                                                            "output_level": {"type": "number", "minimum": 0.1, "maximum": 2.0, "description": "Output compensation: 0.5=quiet, 1.0=unity, 1.5=boost"}
-                                                        }
-                                                    }
-                                                ]
-                                            },
-                                            "intensity": {
-                                                "type": "number",
-                                                "minimum": 0.0,
-                                                "maximum": 1.0,
-                                                "description": "🔊 Effect intensity/wet-dry mix: 0.0=bypassed, 0.3=subtle, 0.6=moderate, 1.0=maximum effect"
-                                            },
-                                            "enabled": {
-                                                "type": "boolean",
-                                                "description": "🔛 Enable/disable this effect",
-                                                "default": true
-                                            }
-                                        },
-                                        "required": ["effect", "intensity"]
-                                    }
-                                },
-                                "effects_preset": {
-                                    "type": "string",
-                                    "description": "🎭 EFFECTS PRESET: Apply curated effect combinations. Choose from professional presets: 'studio' (clean + subtle reverb), 'concert_hall' (spacious reverb), 'vintage' (analog warmth), 'ambient' (lush atmospheric), 'live_stage' (punchy compression), 'tight_mix' (controlled dynamics), 'dreamy' (soft ethereal), 'spacious' (wide reverb), 'analog_warmth' (tube character), 'retro_echo' (tape delay), 'psychedelic' (wild modulation), 'distorted' (aggressive), 'filtered' (prominent filtering), 'lush_chorus' (rich modulation). Effects presets provide instant professional sound character!",
-                                    "enum": ["studio", "concert_hall", "vintage", "ambient", "live_stage", "tight_mix", "dreamy", "spacious", "analog_warmth", "retro_echo", "psychedelic", "distorted", "filtered", "lush_chorus"]
-                                }
-                            },
-                            "anyOf": [
-                                {"required": ["start_time", "duration"]},
-                                {"required": ["musical_time", "musical_duration"]}
-                            ],
-                            "additionalProperties": false
-                        }
+                        "items": note_schema()
                     },
                     "tempo": {
                         "type": "integer",

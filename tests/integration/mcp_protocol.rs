@@ -983,3 +983,69 @@ fn musical_duration_number_means_bars_and_time_signature_is_honoured() {
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("1 bars of 3/4"), "unexpected text: {text}");
 }
+
+#[test]
+fn custom_effects_chains_are_accepted_in_both_forms() {
+    let mut server = TestServer::start();
+    // Flat form, as documented in the schema.
+    let flat = server.call(json!({
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [{
+            "synth_type": "sawtooth", "note": 48, "start_time": 0.0, "duration": 0.3,
+            "effects": [
+                {"type": "filter", "filter_type": "low_pass", "cutoff": 900, "resonance": 2.0, "intensity": 0.8},
+                {"type": "delay", "delay_time": 0.25, "feedback": 0.3, "intensity": 0.5},
+                {"type": "reverb", "room_size": 0.7, "intensity": 0.4}
+            ]}]}}
+    }));
+    assert!(flat["error"].is_null(), "flat chain rejected: {flat}");
+
+    // Nested PascalCase form from the previous schema.
+    let nested = server.call(json!({
+        "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [{
+            "instrument": 30, "note": 52, "start_time": 0.0, "duration": 0.3,
+            "effects": [
+                {"effect": {"type": "Distortion", "drive": 3.0, "tone": 0.6}, "intensity": 0.7},
+                {"effect": {"type": "Filter", "filter_type": "HighPass", "cutoff": 200.0}, "intensity": 0.5}
+            ]}]}}
+    }));
+    assert!(nested["error"].is_null(), "nested chain rejected: {nested}");
+
+    // A typo in the type is still a validation error the model can read.
+    let bad = server.call(json!({
+        "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [{
+            "note": 60, "start_time": 0.0, "duration": 0.3,
+            "effects": [{"type": "flanger", "intensity": 0.5}]}]}}
+    }));
+    assert_eq!(bad["error"]["code"], -32602, "{bad}");
+    assert!(
+        bad["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("flanger")
+    );
+
+    // All three tools expose the same note schema.
+    let tools = server.call(json!({"jsonrpc": "2.0", "id": 13, "method": "tools/list"}));
+    let schema_for = |name: &str| -> Value {
+        tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap()["inputSchema"]["properties"]["notes"]["items"]
+            .clone()
+    };
+    assert_eq!(
+        schema_for("play_notes"),
+        schema_for("define_sequence_pattern")
+    );
+    assert_eq!(schema_for("play_notes"), schema_for("play_sequence"));
+    assert_eq!(
+        schema_for("play_notes")["properties"]["effects"]["items"]["required"],
+        json!(["type"])
+    );
+    let _ = server.call(json!({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "stop_playback", "arguments": {}}}));
+}
