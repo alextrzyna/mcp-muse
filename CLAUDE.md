@@ -50,18 +50,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **MIDI System (src/midi/)**
 - `player.rs` - Unified audio playback with MidiPlayer class:
   - `play_enhanced_mixed()` - Universal playback method supporting ALL audio types (MIDI, synthesis, R2D2, presets, effects)
-  - Per-channel effects processing with intelligent limiting (max 3 effects per channel)
-  - Automatic gain compensation for heavily processed signals
+  - One `EffectsChain` per bus (16 MIDI channels, R2D2, synthesis)
 - `parser.rs` - MIDI file parsing and timing conversion
 
 **Synthesis System (src/expressive/)**
 - `synth.rs` - PolyphonicVoiceManager for real-time voice allocation
 - `r2d2.rs` - Ring modulation synthesis with emotion-specific parameters
 - `presets/` - 31 classic synthesizer presets (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
-- `fundsp_effects.rs` - Professional audio effects processor:
-  - Reverb (Schroeder algorithm), Delay, Chorus, Filter, Compressor, Distortion
-  - Per-channel processing with automatic limiting
-  - Effects presets for common scenarios
+- `effects.rs` - Stateful audio effects (Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion). Build an `EffectsChain` per bus and call `process` per sample; state persists across calls.
+- `effects_presets.rs` - Named effect combinations ("studio", "concert_hall", ...)
 
 **Setup System (src/setup/)**
 - Automatic FluidR3_GM SoundFont download (142MB)
@@ -99,9 +96,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ExpressiveSynth for R2D2 emotional vocalizations
 - rodio-based audio pipeline with proper buffering
 - Real-time mixing with sample-accurate timing
-- Per-channel effects processing (16 MIDI channels + R2D2 + synthesis)
-- Intelligent effects limiting to prevent signal destruction
-- Automatic gain compensation for heavily attenuated signals
+- Per-bus effects processing (16 MIDI channels + R2D2 + synthesis)
 
 **Polyphony Management:**
 - Voice allocation with intelligent voice stealing
@@ -123,8 +118,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Important Architectural Decisions:**
 - **Unified Playback**: All audio types use `play_enhanced_mixed()` - no separate methods needed
-- **Effects Limiting**: Maximum 3 effects per channel to prevent signal destruction (>3 effects can cause inaudible output)
-- **Gain Compensation**: Automatic 2x gain boost when effects attenuate signal below 10% of original
 - **Channel Routing**: Currently all MIDI routes to channel 0 (TODO: implement per-channel MIDI separation)
 - **Effects Collection**: Effects are collected per audio type (MIDI, R2D2, synthesis) not per individual note
 

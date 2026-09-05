@@ -1,5 +1,5 @@
 use crate::expressive::{
-    EffectsPresetLibrary, ExpressiveSynth, FunDSPEffectsProcessor, PresetLibrary, R2D2Emotion,
+    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, PresetLibrary, R2D2Emotion,
     R2D2Expression, R2D2Voice,
 };
 use crate::midi::SimpleSequence;
@@ -1029,226 +1029,53 @@ struct SynthPrecomputedEvent {
     samples: Vec<f32>,
 }
 
-/// Per-channel effects chain for independent audio processing
-struct ChannelEffectsChain {
-    /// Effects applied to this channel
-    effects: Vec<crate::midi::EffectConfig>,
-    /// Channel volume (0.0-1.0)
-    volume: f32,
-    /// Pan position (-1.0=left, 0.0=center, 1.0=right)
-    pan: f32,
-    /// Channel mute state
-    mute: bool,
-    /// Channel solo state  
-    solo: bool,
-    /// Effects processor for this channel
-    effects_processor: Option<FunDSPEffectsProcessor>,
-}
-
-impl ChannelEffectsChain {
-    fn new(_buffer_size: usize, sample_rate: f64) -> Self {
-        Self {
-            effects: Vec::new(),
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            effects_processor: Some(FunDSPEffectsProcessor::new(sample_rate)),
-        }
-    }
-
-    fn set_effects(&mut self, effects: Vec<crate::midi::EffectConfig>) {
-        self.effects = effects;
-    }
-
-    fn process_sample(&mut self, input_sample: f32) -> f32 {
-        if self.mute {
-            return 0.0;
-        }
-
-        // Apply effects if present (limit to prevent signal destruction)
-        let processed_sample = if !self.effects.is_empty() {
-            // SAFETY: Limit effects to prevent signal attenuation - too many effects destroy audio
-            let max_effects = 3; // Reasonable limit for musical quality
-            let effects_to_apply = if self.effects.len() > max_effects {
-                tracing::warn!(
-                    "Limiting effects from {} to {} to prevent signal destruction",
-                    self.effects.len(),
-                    max_effects
-                );
-                &self.effects[..max_effects]
-            } else {
-                &self.effects[..]
-            };
-
-            if let Some(ref effects_processor) = self.effects_processor {
-                match effects_processor.process_effects(&[input_sample], effects_to_apply) {
-                    Ok(processed) => {
-                        let result = processed.first().copied().unwrap_or(input_sample);
-
-                        // Add gain compensation if signal was attenuated too much
-                        let gain_compensation = if result.abs() < input_sample.abs() * 0.1 {
-                            2.0 // Boost signal if heavily attenuated
-                        } else {
-                            1.0
-                        };
-                        result * gain_compensation
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Effects processing failed: {} - falling back to dry signal",
-                            e
-                        );
-                        input_sample
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    "Effects processor is None but {} effects are present",
-                    self.effects.len()
-                );
-                input_sample
-            }
-        } else {
-            input_sample
-        };
-
-        // Apply volume
-        processed_sample * self.volume
-    }
-
-    fn is_active(&self) -> bool {
-        !self.mute && self.volume > 0.0
-    }
-}
-
-/// Multi-channel processor for independent effects processing
+/// Mixes the MIDI, R2D2 and synthesis buses, each through its own stateful
+/// effects chain. Effects keep their delay-line and filter memory between
+/// samples, so reverb, delay, chorus, filter and compression behave as expected.
 struct ChannelProcessor {
-    /// MIDI channels 0-15
-    midi_channels: [ChannelEffectsChain; 16],
-    /// R2D2 synthesis channel
-    r2d2_channel: ChannelEffectsChain,
-    /// Custom synthesis channel  
-    synthesis_channel: ChannelEffectsChain,
-    /// Master effects applied after mixing
-    master_effects: Vec<crate::midi::EffectConfig>,
-    /// Master effects processor
-    master_effects_processor: Option<FunDSPEffectsProcessor>,
-    /// Any channel soloed?
-    has_solo: bool,
-    /// Bypass all effects processing for debugging
-    bypass_mode: bool,
+    /// MIDI channels 0-15 (all OxiSynth output currently arrives on channel 0)
+    midi_channels: Vec<EffectsChain>,
+    r2d2_channel: EffectsChain,
+    synthesis_channel: EffectsChain,
 }
 
 impl ChannelProcessor {
-    fn new(buffer_size: usize, sample_rate: f64) -> Self {
-        // Initialize all MIDI channels
-        let midi_channels =
-            std::array::from_fn(|_| ChannelEffectsChain::new(buffer_size, sample_rate));
+    fn new(
+        sample_rate: f32,
+        channel_effects: &std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>>,
+        r2d2_effects: &[crate::midi::EffectConfig],
+        synthesis_effects: &[crate::midi::EffectConfig],
+    ) -> Self {
+        let midi_channels = (0..16u8)
+            .map(|ch| {
+                channel_effects
+                    .get(&ch)
+                    .map(|effects| EffectsChain::new(sample_rate, effects))
+                    .unwrap_or_default()
+            })
+            .collect();
 
         Self {
             midi_channels,
-            r2d2_channel: ChannelEffectsChain::new(buffer_size, sample_rate),
-            synthesis_channel: ChannelEffectsChain::new(buffer_size, sample_rate),
-            master_effects: Vec::new(),
-            master_effects_processor: Some(FunDSPEffectsProcessor::new(sample_rate)),
-            has_solo: false,
-            bypass_mode: false, // Start with effects enabled
+            r2d2_channel: EffectsChain::new(sample_rate, r2d2_effects),
+            synthesis_channel: EffectsChain::new(sample_rate, synthesis_effects),
         }
     }
 
-    fn set_channel_effects(&mut self, channel: u8, effects: Vec<crate::midi::EffectConfig>) {
-        if (channel as usize) < self.midi_channels.len() {
-            self.midi_channels[channel as usize].set_effects(effects);
-        }
-    }
-
-    fn set_r2d2_effects(&mut self, effects: Vec<crate::midi::EffectConfig>) {
-        self.r2d2_channel.set_effects(effects);
-    }
-
-    fn set_synthesis_effects(&mut self, effects: Vec<crate::midi::EffectConfig>) {
-        self.synthesis_channel.set_effects(effects);
-    }
-
-    fn update_solo_state(&mut self) {
-        self.has_solo = self.midi_channels.iter().any(|ch| ch.solo)
-            || self.r2d2_channel.solo
-            || self.synthesis_channel.solo;
-    }
-
+    #[inline]
     fn process_and_mix(
         &mut self,
         midi_samples: &[f32],
         r2d2_sample: f32,
         synthesis_sample: f32,
     ) -> f32 {
-        // If bypass mode is enabled, do simple mixing without effects
-        if self.bypass_mode {
-            let midi_sum: f32 = midi_samples.iter().sum();
-            return midi_sum + r2d2_sample + synthesis_sample;
+        let mut mixed = 0.0;
+        for (chain, &sample) in self.midi_channels.iter_mut().zip(midi_samples) {
+            mixed += chain.process(sample);
         }
-
-        let mut mixed_sample = 0.0;
-
-        // Process MIDI channels
-        for (channel_idx, channel) in self.midi_channels.iter_mut().enumerate() {
-            if channel_idx < midi_samples.len() {
-                let input_sample = midi_samples[channel_idx];
-                let should_play = if self.has_solo {
-                    channel.solo
-                } else {
-                    !channel.mute
-                };
-
-                if should_play && channel.is_active() {
-                    let processed = channel.process_sample(input_sample);
-                    // Apply stereo panning (calculate inline to avoid borrow checker issues)
-                    let pan_gain = 1.0 - (channel.pan.abs() * 0.3);
-                    mixed_sample += processed * pan_gain;
-                }
-            }
-        }
-
-        // Process R2D2 channel
-        let should_play_r2d2 = if self.has_solo {
-            self.r2d2_channel.solo
-        } else {
-            !self.r2d2_channel.mute
-        };
-        if should_play_r2d2 && self.r2d2_channel.is_active() {
-            let processed = self.r2d2_channel.process_sample(r2d2_sample);
-            let pan_gain = 1.0 - (self.r2d2_channel.pan.abs() * 0.3);
-            mixed_sample += processed * pan_gain;
-        }
-
-        // Process synthesis channel
-        let should_play_synth = if self.has_solo {
-            self.synthesis_channel.solo
-        } else {
-            !self.synthesis_channel.mute
-        };
-        if should_play_synth && self.synthesis_channel.is_active() {
-            let processed = self.synthesis_channel.process_sample(synthesis_sample);
-            let pan_gain = 1.0 - (self.synthesis_channel.pan.abs() * 0.3);
-            mixed_sample += processed * pan_gain;
-        }
-
-        // Apply master effects
-        if !self.master_effects.is_empty()
-            && let Some(ref master_processor) = self.master_effects_processor
-        {
-            match master_processor.process_effects(&[mixed_sample], &self.master_effects) {
-                Ok(processed) => {
-                    mixed_sample = processed.first().copied().unwrap_or(mixed_sample);
-                }
-                Err(e) => {
-                    tracing::warn!("Master effects processing failed: {}", e);
-                }
-            }
-        }
-
-        mixed_sample
+        mixed += self.r2d2_channel.process(r2d2_sample);
+        mixed += self.synthesis_channel.process(synthesis_sample);
+        mixed
     }
 }
 
@@ -1282,7 +1109,6 @@ impl EnhancedHybridAudioSource {
         synthesis_effects: Vec<crate::midi::EffectConfig>,
     ) -> Result<Self, String> {
         let sample_rate = 44100;
-        let buffer_size = 512; // Smaller buffer for lower latency
 
         // Create MIDI synthesizer source if there are MIDI notes
         let oxisynth_source = if !midi_notes.is_empty() {
@@ -1349,23 +1175,12 @@ impl EnhancedHybridAudioSource {
             }
         }
 
-        // Initialize channel processor
-        let mut channel_processor = ChannelProcessor::new(buffer_size, sample_rate as f64);
-
-        // Per-channel effects processing enabled
-        channel_processor.bypass_mode = false;
-
-        // Set up channel effects
-        for (channel, effects) in channel_effects {
-            channel_processor.set_channel_effects(channel, effects);
-        }
-
-        // Set up R2D2 and synthesis effects
-        channel_processor.set_r2d2_effects(r2d2_effects);
-        channel_processor.set_synthesis_effects(synthesis_effects);
-
-        // Update solo state
-        channel_processor.update_solo_state();
+        let channel_processor = ChannelProcessor::new(
+            sample_rate as f32,
+            &channel_effects,
+            &r2d2_effects,
+            &synthesis_effects,
+        );
 
         Ok(EnhancedHybridAudioSource {
             oxisynth_source,
