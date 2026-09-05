@@ -2,7 +2,9 @@
 
 use clap::Parser;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+use tracing_subscriber::EnvFilter;
 
 mod expressive;
 mod midi;
@@ -33,6 +35,37 @@ fn determine_log_directory(preferred_dir: PathBuf) -> PathBuf {
     }
 }
 
+/// Remove rotated log files (`mcp-muse.log.*`) older than `max_age`.
+/// Returns the number of files removed. Never touches non-log files.
+fn prune_old_logs(dir: &Path, max_age: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("mcp-muse.log.") {
+            continue;
+        }
+        let Ok(modified) = entry.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        let is_old = now
+            .duration_since(modified)
+            .map(|age| age > max_age)
+            .unwrap_or(false);
+        if is_old && fs::remove_file(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Default retention for rotated log files.
+const LOG_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
 fn init_logging() {
     // Cross-platform data directory (macOS: ~/Library/Application Support, Linux: ~/.local/share, Windows: %APPDATA%)
     let preferred_log_dir = dirs::data_dir()
@@ -40,18 +73,27 @@ fn init_logging() {
         .join("mcp-muse");
 
     let log_dir = determine_log_directory(preferred_log_dir);
+    let pruned = prune_old_logs(&log_dir, LOG_RETENTION);
 
     let file_appender = tracing_appender::rolling::daily(&log_dir, "mcp-muse.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
+    // Level is controlled by MCP_MUSE_LOG (EnvFilter syntax, e.g. "debug" or
+    // "mcp_muse::midi=trace"). Defaults to INFO so playback never floods the disk.
+    let filter = EnvFilter::try_from_env("MCP_MUSE_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
+
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
         .with_ansi(false)
-        .with_max_level(tracing::Level::TRACE)
+        .with_env_filter(filter)
         .init();
 
     // Log the directory being used for transparency
-    tracing::info!("Logging to directory: {:?}", log_dir);
+    tracing::info!(
+        "Logging to directory: {:?} (pruned {} old files)",
+        log_dir,
+        pruned
+    );
 
     // _guard must be kept alive, so we leak it (ok for a server)
     std::mem::forget(_guard);
@@ -1581,6 +1623,42 @@ mod tests {
             let result = determine_log_directory(impossible_dir);
             assert_eq!(result, PathBuf::from("."));
         }
+    }
+
+    #[test]
+    fn test_prune_old_logs_removes_only_old_rotated_files() {
+        let temp_dir = std::env::temp_dir().join("mcp-muse-test-prune");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let old_log = temp_dir.join("mcp-muse.log.2020-01-01");
+        let new_log = temp_dir.join("mcp-muse.log.2099-01-01");
+        let config = temp_dir.join("config.json");
+        for path in [&old_log, &new_log, &config] {
+            fs::write(path, "x").unwrap();
+        }
+        let ancient = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(86_400);
+        fs::File::options()
+            .write(true)
+            .open(&old_log)
+            .unwrap()
+            .set_modified(ancient)
+            .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&config)
+            .unwrap()
+            .set_modified(ancient)
+            .unwrap();
+
+        let removed = prune_old_logs(&temp_dir, std::time::Duration::from_secs(7 * 86_400));
+
+        assert_eq!(removed, 1);
+        assert!(!old_log.exists(), "old rotated log should be removed");
+        assert!(new_log.exists(), "recent log must be kept");
+        assert!(config.exists(), "non-log files must never be touched");
+
+        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

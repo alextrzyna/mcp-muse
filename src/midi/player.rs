@@ -938,23 +938,6 @@ impl OxiSynthSource {
         self.synth
             .write((&mut self.left_buffer[..], &mut self.right_buffer[..]));
 
-        // Log some debug info about the audio levels
-        let max_left = self.left_buffer.iter().map(|x| x.abs()).fold(0.0, f32::max);
-        let max_right = self
-            .right_buffer
-            .iter()
-            .map(|x| x.abs())
-            .fold(0.0, f32::max);
-
-        if max_left > 0.001 || max_right > 0.001 {
-            tracing::debug!(
-                "Audio chunk: max_left={:.4}, max_right={:.4}, samples={}",
-                max_left,
-                max_right,
-                self.buffer_size
-            );
-        }
-
         // Reset buffer position
         self.buffer_pos = 0;
         self.samples_generated += self.buffer_size;
@@ -1109,18 +1092,7 @@ impl ChannelEffectsChain {
                         } else {
                             1.0
                         };
-                        let compensated_result = result * gain_compensation;
-
-                        if input_sample.abs() > 0.001 {
-                            tracing::debug!(
-                                "Effects processed: input={:.4}, output={:.4}, compensated={:.4}, effects_count={}",
-                                input_sample,
-                                result,
-                                compensated_result,
-                                effects_to_apply.len()
-                            );
-                        }
-                        compensated_result
+                        result * gain_compensation
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -1142,16 +1114,7 @@ impl ChannelEffectsChain {
         };
 
         // Apply volume
-        let final_sample = processed_sample * self.volume;
-        if final_sample.abs() > 0.001 {
-            tracing::debug!(
-                "Channel output: processed={:.4}, volume={:.2}, final={:.4}",
-                processed_sample,
-                self.volume,
-                final_sample
-            );
-        }
-        final_sample
+        processed_sample * self.volume
     }
 
     fn is_active(&self) -> bool {
@@ -1223,17 +1186,7 @@ impl ChannelProcessor {
         // If bypass mode is enabled, do simple mixing without effects
         if self.bypass_mode {
             let midi_sum: f32 = midi_samples.iter().sum();
-            let result = midi_sum + r2d2_sample + synthesis_sample;
-            if result.abs() > 0.001 {
-                tracing::debug!(
-                    "Bypass mode: midi_sum={:.4}, r2d2={:.4}, synth={:.4}, total={:.4}",
-                    midi_sum,
-                    r2d2_sample,
-                    synthesis_sample,
-                    result
-                );
-            }
-            return result;
+            return midi_sum + r2d2_sample + synthesis_sample;
         }
 
         let mut mixed_sample = 0.0;
@@ -1782,12 +1735,6 @@ impl Iterator for EnhancedHybridAudioSource {
                 midi_channels[9] = midi_sample * 3.0; // Significant drum volume boost
                 // Also put on channel 0 for compatibility, but at normal volume
                 midi_channels[0] = midi_sample;
-
-                // Debug log when drums are detected
-                if self.current_sample.is_multiple_of(22050) {
-                    // Log every 0.5 seconds
-                    tracing::info!("🥁 Drums detected playing on channel 9, boosted volume");
-                }
             } else {
                 midi_channels[0] = midi_sample;
             }
