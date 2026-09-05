@@ -1,6 +1,5 @@
 pub mod parser;
 pub mod player;
-pub mod polyphonic_source;
 
 pub use player::*;
 

@@ -527,7 +527,6 @@ impl EffectsChain {
         }
     }
 
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
@@ -546,7 +545,6 @@ impl EffectsChain {
     }
 
     /// Process a whole buffer in place.
-    #[allow(dead_code)]
     pub fn process_buffer(&mut self, samples: &mut [f32]) {
         if self.nodes.is_empty() {
             return;

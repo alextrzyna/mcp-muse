@@ -203,22 +203,6 @@ impl MidiPlayer {
             note.synth_filter_resonance = Some(filter.resonance);
         }
 
-        // Apply effects
-        for effect in &synth_params.effects {
-            match &effect.effect_type {
-                crate::expressive::EffectType::Reverb => {
-                    note.synth_reverb = Some(effect.intensity);
-                }
-                crate::expressive::EffectType::Chorus => {
-                    note.synth_chorus = Some(effect.intensity);
-                }
-                crate::expressive::EffectType::Delay { delay_time } => {
-                    note.synth_delay = Some(effect.intensity);
-                    note.synth_delay_time = Some(*delay_time);
-                }
-            }
-        }
-
         // Apply synthesis-specific parameters based on synth type
         match &synth_params.synth_type {
             crate::expressive::SynthType::Square { pulse_width } => {
@@ -240,9 +224,14 @@ impl MidiPlayer {
             _ => {} // Other synth types don't have specific parameters to set
         }
 
-        // Apply signature effects from preset
-        if note.effects.is_none() && !preset.signature_effects.is_empty() {
-            note.effects = Some(preset.signature_effects.clone());
+        // Preset effects (built-in reverb/chorus) plus the preset's signature
+        // chain apply unless the caller supplied an explicit effects list.
+        if note.effects.is_none() {
+            let mut effects = synth_params.effects.clone();
+            effects.extend(preset.signature_effects.iter().cloned());
+            if !effects.is_empty() {
+                note.effects = Some(effects);
+            }
         }
 
         tracing::info!("Applied preset '{}' to note", preset.name);
@@ -351,39 +340,26 @@ impl MidiPlayer {
             processed_notes.push(note);
         }
 
-        // For the initial implementation, apply all effects globally to avoid MIDI channel separation complexity
-        let mut all_effects = Vec::new();
-        let mut r2d2_effects = Vec::new();
-        let mut synthesis_effects = Vec::new();
-
-        for note in &processed_notes {
-            if let Some(effects) = &note.effects {
-                if note.note_type == "r2d2" {
-                    // R2D2 effects
-                    r2d2_effects.extend(effects.clone());
-                } else if note.is_synthesis() {
-                    // Synthesis effects
-                    synthesis_effects.extend(effects.clone());
-                } else {
-                    // MIDI effects - for now, collect all MIDI effects together
-                    all_effects.extend(effects.clone());
-                }
-            }
-        }
-
-        // Put all MIDI effects on channel 0 for simplicity
+        // Synthesis and R2D2 notes render their own effects into their sample
+        // buffers. MIDI comes out of OxiSynth as one mixed bus, so the first
+        // MIDI note that specifies effects defines the chain for that bus.
         let mut channel_effects: std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>> =
             std::collections::HashMap::new();
-        if !all_effects.is_empty() {
-            channel_effects.insert(0, all_effects);
+        for note in &processed_notes {
+            if note.note_type == "r2d2" || note.is_synthesis() {
+                continue;
+            }
+            if let Some(effects) = &note.effects
+                && !effects.is_empty()
+            {
+                channel_effects.entry(0).or_insert_with(|| effects.clone());
+            }
         }
-
-        tracing::info!(
-            "Collected effects for {} MIDI channels, R2D2 effects: {}, synthesis effects: {}",
-            channel_effects.len(),
-            r2d2_effects.len(),
-            synthesis_effects.len()
-        );
+        if channel_effects.is_empty() {
+            tracing::debug!("No MIDI bus effects");
+        } else {
+            tracing::info!("MIDI bus effects: {} effects", channel_effects[&0].len());
+        }
 
         // Separate MIDI, R2D2, and synthesis notes
         let mut midi_notes = Vec::new();
@@ -434,6 +410,7 @@ impl MidiPlayer {
                 r2d2_events.push(R2D2Event {
                     start_time: note.start_time.unwrap_or(0.0),
                     expression,
+                    effects: note.effects.clone().unwrap_or_default(),
                 });
             } else if note.is_synthesis() {
                 // Handle synthesis notes
@@ -535,8 +512,6 @@ impl MidiPlayer {
             synthesis_events,
             total_time,
             channel_effects,
-            r2d2_effects,
-            synthesis_effects,
         )
         .map_err(|e| format!("Failed to create enhanced hybrid audio source: {}", e))?;
 
@@ -1006,6 +981,7 @@ impl Source for OxiSynthSource {
 struct R2D2Event {
     start_time: f64, // seconds
     expression: R2D2Expression,
+    effects: Vec<crate::midi::EffectConfig>,
 }
 
 /// Pre-computed R2D2 event with generated audio samples
@@ -1029,22 +1005,17 @@ struct SynthPrecomputedEvent {
     samples: Vec<f32>,
 }
 
-/// Mixes the MIDI, R2D2 and synthesis buses, each through its own stateful
-/// effects chain. Effects keep their delay-line and filter memory between
-/// samples, so reverb, delay, chorus, filter and compression behave as expected.
+/// Mixes the MIDI bus (through its stateful effects chain) with the
+/// pre-rendered R2D2 and synthesis buffers, which already carry their effects.
 struct ChannelProcessor {
     /// MIDI channels 0-15 (all OxiSynth output currently arrives on channel 0)
     midi_channels: Vec<EffectsChain>,
-    r2d2_channel: EffectsChain,
-    synthesis_channel: EffectsChain,
 }
 
 impl ChannelProcessor {
     fn new(
         sample_rate: f32,
         channel_effects: &std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>>,
-        r2d2_effects: &[crate::midi::EffectConfig],
-        synthesis_effects: &[crate::midi::EffectConfig],
     ) -> Self {
         let midi_channels = (0..16u8)
             .map(|ch| {
@@ -1055,11 +1026,7 @@ impl ChannelProcessor {
             })
             .collect();
 
-        Self {
-            midi_channels,
-            r2d2_channel: EffectsChain::new(sample_rate, r2d2_effects),
-            synthesis_channel: EffectsChain::new(sample_rate, synthesis_effects),
-        }
+        Self { midi_channels }
     }
 
     #[inline]
@@ -1073,9 +1040,7 @@ impl ChannelProcessor {
         for (chain, &sample) in self.midi_channels.iter_mut().zip(midi_samples) {
             mixed += chain.process(sample);
         }
-        mixed += self.r2d2_channel.process(r2d2_sample);
-        mixed += self.synthesis_channel.process(synthesis_sample);
-        mixed
+        mixed + r2d2_sample + synthesis_sample
     }
 }
 
@@ -1105,8 +1070,6 @@ impl EnhancedHybridAudioSource {
         synthesis_events: Vec<SynthEvent>,
         total_duration: Duration,
         channel_effects: std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>>,
-        r2d2_effects: Vec<crate::midi::EffectConfig>,
-        synthesis_effects: Vec<crate::midi::EffectConfig>,
     ) -> Result<Self, String> {
         let sample_rate = 44100;
 
@@ -1124,8 +1087,7 @@ impl EnhancedHybridAudioSource {
         let mut precomputed_r2d2_events = Vec::new();
 
         if !r2d2_events.is_empty() {
-            let expressive_synth = ExpressiveSynth::new()
-                .map_err(|e| format!("Failed to create ExpressiveSynth: {}", e))?;
+            let expressive_synth = ExpressiveSynth::new();
 
             let r2d2_voice = R2D2Voice::new();
 
@@ -1136,12 +1098,17 @@ impl EnhancedHybridAudioSource {
                     .generate_expression_params(&event.expression)
                     .ok_or("Failed to generate R2D2 synthesis parameters")?;
 
-                let samples = expressive_synth.generate_r2d2_samples_with_contour(
+                let mut samples = expressive_synth.generate_r2d2_samples_with_contour(
                     synth_params.base_freq,
                     event.expression.intensity,
                     synth_params.duration,
                     &synth_params.pitch_contour,
                 );
+                let mut chain = EffectsChain::new(sample_rate as f32, &event.effects);
+                if !chain.is_empty() {
+                    samples.resize(samples.len() + sample_rate as usize, 0.0);
+                    chain.process_buffer(&mut samples);
+                }
 
                 precomputed_r2d2_events.push(R2D2PrecomputedEvent {
                     start_sample,
@@ -1154,8 +1121,7 @@ impl EnhancedHybridAudioSource {
         let mut precomputed_synthesis_events = Vec::new();
 
         if !synthesis_events.is_empty() {
-            let expressive_synth = ExpressiveSynth::new()
-                .map_err(|e| format!("Failed to create ExpressiveSynth for synthesis: {}", e))?;
+            let expressive_synth = ExpressiveSynth::new();
 
             for event in synthesis_events {
                 let start_sample = (event.start_time * sample_rate as f64) as u32;
@@ -1175,12 +1141,7 @@ impl EnhancedHybridAudioSource {
             }
         }
 
-        let channel_processor = ChannelProcessor::new(
-            sample_rate as f32,
-            &channel_effects,
-            &r2d2_effects,
-            &synthesis_effects,
-        );
+        let channel_processor = ChannelProcessor::new(sample_rate as f32, &channel_effects);
 
         Ok(EnhancedHybridAudioSource {
             oxisynth_source,
@@ -1198,8 +1159,7 @@ impl EnhancedHybridAudioSource {
         note: &crate::midi::SimpleNote,
     ) -> Result<crate::expressive::SynthParams, String> {
         use crate::expressive::{
-            EffectParams, EffectType, EnvelopeParams, FilterParams, FilterType, NoiseColor,
-            SynthParams, SynthType,
+            EnvelopeParams, FilterParams, FilterType, NoiseColor, SynthParams, SynthType,
         };
 
         let synth_type_str = note
@@ -1380,87 +1340,34 @@ impl EnhancedHybridAudioSource {
             None
         };
 
-        // Create effects
-        let mut effects = Vec::new();
-
+        // Effects: shorthand synth_reverb/chorus/delay fields plus any explicit chain.
+        let mut effects: Vec<crate::midi::EffectConfig> = Vec::new();
         if let Some(reverb) = note.synth_reverb
             && reverb > 0.0
         {
-            effects.push(EffectParams {
-                effect_type: EffectType::Reverb,
-                intensity: reverb,
-            });
+            effects.push(PresetLibrary::create_reverb(reverb));
         }
-
         if let Some(chorus) = note.synth_chorus
             && chorus > 0.0
         {
-            effects.push(EffectParams {
-                effect_type: EffectType::Chorus,
-                intensity: chorus,
-            });
+            effects.push(PresetLibrary::create_chorus(chorus));
         }
-
         if let Some(delay) = note.synth_delay
             && delay > 0.0
         {
-            let delay_time = note.synth_delay_time.unwrap_or(0.25);
-            effects.push(EffectParams {
-                effect_type: EffectType::Delay { delay_time },
+            effects.push(crate::midi::EffectConfig {
+                effect: crate::midi::EffectType::Delay {
+                    delay_time: note.synth_delay_time.unwrap_or(0.25),
+                    feedback: 0.35,
+                    wet_level: 0.5,
+                    sync_tempo: false,
+                },
                 intensity: delay,
+                enabled: true,
             });
         }
-
-        // Process universal effects from the new effects system
-        if let Some(universal_effects) = &note.effects {
-            for effect_config in universal_effects {
-                if effect_config.enabled {
-                    // Convert EffectConfig to EffectParams for audio processing
-                    match &effect_config.effect {
-                        crate::midi::EffectType::Reverb {
-                            room_size: _,
-                            dampening: _,
-                            wet_level: _,
-                            pre_delay: _,
-                        } => {
-                            effects.push(EffectParams {
-                                effect_type: EffectType::Reverb,
-                                intensity: effect_config.intensity,
-                            });
-                        }
-                        crate::midi::EffectType::Delay {
-                            delay_time,
-                            feedback: _,
-                            wet_level: _,
-                            sync_tempo: _,
-                        } => {
-                            effects.push(EffectParams {
-                                effect_type: EffectType::Delay {
-                                    delay_time: *delay_time,
-                                },
-                                intensity: effect_config.intensity,
-                            });
-                        }
-                        crate::midi::EffectType::Chorus {
-                            rate: _,
-                            depth: _,
-                            feedback: _,
-                            stereo_width: _,
-                        } => {
-                            effects.push(EffectParams {
-                                effect_type: EffectType::Chorus,
-                                intensity: effect_config.intensity,
-                            });
-                        }
-                        // Note: Filter, Compressor, Distortion are not yet implemented in EffectParams
-                        // They would need to be added to the EffectType enum in the expressive module
-                        _ => {
-                            // For now, skip unsupported effect types
-                            // In the future, these would be implemented in the audio processing chain
-                        }
-                    }
-                }
-            }
+        if let Some(chain) = &note.effects {
+            effects.extend(chain.iter().filter(|e| e.enabled).cloned());
         }
 
         Ok(SynthParams {

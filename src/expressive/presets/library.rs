@@ -1,7 +1,5 @@
-use crate::expressive::{
-    EffectParams, EffectType, EnvelopeParams, FilterParams, FilterType, SynthParams,
-};
-use crate::midi::EffectConfig;
+use crate::expressive::{EnvelopeParams, FilterParams, FilterType, SynthParams};
+use crate::midi::{EffectConfig, EffectType};
 use rand::prelude::IndexedRandom;
 use rand::rng;
 use serde::{Deserialize, Serialize};
@@ -249,25 +247,38 @@ impl PresetLibrary {
         }
     }
 
-    /// Helper to create common effect parameters
-    pub fn create_reverb(intensity: f32) -> EffectParams {
-        EffectParams {
-            effect_type: EffectType::Reverb,
+    /// A medium-room reverb at the given wet intensity.
+    pub fn create_reverb(intensity: f32) -> EffectConfig {
+        EffectConfig {
+            effect: EffectType::Reverb {
+                room_size: 0.5,
+                dampening: 0.3,
+                wet_level: 0.6,
+                pre_delay: 0.02,
+            },
             intensity,
+            enabled: true,
         }
     }
 
-    pub fn create_chorus(intensity: f32) -> EffectParams {
-        EffectParams {
-            effect_type: EffectType::Chorus,
+    /// A gentle stereo-style chorus at the given intensity.
+    pub fn create_chorus(intensity: f32) -> EffectConfig {
+        EffectConfig {
+            effect: EffectType::Chorus {
+                rate: 1.2,
+                depth: 0.4,
+                feedback: 0.2,
+                stereo_width: 0.7,
+            },
             intensity,
+            enabled: true,
         }
     }
 
     /// Helper to create signature effects for presets
     pub fn create_signature_effects_for_bass() -> Vec<EffectConfig> {
         vec![EffectConfig {
-            effect: crate::midi::EffectType::Compressor {
+            effect: EffectType::Compressor {
                 threshold: -16.0,
                 ratio: 3.0,
                 attack: 0.003,
@@ -281,7 +292,7 @@ impl PresetLibrary {
     pub fn create_signature_effects_for_acid_bass() -> Vec<EffectConfig> {
         vec![
             EffectConfig {
-                effect: crate::midi::EffectType::Filter {
+                effect: EffectType::Filter {
                     filter_type: crate::midi::FilterType::LowPass,
                     cutoff: 800.0,
                     resonance: 2.0,
@@ -291,7 +302,7 @@ impl PresetLibrary {
                 enabled: true,
             },
             EffectConfig {
-                effect: crate::midi::EffectType::Delay {
+                effect: EffectType::Delay {
                     delay_time: 0.125,
                     feedback: 0.2,
                     wet_level: 0.15,
@@ -306,7 +317,7 @@ impl PresetLibrary {
     pub fn create_signature_effects_for_vintage_warmth() -> Vec<EffectConfig> {
         vec![
             EffectConfig {
-                effect: crate::midi::EffectType::Distortion {
+                effect: EffectType::Distortion {
                     drive: 0.8,
                     tone: 0.3,
                     output_level: 0.95,
@@ -315,7 +326,7 @@ impl PresetLibrary {
                 enabled: true,
             },
             EffectConfig {
-                effect: crate::midi::EffectType::Compressor {
+                effect: EffectType::Compressor {
                     threshold: -20.0,
                     ratio: 2.5,
                     attack: 0.01,
@@ -330,7 +341,7 @@ impl PresetLibrary {
     pub fn create_signature_effects_for_modern_clarity() -> Vec<EffectConfig> {
         vec![
             EffectConfig {
-                effect: crate::midi::EffectType::Compressor {
+                effect: EffectType::Compressor {
                     threshold: -14.0,
                     ratio: 4.0,
                     attack: 0.001,
@@ -340,7 +351,7 @@ impl PresetLibrary {
                 enabled: true,
             },
             EffectConfig {
-                effect: crate::midi::EffectType::Filter {
+                effect: EffectType::Filter {
                     filter_type: crate::midi::FilterType::HighPass,
                     cutoff: 80.0,
                     resonance: 0.3,
@@ -355,7 +366,7 @@ impl PresetLibrary {
     pub fn create_signature_effects_for_pad() -> Vec<EffectConfig> {
         vec![
             EffectConfig {
-                effect: crate::midi::EffectType::Reverb {
+                effect: EffectType::Reverb {
                     room_size: 0.7,
                     dampening: 0.3,
                     wet_level: 0.4,
@@ -365,7 +376,7 @@ impl PresetLibrary {
                 enabled: true,
             },
             EffectConfig {
-                effect: crate::midi::EffectType::Chorus {
+                effect: EffectType::Chorus {
                     rate: 0.8,
                     depth: 0.4,
                     feedback: 0.2,
@@ -380,7 +391,7 @@ impl PresetLibrary {
     pub fn create_signature_effects_for_lead() -> Vec<EffectConfig> {
         vec![
             EffectConfig {
-                effect: crate::midi::EffectType::Delay {
+                effect: EffectType::Delay {
                     delay_time: 0.25,
                     feedback: 0.3,
                     wet_level: 0.25,
@@ -390,7 +401,7 @@ impl PresetLibrary {
                 enabled: true,
             },
             EffectConfig {
-                effect: crate::midi::EffectType::Chorus {
+                effect: EffectType::Chorus {
                     rate: 1.5,
                     depth: 0.3,
                     feedback: 0.2,
@@ -404,7 +415,7 @@ impl PresetLibrary {
 
     pub fn create_signature_effects_for_keys() -> Vec<EffectConfig> {
         vec![EffectConfig {
-            effect: crate::midi::EffectType::Reverb {
+            effect: EffectType::Reverb {
                 room_size: 0.4,
                 dampening: 0.4,
                 wet_level: 0.2,
