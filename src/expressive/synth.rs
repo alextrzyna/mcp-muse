@@ -533,7 +533,7 @@ impl Oscillator {
                     output += (base * i as f32).sin() * amp * evolve;
                 }
                 let lfo = 1.0 + (TAU * 0.2 * t).sin() * movement * 0.1;
-                output * lfo * (0.5 + space * 0.2) * 0.3
+                output * lfo * (0.5 + space * 0.2) * 0.6
             }
             SynthType::Texture {
                 roughness,

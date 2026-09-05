@@ -581,9 +581,14 @@ fn find_soundfont() -> Result<PathBuf, String> {
 }
 
 /// Synthesizer gain passed to OxiSynth (its default of 0.2 is very quiet).
+/// At 1.0 a single velocity-100 note peaks around 0.35 and a four-note
+/// chord around 0.5, leaving headroom before the soft clipper (knee 0.8).
 const OXISYNTH_GAIN: f32 = 1.0;
 /// Extra linear gain applied to each OxiSynth output channel.
-const MIDI_GAIN: f32 = 5.0;
+const MIDI_GAIN: f32 = 1.0;
+/// Gain on the pre-rendered synthesis bus so preset notes (amplitude ~0.8)
+/// sit at the same level as MIDI instruments.
+const SYNTH_BUS_GAIN: f32 = 0.5;
 
 /// Renders scheduled MIDI notes through OxiSynth as stereo frames.
 pub struct OxiSynthSource {
@@ -988,6 +993,8 @@ struct ChannelProcessor {
     midi_left: Vec<EffectsChain>,
     /// Same configuration as `midi_left`, separate state for the right side
     midi_right: Vec<EffectsChain>,
+    #[cfg(test)]
+    probe_unclipped: bool,
 }
 
 impl ChannelProcessor {
@@ -1008,6 +1015,8 @@ impl ChannelProcessor {
         Self {
             midi_left: build(),
             midi_right: build(),
+            #[cfg(test)]
+            probe_unclipped: false,
         }
     }
 
@@ -1021,6 +1030,10 @@ impl ChannelProcessor {
         }
         for (chain, &sample) in self.midi_right.iter_mut().zip(midi_right) {
             right += chain.process(sample);
+        }
+        #[cfg(test)]
+        if self.probe_unclipped {
+            return (left, right);
         }
         (soft_clip(left), soft_clip(right))
     }
@@ -1403,7 +1416,7 @@ impl EnhancedHybridAudioSource {
             }
         }
 
-        sample
+        sample * SYNTH_BUS_GAIN
     }
 }
 
@@ -1433,6 +1446,12 @@ impl EnhancedHybridAudioSource {
             .process_and_mix(&midi_left, &midi_right, mono);
         self.current_sample += 1;
         Some(frame)
+    }
+
+    #[cfg(test)]
+    fn next_frame_unclipped(&mut self) -> Option<(f32, f32)> {
+        self.channel_processor.probe_unclipped = true;
+        self.next_frame()
     }
 }
 
@@ -1557,5 +1576,165 @@ mod tests {
             l_hard_left > l_hard_right * 1.5 && r_hard_right > r_hard_left * 1.5,
             "pan had no effect: pan0=({l_hard_left},{r_hard_left}) pan127=({l_hard_right},{r_hard_right})"
         );
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    //! Headroom checks: typical material must stay clear of the soft-clip knee.
+    use super::*;
+    use crate::midi::SimpleNote;
+
+    /// Peak and fraction of samples above the clipper knee, before clipping.
+    fn measure(seq: SimpleSequence) -> (f32, f32) {
+        let player = MidiPlayer::new().unwrap();
+        let mut midi = Vec::new();
+        let mut synth = Vec::new();
+        for n in seq.notes {
+            if n.is_synthesis() || n.is_preset() {
+                let mut n = n;
+                player.apply_preset_to_note(&mut n).unwrap();
+                synth.push(SynthEvent {
+                    start_time: n.start_time.unwrap_or(0.0),
+                    note: n,
+                });
+            } else {
+                midi.push(MidiNote {
+                    note: n.note.unwrap(),
+                    velocity: n.velocity.unwrap_or(80),
+                    channel: n.channel,
+                    start_time: Duration::from_secs_f64(n.start_time.unwrap_or(0.0)),
+                    duration: Duration::from_secs_f64(n.duration.unwrap_or(1.0)),
+                    instrument: n.instrument,
+                    reverb: n.reverb,
+                    chorus: n.chorus,
+                    volume: n.volume,
+                    pan: n.pan,
+                    balance: n.balance,
+                    expression: n.expression,
+                    sustain: n.sustain,
+                });
+            }
+        }
+        let mut src = EnhancedHybridAudioSource::new(
+            midi,
+            Vec::new(),
+            synth,
+            Duration::from_millis(1500),
+            Default::default(),
+        )
+        .unwrap();
+        let (mut peak, mut over, mut count) = (0.0f32, 0usize, 0usize);
+        while let Some((l, r)) = src.next_frame_unclipped() {
+            for v in [l, r] {
+                peak = peak.max(v.abs());
+                if v.abs() > 0.8 {
+                    over += 1;
+                }
+                count += 1;
+            }
+        }
+        (peak, over as f32 / count as f32)
+    }
+
+    fn midi(notes: &[(u8, u8, u8, Option<u8>)]) -> SimpleSequence {
+        SimpleSequence {
+            notes: notes
+                .iter()
+                .map(|&(note, vel, ch, inst)| SimpleNote {
+                    note: Some(note),
+                    velocity: Some(vel),
+                    channel: ch,
+                    instrument: inst,
+                    ..Default::default()
+                })
+                .collect(),
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    fn preset(name: &str, notes: &[u8]) -> SimpleSequence {
+        SimpleSequence {
+            notes: notes
+                .iter()
+                .map(|&n| SimpleNote {
+                    preset_name: Some(name.to_string()),
+                    note: Some(n),
+                    velocity: Some(100),
+                    duration: Some(1.4),
+                    ..Default::default()
+                })
+                .collect(),
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    #[test]
+    fn typical_material_stays_below_the_clipper_knee() {
+        if find_soundfont().is_err() {
+            eprintln!("skipping: SoundFont not installed");
+            return;
+        }
+        let cases: Vec<(&str, SimpleSequence, f32)> = vec![
+            ("flute", midi(&[(76, 100, 0, Some(73))]), 0.6),
+            (
+                "piano chord",
+                midi(&[
+                    (60, 90, 0, Some(0)),
+                    (64, 90, 0, Some(0)),
+                    (67, 90, 0, Some(0)),
+                    (72, 90, 0, Some(0)),
+                ]),
+                0.8,
+            ),
+            (
+                "strings chord",
+                midi(&[
+                    (60, 90, 0, Some(48)),
+                    (64, 90, 0, Some(48)),
+                    (67, 90, 0, Some(48)),
+                    (72, 90, 0, Some(48)),
+                ]),
+                0.8,
+            ),
+            (
+                "drums",
+                midi(&[(36, 110, 9, None), (38, 110, 9, None), (42, 110, 9, None)]),
+                1.0,
+            ),
+            ("minimoog bass", preset("Minimoog Bass", &[36]), 0.6),
+            (
+                "jp8 strings chord",
+                preset("JP-8 Strings", &[60, 64, 67]),
+                0.8,
+            ),
+            ("tr808 kick", preset("TR-808 Kick", &[36]), 0.6),
+        ];
+        for (name, seq, max_peak) in cases {
+            let (peak, over) = measure(seq);
+            eprintln!(
+                "LEVEL {name:20} peak={peak:.2} above_knee={:.1}%",
+                over * 100.0
+            );
+            assert!(peak < max_peak, "{name}: peak {peak} exceeds {max_peak}");
+            assert!(
+                over < 0.01,
+                "{name}: {:.1}% of samples in the clipper",
+                over * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn material_is_not_too_quiet_either() {
+        if find_soundfont().is_err() {
+            return;
+        }
+        let (flute, _) = measure(midi(&[(76, 100, 0, Some(73))]));
+        let (bass, _) = measure(preset("Minimoog Bass", &[36]));
+        assert!(flute > 0.15, "flute peak {flute} is too quiet");
+        assert!(bass > 0.15, "bass peak {bass} is too quiet");
     }
 }
