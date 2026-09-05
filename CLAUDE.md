@@ -118,7 +118,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Important Architectural Decisions:**
 - **Unified Playback**: All audio types use `play_enhanced_mixed()` - no separate methods needed
-- **Channel Routing**: Currently all MIDI routes to channel 0 (TODO: implement per-channel MIDI separation)
+- **Channel Routing**: OxiSynth renders all 16 MIDI channels into one stereo bus that is routed through the channel-0 effects chain (TODO: render channels separately so each can carry its own effects)
+- **Stereo**: the mixer is stereo; MIDI pan/balance CCs are preserved, R2D2 and synthesis buffers are mono and centered; a soft clipper on each output side prevents hard clipping
 - **Effects Collection**: Effects are collected per audio type (MIDI, R2D2, synthesis) not per individual note
 
 The system is production-ready with professional audio quality, supporting both nostalgic SNES gaming sounds and expressive R2D2 robotic vocalizations for AI conversation enhancement.

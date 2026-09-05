@@ -157,35 +157,32 @@ pub struct EnvelopeParams {
 
 impl EnvelopeParams {
     /// ADSR level at time `t` for a note of `duration` seconds.
-    /// The release starts `release` seconds before the end (or as soon as
-    /// attack+decay finish if the note is shorter) and never goes negative.
+    ///
+    /// The release normally starts `release` seconds before the end. A note
+    /// shorter than its envelope still fades to zero by `duration`: the fade is
+    /// applied on top of whatever the attack/decay curve is doing at the time.
     pub fn level_at(&self, t: f32, duration: f32) -> f32 {
         let a = self.attack.max(0.0);
         let d = self.decay.max(0.0);
         let r = self.release.max(0.0);
         let s = self.sustain.clamp(0.0, 1.0);
 
-        let pre_release = |t: f32| -> f32 {
-            if t < a {
-                if a > 0.0 { t / a } else { 1.0 }
-            } else if t < a + d {
-                let p = if d > 0.0 { (t - a) / d } else { 1.0 };
-                1.0 - p * (1.0 - s)
-            } else {
-                s
-            }
+        let pre_release = if t < a {
+            if a > 0.0 { t / a } else { 1.0 }
+        } else if t < a + d {
+            let p = if d > 0.0 { (t - a) / d } else { 1.0 };
+            1.0 - p * (1.0 - s)
+        } else {
+            s
         };
 
         let release_start = (duration - r).max(0.0);
         if t < release_start {
-            pre_release(t)
+            pre_release
         } else {
-            let p = if r > 0.0 {
-                (t - release_start) / r
-            } else {
-                1.0
-            };
-            pre_release(release_start) * (1.0 - p).clamp(0.0, 1.0)
+            let fade_len = (duration - release_start).max(1e-6);
+            let p = (t - release_start) / fade_len;
+            pre_release * (1.0 - p).clamp(0.0, 1.0)
         }
     }
 }
@@ -810,6 +807,18 @@ mod tests {
             assert!((0.0..=1.0).contains(&v), "t={t} level={v}");
         }
         assert_eq!(env.level_at(1.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn short_note_with_long_release_is_still_audible() {
+        let env = EnvelopeParams {
+            attack: 0.01,
+            decay: 0.1,
+            sustain: 0.7,
+            release: 0.3,
+        };
+        assert!(env.level_at(0.05, 0.2) > 0.5);
+        assert_eq!(env.level_at(0.2, 0.2), 0.0);
     }
 
     #[test]

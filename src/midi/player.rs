@@ -587,7 +587,12 @@ fn find_soundfont() -> Result<PathBuf, String> {
     Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
 }
 
-// OxiSynth-based audio source
+/// Synthesizer gain passed to OxiSynth (its default of 0.2 is very quiet).
+const OXISYNTH_GAIN: f32 = 1.0;
+/// Extra linear gain applied to each OxiSynth output channel.
+const MIDI_GAIN: f32 = 5.0;
+
+/// Renders scheduled MIDI notes through OxiSynth as stereo frames.
 pub struct OxiSynthSource {
     synth: Synth,
     notes: Vec<MidiNote>,
@@ -598,7 +603,7 @@ pub struct OxiSynthSource {
     right_buffer: Vec<f32>,
     buffer_size: usize,
     buffer_pos: usize,
-    playing_notes: std::collections::HashMap<(u32, u8), Duration>, // (start_sample, note) -> duration
+    playing_notes: std::collections::HashMap<(u32, u8, u8), Duration>, // (start_sample, note, channel) -> duration
     samples_generated: usize,
     channel_instruments: std::collections::HashMap<u8, u8>, // channel -> current instrument
     channel_reverb: std::collections::HashMap<u8, u8>,      // channel -> current reverb depth
@@ -624,6 +629,7 @@ impl OxiSynthSource {
 
         // Create synthesizer
         let mut synth = Synth::default();
+        synth.set_gain(OXISYNTH_GAIN);
         synth.add_font(soundfont, true);
 
         tracing::info!("Loaded SoundFont from: {:?}", soundfont_path);
@@ -675,7 +681,7 @@ impl OxiSynthSource {
 
             // Check if we should start this note in this chunk
             if note_start_sample >= current_sample_u32 && note_start_sample < chunk_end {
-                let key = (note_start_sample, note.note);
+                let key = (note_start_sample, note.note, note.channel);
                 if !self.playing_notes.contains_key(&key) {
                     // Handle drums (channel 9) specially
                     if note.channel == 9 {
@@ -888,7 +894,7 @@ impl OxiSynthSource {
 
             // Check if we should end this note in this chunk
             if note_end_sample >= current_sample_u32 && note_end_sample < chunk_end {
-                let key = (note_start_sample, note.note);
+                let key = (note_start_sample, note.note, note.channel);
                 if self.playing_notes.remove(&key).is_some() {
                     let midi_event = MidiEvent::NoteOff {
                         channel: note.channel,
@@ -919,60 +925,36 @@ impl OxiSynthSource {
     }
 }
 
-impl Iterator for OxiSynthSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl OxiSynthSource {
+    /// Next (left, right) frame, or `None` once the total duration has elapsed.
+    fn next_frame(&mut self) -> Option<(f32, f32)> {
         let current_time =
             Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-
         if current_time > self.total_duration {
             tracing::info!(
-                "Audio playback finished after {} samples ({:.2}s)",
+                "MIDI rendering finished after {} samples ({:.2}s)",
                 self.samples_generated,
                 current_time.as_secs_f32()
             );
             return None;
         }
 
-        // If we've consumed the current buffer, process the next chunk
         if self.buffer_pos >= self.buffer_size {
             self.process_audio_chunk();
         }
 
-        // Get the next sample (mix left and right channels with better balance)
-        let sample = if self.buffer_pos < self.left_buffer.len() {
-            // Amplify and properly mix left and right channels for drums
-            let left = self.left_buffer[self.buffer_pos] * 20.0;
-            let right = self.right_buffer[self.buffer_pos] * 20.0;
-            // Better stereo-to-mono conversion maintaining drum punch
-            (left + right) * 0.7 // Slight reduction to prevent clipping
+        let frame = if self.buffer_pos < self.left_buffer.len() {
+            (
+                self.left_buffer[self.buffer_pos] * MIDI_GAIN,
+                self.right_buffer[self.buffer_pos] * MIDI_GAIN,
+            )
         } else {
-            0.0
+            (0.0, 0.0)
         };
 
         self.buffer_pos += 1;
         self.current_sample += 1;
-
-        Some(sample)
-    }
-}
-
-impl Source for OxiSynthSource {
-    fn current_span_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1 // Mono output (but with better mixing)
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        Some(self.total_duration)
+        Some(frame)
     }
 }
 
@@ -1005,11 +987,14 @@ struct SynthPrecomputedEvent {
     samples: Vec<f32>,
 }
 
-/// Mixes the MIDI bus (through its stateful effects chain) with the
-/// pre-rendered R2D2 and synthesis buffers, which already carry their effects.
+/// Mixes the stereo MIDI bus (through its stateful effects chains, one per
+/// side so stereo image survives) with the pre-rendered mono R2D2 and
+/// synthesis buffers, which already carry their own effects.
 struct ChannelProcessor {
-    /// MIDI channels 0-15 (all OxiSynth output currently arrives on channel 0)
-    midi_channels: Vec<EffectsChain>,
+    /// MIDI channels 0-15, left side (all OxiSynth output currently arrives on channel 0)
+    midi_left: Vec<EffectsChain>,
+    /// Same configuration as `midi_left`, separate state for the right side
+    midi_right: Vec<EffectsChain>,
 }
 
 impl ChannelProcessor {
@@ -1017,30 +1002,45 @@ impl ChannelProcessor {
         sample_rate: f32,
         channel_effects: &std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>>,
     ) -> Self {
-        let midi_channels = (0..16u8)
-            .map(|ch| {
-                channel_effects
-                    .get(&ch)
-                    .map(|effects| EffectsChain::new(sample_rate, effects))
-                    .unwrap_or_default()
-            })
-            .collect();
-
-        Self { midi_channels }
+        let build = || -> Vec<EffectsChain> {
+            (0..16u8)
+                .map(|ch| {
+                    channel_effects
+                        .get(&ch)
+                        .map(|effects| EffectsChain::new(sample_rate, effects))
+                        .unwrap_or_default()
+                })
+                .collect()
+        };
+        Self {
+            midi_left: build(),
+            midi_right: build(),
+        }
     }
 
+    /// Returns the (left, right) mix. `mono` (R2D2 + synthesis) goes to both sides.
     #[inline]
-    fn process_and_mix(
-        &mut self,
-        midi_samples: &[f32],
-        r2d2_sample: f32,
-        synthesis_sample: f32,
-    ) -> f32 {
-        let mut mixed = 0.0;
-        for (chain, &sample) in self.midi_channels.iter_mut().zip(midi_samples) {
-            mixed += chain.process(sample);
+    fn process_and_mix(&mut self, midi_left: &[f32], midi_right: &[f32], mono: f32) -> (f32, f32) {
+        let mut left = mono;
+        let mut right = mono;
+        for (chain, &sample) in self.midi_left.iter_mut().zip(midi_left) {
+            left += chain.process(sample);
         }
-        mixed + r2d2_sample + synthesis_sample
+        for (chain, &sample) in self.midi_right.iter_mut().zip(midi_right) {
+            right += chain.process(sample);
+        }
+        (soft_clip(left), soft_clip(right))
+    }
+}
+
+/// Transparent below ±0.8, then a smooth tanh knee so summed buses cannot hard-clip.
+#[inline]
+fn soft_clip(x: f32) -> f32 {
+    const KNEE: f32 = 0.8;
+    if x.abs() <= KNEE {
+        x
+    } else {
+        x.signum() * (KNEE + (1.0 - KNEE) * ((x.abs() - KNEE) / (1.0 - KNEE)).tanh())
     }
 }
 
@@ -1061,6 +1061,9 @@ struct EnhancedHybridAudioSource {
 
     // Per-channel effects processing
     channel_processor: ChannelProcessor,
+
+    /// Right sample of the current frame, waiting to be emitted after the left.
+    pending_right: Option<f32>,
 }
 
 impl EnhancedHybridAudioSource {
@@ -1151,6 +1154,7 @@ impl EnhancedHybridAudioSource {
             current_sample: 0,
             total_duration,
             channel_processor,
+            pending_right: None,
         })
     }
 
@@ -1408,21 +1412,34 @@ impl EnhancedHybridAudioSource {
 
         sample
     }
+}
 
-    /// Check if drums are currently playing (for channel routing)
-    fn has_drums_playing(&self) -> bool {
-        if let Some(ref oxisynth) = self.oxisynth_source {
-            // Check if any notes on channel 9 are currently playing
-            let current_time =
-                Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-            oxisynth.notes.iter().any(|note| {
-                note.channel == 9
-                    && current_time >= note.start_time
-                    && current_time <= note.start_time + note.duration
-            })
-        } else {
-            false
+impl EnhancedHybridAudioSource {
+    /// Render one stereo frame, or `None` at the end of the sequence.
+    fn next_frame(&mut self) -> Option<(f32, f32)> {
+        let current_time =
+            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+        if current_time > self.total_duration {
+            return None;
         }
+
+        let mono = self.get_r2d2_sample(self.current_sample)
+            + self.get_synthesis_sample(self.current_sample);
+
+        let mut midi_left = [0.0f32; 16];
+        let mut midi_right = [0.0f32; 16];
+        if let Some(ref mut oxisynth) = self.oxisynth_source
+            && let Some((l, r)) = oxisynth.next_frame()
+        {
+            midi_left[0] = l;
+            midi_right[0] = r;
+        }
+
+        let frame = self
+            .channel_processor
+            .process_and_mix(&midi_left, &midi_right, mono);
+        self.current_sample += 1;
+        Some(frame)
     }
 }
 
@@ -1430,45 +1447,12 @@ impl Iterator for EnhancedHybridAudioSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Check if we've reached the end of the sequence
-        let current_time =
-            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-
-        if current_time > self.total_duration {
-            return None;
+        if let Some(right) = self.pending_right.take() {
+            return Some(right);
         }
-
-        // Get R2D2 sample
-        let r2d2_sample = self.get_r2d2_sample(self.current_sample);
-
-        // Get synthesis sample
-        let synthesis_sample = self.get_synthesis_sample(self.current_sample);
-
-        // Get MIDI samples with proper per-channel separation
-        let mut midi_channels = vec![0.0; 16]; // 16 MIDI channels
-
-        if let Some(ref mut oxisynth) = self.oxisynth_source {
-            // Get the mixed sample from OxiSynth
-            let midi_sample = oxisynth.next().unwrap_or(0.0);
-
-            // Enhanced channel routing with special drum handling
-            if self.has_drums_playing() {
-                // Drums are playing - give them special routing and volume boost
-                midi_channels[9] = midi_sample * 3.0; // Significant drum volume boost
-                // Also put on channel 0 for compatibility, but at normal volume
-                midi_channels[0] = midi_sample;
-            } else {
-                midi_channels[0] = midi_sample;
-            }
-        }
-
-        // Use channel processor to mix and apply effects
-        let final_sample =
-            self.channel_processor
-                .process_and_mix(&midi_channels, r2d2_sample, synthesis_sample);
-
-        self.current_sample += 1;
-        Some(final_sample)
+        let (left, right) = self.next_frame()?;
+        self.pending_right = Some(right);
+        Some(left)
     }
 }
 
@@ -1478,7 +1462,7 @@ impl Source for EnhancedHybridAudioSource {
     }
 
     fn channels(&self) -> u16 {
-        1 // Mono output
+        2
     }
 
     fn sample_rate(&self) -> u32 {
@@ -1493,12 +1477,92 @@ impl Source for EnhancedHybridAudioSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expressive::test_util::rms;
+    use crate::midi::SimpleNote;
+
+    fn soundfont_available() -> bool {
+        if find_soundfont().is_ok() {
+            true
+        } else {
+            eprintln!("skipping: SoundFont not installed (run `mcp-muse setup`)");
+            false
+        }
+    }
 
     #[test]
-    fn test_midi_player_creation() {
-        // This test might fail in CI environments without audio
-        if let Ok(_player) = MidiPlayer::new() {
-            // Success
+    fn hybrid_source_is_stereo_and_mono_buses_are_centered() {
+        let note = SimpleNote {
+            synth_type: Some("sine".to_string()),
+            synth_frequency: Some(440.0),
+            start_time: Some(0.0),
+            duration: Some(0.2),
+            ..Default::default()
+        };
+        let source = EnhancedHybridAudioSource::new(
+            Vec::new(),
+            Vec::new(),
+            vec![SynthEvent {
+                start_time: 0.0,
+                note,
+            }],
+            Duration::from_millis(300),
+            std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(source.channels(), 2);
+
+        let samples: Vec<f32> = source.collect();
+        assert!(samples.len() > 2 * 44100 / 10);
+        let left: Vec<f32> = samples.iter().step_by(2).copied().collect();
+        let right: Vec<f32> = samples.iter().skip(1).step_by(2).copied().collect();
+        assert!(rms(&left) > 0.01, "silent output");
+        assert_eq!(left, right, "mono buses must be identical on both sides");
+    }
+
+    #[test]
+    fn soft_clip_is_transparent_then_bounded() {
+        assert_eq!(soft_clip(0.5), 0.5);
+        assert_eq!(soft_clip(-0.5), -0.5);
+        assert!(soft_clip(3.0) <= 1.0 && soft_clip(3.0) > 0.9);
+        assert!(soft_clip(-3.0) >= -1.0);
+    }
+
+    fn render_panned_flute(pan: u8) -> (f32, f32) {
+        let note = MidiNote {
+            note: 60,
+            velocity: 100,
+            channel: 0,
+            start_time: Duration::ZERO,
+            duration: Duration::from_millis(500),
+            instrument: Some(73),
+            reverb: Some(0),
+            chorus: Some(0),
+            volume: None,
+            pan: Some(pan),
+            balance: None,
+            expression: None,
+            sustain: None,
+        };
+        let mut source = OxiSynthSource::new(vec![note], Duration::from_millis(600)).unwrap();
+        let (mut left, mut right) = (Vec::new(), Vec::new());
+        while let Some((l, r)) = source.next_frame() {
+            left.push(l);
+            right.push(r);
         }
+        (rms(&left[4410..22050]), rms(&right[4410..22050]))
+    }
+
+    #[test]
+    fn pan_moves_the_stereo_image() {
+        if !soundfont_available() {
+            return;
+        }
+        let (l_hard_left, r_hard_left) = render_panned_flute(0);
+        let (l_hard_right, r_hard_right) = render_panned_flute(127);
+        assert!(r_hard_right > 0.01, "no audio rendered");
+        assert!(
+            l_hard_left > l_hard_right * 1.5 && r_hard_right > r_hard_left * 1.5,
+            "pan had no effect: pan0=({l_hard_left},{r_hard_left}) pan127=({l_hard_right},{r_hard_right})"
+        );
     }
 }
