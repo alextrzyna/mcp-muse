@@ -866,6 +866,31 @@ fn handle_tool_call(
     };
     tracing::info!("tools/call {}", tool_params.name);
 
+    // A bug inside a render must not kill the server; the model gets an
+    // isError result and the next call still works.
+    let name = tool_params.name.clone();
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dispatch_tool(state, tool_params, id.clone())
+    }));
+    outcome.unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_else(|| "unknown panic".to_string());
+        tracing::error!("Tool {} panicked: {}", name, message);
+        JsonRpcResponse::tool_error(
+            id,
+            format!("Internal error while running {}: {}", name, message),
+        )
+    })
+}
+
+fn dispatch_tool(
+    state: &mut ServerState,
+    tool_params: ToolCallParams,
+    id: Option<Value>,
+) -> JsonRpcResponse {
     match tool_params.name.as_str() {
         "play_notes" => handle_play_notes(state, tool_params.arguments, id),
         "define_sequence_pattern" => handle_define_pattern(state, tool_params.arguments, id),

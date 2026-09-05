@@ -94,6 +94,14 @@ fn init_logging() {
         pruned
     );
 
+    // Panics normally go only to stderr, which MCP hosts may hide; mirror them
+    // into the log file before the default hook prints them.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("panic: {}", info);
+        default_hook(info);
+    }));
+
     // _guard must be kept alive, so we leak it (ok for a server)
     std::mem::forget(_guard);
 }

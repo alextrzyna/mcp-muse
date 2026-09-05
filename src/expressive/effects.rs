@@ -131,12 +131,14 @@ impl DelayLine {
     /// Linearly interpolated read `delay` samples in the past (0 < delay < len).
     #[inline]
     fn read_fractional(&self, delay: f32) -> f32 {
-        let len = self.buffer.len() as f32;
-        let delay = delay.clamp(1.0, len - 1.0);
-        let pos = (self.write as f32 - delay).rem_euclid(len);
-        let i0 = pos.floor() as usize;
-        let i1 = (i0 + 1) % self.buffer.len();
-        let frac = pos - i0 as f32;
+        let len = self.buffer.len();
+        let delay = delay.clamp(1.0, len as f32 - 1.0);
+        let whole = delay.floor();
+        let frac = delay - whole;
+        // Integer wrap-around: floating-point `rem_euclid` can round to
+        // exactly `len` for tiny negative inputs and index past the end.
+        let i0 = (self.write + len - whole as usize) % len;
+        let i1 = (i0 + len - 1) % len;
         self.buffer[i0] * (1.0 - frac) + self.buffer[i1] * frac
     }
 
@@ -578,6 +580,33 @@ mod tests {
             silence < 1e-3,
             "unexpected signal before the echo: {silence}"
         );
+    }
+
+    #[test]
+    fn delay_line_fractional_read_never_indexes_past_the_end() {
+        // Regression: a delay a hair longer than the write position used to
+        // produce a position that rounded to exactly `len`.
+        let mut line = DelayLine::new(1764);
+        for i in 0..5 {
+            line.write(i as f32);
+        }
+        for delay in [1.0, 4.9999995, 5.0, 5.0000005, 1762.9999, 1763.0, 5000.0] {
+            let _ = line.read_fractional(delay);
+        }
+        // Exact integer delays read back what was written that long ago.
+        assert_eq!(line.read_fractional(1.0), 4.0);
+        assert_eq!(line.read_fractional(3.0), 2.0);
+    }
+
+    #[test]
+    fn chorus_survives_a_long_render() {
+        let mut c = Chorus::new(SR, 0.8, 1.0, 0.2, 1.0);
+        let input = white_noise((SR * 20.0) as usize, 11);
+        let max = input
+            .iter()
+            .map(|&x| c.process(x).abs())
+            .fold(0.0, f32::max);
+        assert!(max.is_finite() && max < 4.0);
     }
 
     #[test]
