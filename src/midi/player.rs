@@ -12,26 +12,50 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// Owns the audio output stream for the process and every playback started
+/// on it. Each call to [`MidiPlayer::play_enhanced_mixed`] gets its own sink so
+/// overlapping calls mix rather than queue; [`MidiPlayer::stop_all`] silences
+/// them all.
 pub struct MidiPlayer {
-    _stream: OutputStream,
-    sink: Sink,
+    stream: OutputStream,
+    sinks: Vec<Sink>,
     preset_library: PresetLibrary,
     effects_library: EffectsPresetLibrary,
 }
 
 impl MidiPlayer {
     pub fn new() -> Result<Self, String> {
-        let stream_handle = rodio::OutputStreamBuilder::open_default_stream()
+        let stream = rodio::OutputStreamBuilder::open_default_stream()
             .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
 
-        let sink = Sink::connect_new(stream_handle.mixer());
-
         Ok(MidiPlayer {
-            _stream: stream_handle,
-            sink,
+            stream,
+            sinks: Vec::new(),
             preset_library: PresetLibrary::new(),
             effects_library: EffectsPresetLibrary::new(),
         })
+    }
+
+    /// Stop every active playback. Returns how many were still playing.
+    pub fn stop_all(&mut self) -> usize {
+        self.prune_finished();
+        let active = self.sinks.len();
+        for sink in self.sinks.drain(..) {
+            sink.stop();
+        }
+        tracing::info!("Stopped {} active playbacks", active);
+        active
+    }
+
+    /// Number of playbacks that have not finished yet.
+    #[allow(dead_code)]
+    pub fn active_playbacks(&mut self) -> usize {
+        self.prune_finished();
+        self.sinks.len()
+    }
+
+    fn prune_finished(&mut self) {
+        self.sinks.retain(|sink| !sink.empty());
     }
 
     /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
@@ -254,8 +278,9 @@ impl MidiPlayer {
         Ok(())
     }
 
-    /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes (pre-computed approach)
-    pub fn play_enhanced_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
+    /// Start playing a sequence (MIDI, R2D2, synthesis and presets mixed).
+    /// Returns immediately with the total playback time, effect tails included.
+    pub fn play_enhanced_mixed(&mut self, sequence: SimpleSequence) -> Result<Duration, String> {
         tracing::info!(
             "Playing enhanced mixed sequence with {} notes (pre-computed approach)",
             sequence.notes.len()
@@ -263,17 +288,16 @@ impl MidiPlayer {
 
         if sequence.notes.is_empty() {
             tracing::warn!("No notes to play - sequence is empty");
-            return Ok(());
+            return Ok(Duration::ZERO);
         }
 
         // Process each note and apply presets if specified
         let mut processed_notes = Vec::new();
-        for mut note in sequence.notes {
-            // Apply preset configuration if present
-            if let Err(e) = self.apply_preset_to_note(&mut note) {
-                tracing::warn!("Failed to apply preset to note: {}", e);
-                // Continue with the note without preset - don't fail completely
-            }
+        for (i, mut note) in sequence.notes.into_iter().enumerate() {
+            // A preset the caller named but we cannot find is an error, not a
+            // silent fallback to the default piano.
+            self.apply_preset_to_note(&mut note)
+                .map_err(|e| format!("Note {}: {}", i + 1, e))?;
 
             // Validate effects if present
             if let Err(e) = note.validate_effects() {
@@ -515,28 +539,19 @@ impl MidiPlayer {
         )
         .map_err(|e| format!("Failed to create enhanced hybrid audio source: {}", e))?;
 
-        tracing::info!("Created enhanced hybrid audio source, starting playback");
-
-        // Check sink status before playing
-        tracing::info!(
-            "Sink status - is_paused: {}, empty: {}",
-            self.sink.is_paused(),
-            self.sink.empty()
-        );
-
-        self.sink.append(enhanced_source);
-        self.sink.play();
-
-        // Set volume to ensure it's audible
-        self.sink.set_volume(1.0);
+        self.prune_finished();
+        let sink = Sink::connect_new(self.stream.mixer());
+        sink.append(enhanced_source);
+        sink.play();
+        self.sinks.push(sink);
 
         tracing::info!(
-            "Playback started (non-blocking) - volume: {}, duration: {:.2}s",
-            self.sink.volume(),
-            total_time.as_secs_f64()
+            "Playback started (non-blocking) - duration: {:.2}s, active playbacks: {}",
+            total_time.as_secs_f64(),
+            self.sinks.len()
         );
 
-        Ok(())
+        Ok(total_time)
     }
 }
 

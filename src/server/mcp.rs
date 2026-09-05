@@ -1,14 +1,42 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::midi::{ExtendedSequence, MidiPlayer, SequencePattern, SimpleSequence};
+use crate::midi::{ExtendedSequence, MidiPlayer, SequencePattern, SimpleNote, SimpleSequence};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
-use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-// Global pattern storage for the MCP server session
-lazy_static::lazy_static! {
-    static ref PATTERN_STORE: Arc<Mutex<HashMap<String, SequencePattern>>> = Arc::new(Mutex::new(HashMap::new()));
+/// MCP protocol revision this server implements.
+const PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Per-process server state: the audio player (opened on first use so that
+/// `tools/list` works without an audio device) and the session's patterns.
+pub struct ServerState {
+    player: Option<MidiPlayer>,
+    patterns: HashMap<String, SequencePattern>,
+}
+
+impl Default for ServerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ServerState {
+    pub fn new() -> Self {
+        Self {
+            player: None,
+            patterns: HashMap::new(),
+        }
+    }
+
+    fn player(&mut self) -> Result<&mut MidiPlayer, String> {
+        if self.player.is_none() {
+            self.player = Some(MidiPlayer::new()?);
+            tracing::info!("Opened audio output stream");
+        }
+        Ok(self.player.as_mut().expect("player just initialised"))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -23,7 +51,7 @@ struct JsonRpcRequest {
 #[derive(Debug, Serialize)]
 struct JsonRpcResponse {
     jsonrpc: String,
-    #[serde(serialize_with = "serialize_id")]
+    /// `null` when the request id could not be read (JSON-RPC 2.0 §5).
     id: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<Value>,
@@ -31,16 +59,53 @@ struct JsonRpcResponse {
     error: Option<JsonRpcError>,
 }
 
-// Custom serializer for id field to ensure it's never null
-fn serialize_id<S>(id: &Option<Value>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::ser::Serializer,
-{
-    match id {
-        Some(val) => val.serialize(serializer),
-        None => "unknown".serialize(serializer), // Use default string instead of null
+impl JsonRpcResponse {
+    fn ok(id: Option<Value>, result: Value) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    fn error(id: Option<Value>, code: i32, message: impl Into<String>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code,
+                message: message.into(),
+                data: None,
+            }),
+        }
+    }
+
+    /// A successful tool call carrying one text block.
+    fn tool_text(id: Option<Value>, text: impl Into<String>) -> Self {
+        Self::ok(
+            id,
+            json!({ "content": [{ "type": "text", "text": text.into() }] }),
+        )
+    }
+
+    /// A tool call that ran but failed. Reported inside the result (with
+    /// `isError`) so the model can see the message, per the MCP spec.
+    fn tool_error(id: Option<Value>, text: impl Into<String>) -> Self {
+        Self::ok(
+            id,
+            json!({ "content": [{ "type": "text", "text": text.into() }], "isError": true }),
+        )
     }
 }
+
+/// JSON-RPC "Invalid params": the arguments could not be parsed or validated.
+const INVALID_PARAMS: i32 = -32602;
+/// JSON-RPC "Method not found".
+const METHOD_NOT_FOUND: i32 = -32601;
+/// JSON-RPC "Parse error".
+const PARSE_ERROR: i32 = -32700;
 
 #[derive(Debug, Serialize)]
 struct JsonRpcError {
@@ -87,19 +152,17 @@ fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcRespon
 
     let server_info = json!({
         "name": "mcp-muse",
-        "version": "0.1.0"
+        "version": env!("CARGO_PKG_VERSION")
     });
 
-    JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
+    JsonRpcResponse::ok(
         id,
-        result: Some(json!({
-            "protocolVersion": "2024-11-05",
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
             "capabilities": server_capabilities,
             "serverInfo": server_info
-        })),
-        error: None,
-    }
+        }),
+    )
 }
 
 fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
@@ -339,6 +402,15 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
         {
             "name": "list_patterns",
             "description": "List all defined sequence patterns with their names, categories, and note counts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "stop_playback",
+            "description": "Stop all sounds that are currently playing. Playback tools return immediately while audio continues in the background; call this to cut it short.",
             "inputSchema": {
                 "type": "object",
                 "properties": {},
@@ -735,919 +807,367 @@ Examples:
         }
     ]);
 
-    JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        id,
-        result: Some(json!({
-            "tools": tools
-        })),
-        error: None,
-    }
+    JsonRpcResponse::ok(id, json!({ "tools": tools }))
 }
 
 fn handle_resources_list(id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!("Handling resources/list request");
-
-    JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        id,
-        result: Some(json!({
-            "resources": []
-        })),
-        error: None,
-    }
+    JsonRpcResponse::ok(id, json!({ "resources": [] }))
 }
 
 fn handle_prompts_list(id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!("Handling prompts/list request");
-
-    JsonRpcResponse {
-        jsonrpc: "2.0".to_string(),
-        id,
-        result: Some(json!({
-            "prompts": []
-        })),
-        error: None,
-    }
+    JsonRpcResponse::ok(id, json!({ "prompts": [] }))
 }
 
-fn handle_tool_call(params: Option<Value>, id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!("Handling tools/call request");
-
-    let params = match params {
-        Some(p) => p,
-        None => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: "Invalid params".to_string(),
-                    data: None,
-                }),
-            };
-        }
+fn handle_tool_call(
+    state: &mut ServerState,
+    params: Option<Value>,
+    id: Option<Value>,
+) -> JsonRpcResponse {
+    let Some(params) = params else {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, "Invalid params");
     };
-
     let tool_params: ToolCallParams = match serde_json::from_value(params) {
         Ok(p) => p,
         Err(e) => {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
+            return JsonRpcResponse::error(
                 id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid tool call params: {}", e),
-                    data: None,
-                }),
-            };
+                INVALID_PARAMS,
+                format!("Invalid tool call params: {}", e),
+            );
         }
     };
+    tracing::info!("tools/call {}", tool_params.name);
 
     match tool_params.name.as_str() {
-        "play_notes" => handle_play_notes_tool(tool_params.arguments, id),
-        "define_sequence_pattern" => handle_define_pattern_tool(tool_params.arguments, id),
-        "play_sequence" => handle_play_sequence_tool(tool_params.arguments, id),
-        "list_patterns" => handle_list_patterns_tool(id),
-        _ => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32601,
-                message: format!("Unknown tool: {}", tool_params.name),
-                data: None,
-            }),
-        },
+        "play_notes" => handle_play_notes(state, tool_params.arguments, id),
+        "define_sequence_pattern" => handle_define_pattern(state, tool_params.arguments, id),
+        "play_sequence" => handle_play_sequence(state, tool_params.arguments, id),
+        "list_patterns" => handle_list_patterns(state, id),
+        "stop_playback" => handle_stop_playback(state, id),
+        other => JsonRpcResponse::error(id, METHOD_NOT_FOUND, format!("Unknown tool: {}", other)),
     }
 }
 
-fn handle_play_notes_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!(
-        "handle_play_notes_tool called with arguments: {:?}",
-        arguments
-    );
+/// Parameter-level validation shared by every tool that accepts notes.
+fn validate_notes(notes: &[SimpleNote]) -> Result<(), String> {
+    for (i, note) in notes.iter().enumerate() {
+        let checks = [
+            ("R2D2", note.validate_r2d2()),
+            ("synthesis", note.validate_synthesis()),
+            ("preset", note.validate_preset()),
+            ("effects", note.validate_effects()),
+        ];
+        for (what, result) in checks {
+            if let Err(e) = result {
+                return Err(format!(
+                    "Invalid {} parameters in note {}: {}",
+                    what,
+                    i + 1,
+                    e
+                ));
+            }
+        }
+    }
+    Ok(())
+}
 
-    // Parse the simple sequence from JSON
+/// Human-readable summary of what a sequence contains.
+fn describe_sources(notes: &[SimpleNote]) -> String {
+    let mut parts = Vec::new();
+    if notes.iter().any(|n| n.note_type == "r2d2") {
+        parts.push("R2D2 expressions");
+    }
+    if notes.iter().any(|n| n.is_preset()) {
+        parts.push("classic synth presets");
+    }
+    if notes.iter().any(|n| n.is_synthesis() && !n.is_preset()) {
+        parts.push("custom synthesis");
+    }
+    if notes
+        .iter()
+        .any(|n| n.note_type != "r2d2" && !n.is_synthesis() && !n.is_preset())
+    {
+        parts.push("MIDI instruments");
+    }
+    if parts.is_empty() {
+        "audio".to_string()
+    } else {
+        parts.join(" + ")
+    }
+}
+
+fn playback_started_text(summary: String, duration: Duration) -> String {
+    format!(
+        "🎵 Playback started ({}). It will finish in about {:.1} seconds including effect tails; call stop_playback to cut it short.",
+        summary,
+        duration.as_secs_f64()
+    )
+}
+
+fn start_playback(
+    state: &mut ServerState,
+    sequence: SimpleSequence,
+    id: Option<Value>,
+    summary: String,
+) -> JsonRpcResponse {
+    let player = match state.player() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("Audio output unavailable: {}", e);
+            return JsonRpcResponse::tool_error(id, format!("Audio output unavailable: {}", e));
+        }
+    };
+    match player.play_enhanced_mixed(sequence) {
+        Ok(duration) => JsonRpcResponse::tool_text(id, playback_started_text(summary, duration)),
+        Err(e) => {
+            tracing::error!("Playback failed: {}", e);
+            JsonRpcResponse::tool_error(id, format!("Playback failed: {}", e))
+        }
+    }
+}
+
+fn handle_play_notes(
+    state: &mut ServerState,
+    arguments: Value,
+    id: Option<Value>,
+) -> JsonRpcResponse {
     let sequence: SimpleSequence = match serde_json::from_value(arguments) {
         Ok(seq) => seq,
         Err(e) => {
-            tracing::error!("Failed to parse note sequence: {}", e);
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
+            return JsonRpcResponse::error(
                 id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Failed to parse note sequence: {}", e),
-                    data: None,
-                }),
-            };
+                INVALID_PARAMS,
+                format!("Failed to parse note sequence: {}", e),
+            );
         }
     };
-
     if sequence.notes.is_empty() {
-        tracing::warn!("Note sequence is empty");
-        return JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32602,
-                message: "Note sequence cannot be empty".to_string(),
-                data: None,
-            }),
-        };
+        return JsonRpcResponse::error(id, INVALID_PARAMS, "Note sequence cannot be empty");
+    }
+    if let Err(e) = validate_notes(&sequence.notes) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
 
-    // Analyze the sequence to determine the playback mode
-    let mut has_midi = false;
-    let mut has_r2d2 = false;
-    let mut has_synthesis = false;
-    let mut has_presets = false;
-
-    for note in &sequence.notes {
-        // Validate note parameters first
-        if let Err(e) = note.validate_r2d2() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid R2D2 parameters: {}", e),
-                    data: None,
-                }),
-            };
-        }
-
-        if let Err(e) = note.validate_synthesis() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid synthesis parameters: {}", e),
-                    data: None,
-                }),
-            };
-        }
-
-        if let Err(e) = note.validate_preset() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid preset parameters: {}", e),
-                    data: None,
-                }),
-            };
-        }
-
-        // Categorize note types
-        if note.note_type == "r2d2" {
-            has_r2d2 = true;
-        } else if note.is_synthesis() {
-            has_synthesis = true;
-        } else if note.is_preset() {
-            has_presets = true;
-        } else {
-            has_midi = true;
-        }
-    }
-
-    tracing::info!(
-        "Sequence analysis: {} notes, has_midi: {}, has_r2d2: {}, has_synthesis: {}, has_presets: {}",
+    let summary = format!(
+        "{} notes: {}",
         sequence.notes.len(),
-        has_midi,
-        has_r2d2,
-        has_synthesis,
-        has_presets
+        describe_sources(&sequence.notes)
     );
-
-    // Create MIDI player
-    let player = match MidiPlayer::new() {
-        Ok(p) => {
-            tracing::info!("Successfully created MIDI player");
-            p
-        }
-        Err(e) => {
-            tracing::error!("Failed to create MIDI player: {}", e);
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to create MIDI player: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    // Use universal enhanced mixed playback for ALL sequences (supports everything!)
-    let mode = match (has_midi, has_r2d2, has_synthesis, has_presets) {
-        (true, true, true, true) => "MIDI + R2D2 + Synthesis + Presets",
-        (true, true, true, false) => "MIDI + R2D2 + Synthesis",
-        (true, true, false, true) => "MIDI + R2D2 + Presets",
-        (true, false, true, true) => "MIDI + Synthesis + Presets",
-        (false, true, true, true) => "R2D2 + Synthesis + Presets",
-        (true, false, true, false) => "MIDI + Synthesis",
-        (false, true, true, false) => "R2D2 + Synthesis",
-        (false, false, true, true) => "Synthesis + Presets",
-        (true, false, false, true) => "MIDI + Presets",
-        (false, true, false, true) => "R2D2 + Presets",
-        (false, false, true, false) => "Synthesis Only",
-        (false, true, false, false) => "R2D2 Only",
-        (false, false, false, true) => "Presets Only",
-        (true, false, false, false) => "Pure MIDI",
-        _ => "Mixed",
-    };
-
-    tracing::info!(
-        "Using universal enhanced mixed playback for {} sequence",
-        mode
-    );
-    let playback_result = player.play_enhanced_mixed(sequence);
-
-    // Handle the result
-    match playback_result {
-        Ok(()) => {
-            // Leak the player to keep audio stream alive for non-blocking playback
-            Box::leak(Box::new(player));
-            tracing::info!("Player leaked to keep audio alive (non-blocking)");
-            let mode_description = match (has_midi, has_r2d2, has_synthesis, has_presets) {
-                (true, true, true, true) => {
-                    "🎵🤖🎛️🎹 Ultimate audio sequence playback started successfully! MIDI music, R2D2 expressions, custom synthesis, and classic preset sounds are now playing in perfect synchronization."
-                }
-                (true, true, true, false) => {
-                    "🎵🤖🎛️ Universal audio sequence playback started successfully! MIDI music, R2D2 expressions, and custom synthesis are now playing in perfect synchronization."
-                }
-                (true, true, false, true) => {
-                    "🎵🤖🎹 Mixed MIDI, R2D2, and preset sequence playback started successfully! Traditional music, robotic expressions, and vintage synthesizer sounds are now playing together."
-                }
-                (true, false, true, true) => {
-                    "🎵🎛️🎹 Mixed MIDI, synthesis, and preset sequence playback started successfully! Traditional music, custom synthesis, and classic sounds are now playing together."
-                }
-                (false, true, true, true) => {
-                    "🤖🎛️🎹 Mixed R2D2, synthesis, and preset sequence playback started successfully! Robotic expressions, custom synthesis, and vintage sounds are now playing in synchronization."
-                }
-                (true, false, true, false) => {
-                    "🎵🎛️ Mixed MIDI and synthesis sequence playback started successfully! Traditional music and custom synthesized sounds are now playing together."
-                }
-                (false, true, true, false) => {
-                    "🤖🎛️ Mixed R2D2 and synthesis sequence playback started successfully! Robotic expressions and custom sounds are now playing in synchronization."
-                }
-                (true, true, false, false) => {
-                    "🎵🤖 Mixed MIDI and R2D2 sequence playback started successfully! The music and robotic expressions are now playing in perfect synchronization."
-                }
-                (true, false, false, true) => {
-                    "🎵🎹 Mixed MIDI and preset sequence playback started successfully! Traditional music and classic synthesizer sounds are now playing together."
-                }
-                (false, true, false, true) => {
-                    "🤖🎹 Mixed R2D2 and preset sequence playback started successfully! Robotic expressions and vintage synthesizer sounds are now playing together."
-                }
-                (false, false, true, true) => {
-                    "🎛️🎹 Mixed synthesis and preset sequence playback started successfully! Custom synthesis and classic vintage sounds are now playing together."
-                }
-                (false, true, false, false) => {
-                    "🤖 R2D2 expression sequence playback started successfully! The robotic vocalizations are now playing."
-                }
-                (false, false, true, false) => {
-                    "🎛️ Custom synthesis sequence playback started successfully! Your unique synthesized sounds are now playing."
-                }
-                (false, false, false, true) => {
-                    "🎹 Classic synthesizer preset sequence playback started successfully! Authentic vintage synthesizer sounds are now playing."
-                }
-                _ => {
-                    "🎵 Pure MIDI sequence playback started successfully! The music is now playing."
-                }
-            };
-
-            tracing::info!("Playback completed successfully");
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: Some(json!({
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": mode_description
-                        }
-                    ]
-                })),
-                error: None,
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to play sequence: {}", e);
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to play sequence: {}", e),
-                    data: None,
-                }),
-            }
-        }
-    }
+    start_playback(state, sequence, id, summary)
 }
 
-fn handle_define_pattern_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!(
-        "handle_define_pattern_tool called with arguments: {:?}",
-        arguments
-    );
-
-    // Parse the sequence pattern from JSON
+fn handle_define_pattern(
+    state: &mut ServerState,
+    arguments: Value,
+    id: Option<Value>,
+) -> JsonRpcResponse {
     let pattern: SequencePattern = match serde_json::from_value(arguments) {
         Ok(p) => p,
         Err(e) => {
-            tracing::error!("Failed to parse sequence pattern: {}", e);
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
+            return JsonRpcResponse::error(
                 id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Failed to parse sequence pattern: {}", e),
-                    data: None,
-                }),
-            };
+                INVALID_PARAMS,
+                format!("Failed to parse sequence pattern: {}", e),
+            );
         }
     };
-
     if pattern.notes.is_empty() {
-        tracing::warn!("Pattern notes are empty");
-        return JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32602,
-                message: "Pattern notes cannot be empty".to_string(),
-                data: None,
-            }),
-        };
+        return JsonRpcResponse::error(id, INVALID_PARAMS, "Pattern notes cannot be empty");
+    }
+    if let Err(e) = validate_notes(&pattern.notes) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
 
-    // Validate all notes in the pattern
-    for (i, note) in pattern.notes.iter().enumerate() {
-        if let Err(e) = note.validate_r2d2() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid R2D2 parameters in note {}: {}", i + 1, e),
-                    data: None,
-                }),
-            };
-        }
-
-        if let Err(e) = note.validate_synthesis() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid synthesis parameters in note {}: {}", i + 1, e),
-                    data: None,
-                }),
-            };
-        }
-
-        if let Err(e) = note.validate_preset() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid preset parameters in note {}: {}", i + 1, e),
-                    data: None,
-                }),
-            };
-        }
+    let mut details = format!(
+        "🎼 Defined pattern '{}': {} notes, {:.2} s at {} BPM, {} bars of {}/4",
+        pattern.name,
+        pattern.notes.len(),
+        pattern.get_pattern_duration(),
+        pattern.tempo,
+        pattern.pattern_bars,
+        pattern.beats_per_bar
+    );
+    if let Some(category) = &pattern.category {
+        details.push_str(&format!(" (category: {})", category));
     }
-
-    // Store the pattern
-    let pattern_name = pattern.name.clone();
-    match PATTERN_STORE.lock() {
-        Ok(mut store) => {
-            let pattern_info = format!(
-                "Pattern '{}' with {} notes, duration: {:.2}s",
-                pattern.name,
-                pattern.notes.len(),
-                pattern.get_pattern_duration()
-            );
-
-            let category_info = pattern
-                .category
-                .as_ref()
-                .map(|c| format!(" (category: {})", c))
-                .unwrap_or_default();
-
-            let tags_info = if !pattern.tags.is_empty() {
-                format!(" [tags: {}]", pattern.tags.join(", "))
-            } else {
-                String::new()
-            };
-
-            store.insert(pattern.name.clone(), pattern);
-            tracing::info!("Stored pattern: {}", pattern_name);
-
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: Some(json!({
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": format!("🎼 Successfully defined sequence pattern: {}{}{}
-
-📋 **Pattern Details:**
-• **Name**: {}
-• **Notes**: {} notes
-• **Duration**: {:.2} seconds
-• **Tempo**: {} BPM
-{}{}
-
-✅ Pattern is now stored and ready to use with the `play_sequence` tool!
-
-💡 **Usage Example:**
-```json
-{{
-  \"patterns\": [
-    {{\"pattern_name\": \"{}\", \"start_time_offset\": 0}}
-  ]
-}}
-```",
-                                pattern_info, category_info, tags_info,
-                                pattern_name,
-                                store.get(&pattern_name).unwrap().notes.len(),
-                                store.get(&pattern_name).unwrap().get_pattern_duration(),
-                                store.get(&pattern_name).unwrap().tempo,
-                                store.get(&pattern_name).unwrap().description.as_ref()
-                                    .map(|d| format!("\n• **Description**: {}", d))
-                                    .unwrap_or_default(),
-                                if !store.get(&pattern_name).unwrap().tags.is_empty() {
-                                    format!("\n• **Tags**: {}", store.get(&pattern_name).unwrap().tags.join(", "))
-                                } else { String::new() },
-                                pattern_name
-                            )
-                        }
-                    ]
-                })),
-                error: None,
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to lock pattern store: {}", e);
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: "Failed to store pattern due to internal error".to_string(),
-                    data: None,
-                }),
-            }
-        }
+    if !pattern.tags.is_empty() {
+        details.push_str(&format!(" [tags: {}]", pattern.tags.join(", ")));
     }
+    if let Some(description) = &pattern.description {
+        details.push_str(&format!("\n{}", description));
+    }
+    details.push_str(&format!(
+        "\n\nUse it with play_sequence, e.g. {{\"patterns\": [{{\"pattern_name\": \"{}\", \"start_bar\": 1, \"repeat_count\": 2}}]}}",
+        pattern.name
+    ));
+
+    tracing::info!("Stored pattern '{}'", pattern.name);
+    state.patterns.insert(pattern.name.clone(), pattern);
+    JsonRpcResponse::tool_text(id, details)
 }
 
-fn handle_play_sequence_tool(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!(
-        "handle_play_sequence_tool called with arguments: {:?}",
-        arguments
-    );
-
-    // Parse the extended sequence from JSON
-    let extended_sequence: ExtendedSequence = match serde_json::from_value(arguments) {
+fn handle_play_sequence(
+    state: &mut ServerState,
+    arguments: Value,
+    id: Option<Value>,
+) -> JsonRpcResponse {
+    let extended: ExtendedSequence = match serde_json::from_value(arguments) {
         Ok(seq) => seq,
         Err(e) => {
-            tracing::error!("Failed to parse extended sequence: {}", e);
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
+            return JsonRpcResponse::error(
                 id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Failed to parse extended sequence: {}", e),
-                    data: None,
-                }),
-            };
+                INVALID_PARAMS,
+                format!("Failed to parse sequence: {}", e),
+            );
         }
     };
-
-    if extended_sequence.notes.is_empty() && extended_sequence.patterns.is_empty() {
-        tracing::warn!("Extended sequence has no notes or patterns");
-        return JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
+    if extended.notes.is_empty() && extended.patterns.is_empty() {
+        return JsonRpcResponse::error(
             id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32602,
-                message: "Sequence must contain either notes or pattern references".to_string(),
-                data: None,
-            }),
-        };
+            INVALID_PARAMS,
+            "Sequence must contain either notes or pattern references",
+        );
+    }
+    if let Err(e) = validate_notes(&extended.notes) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
 
-    // Validate individual notes
-    for (i, note) in extended_sequence.notes.iter().enumerate() {
-        if let Err(e) = note.validate_r2d2() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid R2D2 parameters in note {}: {}", i + 1, e),
-                    data: None,
-                }),
-            };
-        }
-
-        if let Err(e) = note.validate_synthesis() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid synthesis parameters in note {}: {}", i + 1, e),
-                    data: None,
-                }),
-            };
-        }
-
-        if let Err(e) = note.validate_preset() {
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32602,
-                    message: format!("Invalid preset parameters in note {}: {}", i + 1, e),
-                    data: None,
-                }),
-            };
-        }
-    }
-
-    // Resolve pattern references to get final sequence
-    let resolved_sequence = match PATTERN_STORE.lock() {
-        Ok(store) => match extended_sequence.resolve_patterns(&store) {
-            Ok(seq) => seq,
-            Err(e) => {
-                tracing::error!("Failed to resolve patterns: {}", e);
-                return JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id,
-                    result: None,
-                    error: Some(JsonRpcError {
-                        code: -32602,
-                        message: format!("Failed to resolve patterns: {}", e),
-                        data: None,
-                    }),
-                };
-            }
-        },
+    let resolved = match extended.resolve_patterns(&state.patterns) {
+        Ok(seq) => seq,
         Err(e) => {
-            tracing::error!("Failed to lock pattern store: {}", e);
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
+            let known: Vec<&String> = state.patterns.keys().collect();
+            return JsonRpcResponse::tool_error(
                 id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: "Failed to access pattern store".to_string(),
-                    data: None,
-                }),
-            };
+                format!("{}. Defined patterns: {:?}", e, known),
+            );
         }
     };
-
-    if resolved_sequence.notes.is_empty() {
-        tracing::warn!("Resolved sequence is empty");
-        return JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32602,
-                message: "Resolved sequence cannot be empty".to_string(),
-                data: None,
-            }),
-        };
+    if resolved.notes.is_empty() {
+        return JsonRpcResponse::tool_error(id, "Resolved sequence contains no notes");
     }
 
-    // Create MIDI player
-    let player = match MidiPlayer::new() {
-        Ok(p) => {
-            tracing::info!("Successfully created MIDI player");
-            p
-        }
-        Err(e) => {
-            tracing::error!("Failed to create MIDI player: {}", e);
-            return JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to create MIDI player: {}", e),
-                    data: None,
-                }),
-            };
-        }
-    };
-
-    let pattern_count = extended_sequence.patterns.len();
-    let individual_notes_count = extended_sequence.notes.len();
-    let total_resolved_notes = resolved_sequence.notes.len();
-
-    tracing::info!(
-        "Playing sequence with {} pattern references, {} individual notes, {} total resolved notes",
-        pattern_count,
-        individual_notes_count,
-        total_resolved_notes
+    let summary = format!(
+        "{} pattern references + {} individual notes → {} notes: {}",
+        extended.patterns.len(),
+        extended.notes.len(),
+        resolved.notes.len(),
+        describe_sources(&resolved.notes)
     );
+    start_playback(state, resolved, id, summary)
+}
 
-    match player.play_enhanced_mixed(resolved_sequence) {
-        Ok(()) => {
-            // Leak the player to keep audio stream alive for non-blocking playback
-            Box::leak(Box::new(player));
-            tracing::info!("Player leaked to keep audio alive (non-blocking)");
+fn handle_list_patterns(state: &ServerState, id: Option<Value>) -> JsonRpcResponse {
+    if state.patterns.is_empty() {
+        return JsonRpcResponse::tool_text(
+            id,
+            "📋 No patterns defined yet. Use define_sequence_pattern to create one, then reference it from play_sequence.",
+        );
+    }
 
-            let composition_description = match (individual_notes_count > 0, pattern_count > 0) {
-                (true, true) => format!(
-                    "🎼🎵 Enhanced sequence playback started successfully! Playing {} individual notes plus {} pattern references (expanded to {} total notes) in perfect synchronization.",
-                    individual_notes_count, pattern_count, total_resolved_notes
-                ),
-                (false, true) => format!(
-                    "🎼 Pattern-based sequence playback started successfully! Playing {} pattern references (expanded to {} total notes) with all transformations applied.",
-                    pattern_count, total_resolved_notes
-                ),
-                (true, false) => format!(
-                    "🎵 Individual note sequence playback started successfully! Playing {} notes.",
-                    individual_notes_count
-                ),
-                (false, false) => "🎵 Sequence playback started successfully!".to_string(),
-            };
+    let mut by_category: std::collections::BTreeMap<&str, Vec<&SequencePattern>> =
+        std::collections::BTreeMap::new();
+    for pattern in state.patterns.values() {
+        by_category
+            .entry(pattern.category.as_deref().unwrap_or("uncategorized"))
+            .or_default()
+            .push(pattern);
+    }
 
-            tracing::info!("Enhanced sequence playback completed successfully");
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: Some(json!({
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": composition_description
-                        }
-                    ]
-                })),
-                error: None,
+    let mut output = format!("📋 {} patterns defined\n", state.patterns.len());
+    for (category, patterns) in by_category {
+        output.push_str(&format!("\n## {} ({})\n", category, patterns.len()));
+        let mut patterns = patterns;
+        patterns.sort_by(|a, b| a.name.cmp(&b.name));
+        for pattern in patterns {
+            output.push_str(&format!(
+                "- {}: {} notes, {:.1} s, {} bars",
+                pattern.name,
+                pattern.notes.len(),
+                pattern.get_pattern_duration(),
+                pattern.pattern_bars
+            ));
+            if let Some(desc) = &pattern.description {
+                output.push_str(&format!(" — {}", desc));
             }
-        }
-        Err(e) => {
-            tracing::error!("Failed to play enhanced sequence: {}", e);
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: format!("Failed to play enhanced sequence: {}", e),
-                    data: None,
-                }),
+            if !pattern.tags.is_empty() {
+                output.push_str(&format!(" [{}]", pattern.tags.join(", ")));
             }
+            output.push('\n');
         }
     }
+    JsonRpcResponse::tool_text(id, output)
 }
 
-fn handle_list_patterns_tool(id: Option<Value>) -> JsonRpcResponse {
-    tracing::info!("handle_list_patterns_tool called");
-
-    match PATTERN_STORE.lock() {
-        Ok(store) => {
-            if store.is_empty() {
-                JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id,
-                    result: Some(json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "📋 **Sequence Patterns**
-
-🔍 No patterns defined yet.
-
-💡 **Get Started:**
-Use the `define_sequence_pattern` tool to create reusable musical patterns that you can then reference with the `play_sequence` tool.
-
-**Example:**
-```json
-{
-  \"name\": \"house_beat\",
-  \"description\": \"Classic 4/4 house drum pattern\",
-  \"category\": \"drums\",
-  \"notes\": [
-    {\"note\": 36, \"velocity\": 120, \"start_time\": 0, \"duration\": 0.1, \"channel\": 9},
-    {\"note\": 42, \"velocity\": 80, \"start_time\": 0.25, \"duration\": 0.05, \"channel\": 9},
-    {\"note\": 38, \"velocity\": 100, \"start_time\": 0.5, \"duration\": 0.1, \"channel\": 9}
-  ]
+fn handle_stop_playback(state: &mut ServerState, id: Option<Value>) -> JsonRpcResponse {
+    let stopped = state.player.as_mut().map(|p| p.stop_all()).unwrap_or(0);
+    JsonRpcResponse::tool_text(id, format!("⏹ Stopped {} active playback(s)", stopped))
 }
-```"
-                            }
-                        ]
-                    })),
-                    error: None,
-                }
-            } else {
-                let mut patterns_by_category: std::collections::HashMap<
-                    String,
-                    Vec<&SequencePattern>,
-                > = std::collections::HashMap::new();
 
-                // Group patterns by category
-                for pattern in store.values() {
-                    let category = pattern.category.as_deref().unwrap_or("uncategorized");
-                    patterns_by_category
-                        .entry(category.to_string())
-                        .or_default()
-                        .push(pattern);
-                }
-
-                // Sort categories
-                let mut categories: Vec<_> = patterns_by_category.keys().collect();
-                categories.sort();
-
-                let mut output = String::from("📋 **Sequence Patterns**\n\n");
-                output.push_str(&format!("🎼 **{}** patterns available:\n\n", store.len()));
-
-                for category in categories {
-                    let patterns = patterns_by_category.get(category).unwrap();
-                    let category_icon = match category.as_str() {
-                        "drums" => "🥁",
-                        "bass" => "🎸",
-                        "melody" => "🎵",
-                        "chords" => "🎹",
-                        "harmony" => "🎼",
-                        "effects" => "🎛️",
-                        _ => "📝",
-                    };
-
-                    output.push_str(&format!(
-                        "## {} **{}** ({})\n",
-                        category_icon,
-                        category,
-                        patterns.len()
-                    ));
-
-                    for pattern in patterns {
-                        output.push_str(&format!(
-                            "• **{}** - {} notes, {:.1}s duration",
-                            pattern.name,
-                            pattern.notes.len(),
-                            pattern.get_pattern_duration()
-                        ));
-
-                        if let Some(desc) = &pattern.description {
-                            output.push_str(&format!("\n  *{}*", desc));
-                        }
-
-                        if !pattern.tags.is_empty() {
-                            output.push_str(&format!(" [{}]", pattern.tags.join(", ")));
-                        }
-
-                        output.push('\n');
-                    }
-                    output.push('\n');
-                }
-
-                output.push_str("💡 **Usage:** Reference these patterns in the `play_sequence` tool with transformations like transposition, instrument changes, and repetition!");
-
-                JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id,
-                    result: Some(json!({
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": output
-                            }
-                        ]
-                    })),
-                    error: None,
-                }
-            }
+fn write_response(stdout: &mut impl Write, response: &JsonRpcResponse) {
+    match serde_json::to_string(response) {
+        Ok(json) => {
+            tracing::debug!("Sending: {}", json);
+            let _ = writeln!(stdout, "{}", json);
+            let _ = stdout.flush();
         }
-        Err(e) => {
-            tracing::error!("Failed to lock pattern store: {}", e);
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: "Failed to access pattern store".to_string(),
-                    data: None,
-                }),
-            }
-        }
+        Err(e) => tracing::error!("Failed to serialize response: {}", e),
     }
 }
 
 pub fn run_stdio_server() {
-    tracing::info!("MCP server starting");
+    tracing::info!(
+        "MCP server starting (mcp-muse {})",
+        env!("CARGO_PKG_VERSION")
+    );
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let reader = stdin.lock();
+    let mut state = ServerState::new();
 
     for line in reader.lines() {
-        match line {
-            Ok(line) if !line.trim().is_empty() => {
-                tracing::debug!("Received: {}", line);
-
-                let request: JsonRpcRequest = match serde_json::from_str(&line) {
-                    Ok(req) => req,
-                    Err(e) => {
-                        tracing::error!("Failed to parse JSON-RPC request: {}", e);
-                        let error_response = JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
-                            id: None,
-                            result: None,
-                            error: Some(JsonRpcError {
-                                code: -32700,
-                                message: "Parse error".to_string(),
-                                data: Some(json!(e.to_string())),
-                            }),
-                        };
-                        if let Ok(response_json) = serde_json::to_string(&error_response) {
-                            let _ = writeln!(stdout, "{}", response_json);
-                            let _ = stdout.flush();
-                        }
-                        continue;
-                    }
-                };
-
-                let response = match request.method.as_str() {
-                    "initialize" => handle_initialize(request.params, request.id),
-                    "notifications/initialized" => {
-                        tracing::info!("Client initialized");
-                        continue; // No response needed for notifications
-                    }
-                    "tools/list" => handle_tools_list(request.id),
-                    "resources/list" => handle_resources_list(request.id),
-                    "prompts/list" => handle_prompts_list(request.id),
-                    "tools/call" => handle_tool_call(request.params, request.id),
-                    _ => JsonRpcResponse {
-                        jsonrpc: "2.0".to_string(),
-                        id: request.id,
-                        result: None,
-                        error: Some(JsonRpcError {
-                            code: -32601,
-                            message: "Method not found".to_string(),
-                            data: None,
-                        }),
-                    },
-                };
-
-                match serde_json::to_string(&response) {
-                    Ok(response_json) => {
-                        tracing::debug!("Sending: {}", response_json);
-                        let _ = writeln!(stdout, "{}", response_json);
-                        let _ = stdout.flush();
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to serialize response: {}", e);
-                    }
-                }
-            }
-            Ok(_) => {
-                // Empty line, ignore
-            }
+        let line = match line {
+            Ok(line) => line,
             Err(e) => {
                 tracing::error!("Error reading from stdin: {}", e);
                 break;
             }
+        };
+        if line.trim().is_empty() {
+            continue;
         }
+        tracing::debug!("Received: {}", line);
+
+        let request: JsonRpcRequest = match serde_json::from_str(&line) {
+            Ok(req) => req,
+            Err(e) => {
+                tracing::error!("Failed to parse JSON-RPC request: {}", e);
+                let mut response = JsonRpcResponse::error(None, PARSE_ERROR, "Parse error");
+                if let Some(err) = response.error.as_mut() {
+                    err.data = Some(json!(e.to_string()));
+                }
+                write_response(&mut stdout, &response);
+                continue;
+            }
+        };
+
+        // A request without an id is a notification: never answer it.
+        let Some(id) = request.id else {
+            tracing::info!("Notification: {}", request.method);
+            continue;
+        };
+        let id = Some(id);
+
+        let response = match request.method.as_str() {
+            "initialize" => handle_initialize(request.params, id),
+            "ping" => JsonRpcResponse::ok(id, json!({})),
+            "tools/list" => handle_tools_list(id),
+            "resources/list" => handle_resources_list(id),
+            "prompts/list" => handle_prompts_list(id),
+            "tools/call" => handle_tool_call(&mut state, request.params, id),
+            _ => JsonRpcResponse::error(id, METHOD_NOT_FOUND, "Method not found"),
+        };
+        write_response(&mut stdout, &response);
     }
 
     tracing::info!("MCP server shutting down");

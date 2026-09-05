@@ -106,7 +106,7 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 5);
 
     // Check that all tools are present
     let tool_names: Vec<&str> = tools
@@ -117,6 +117,7 @@ fn test_mcp_tools_list() {
     assert!(tool_names.contains(&"define_sequence_pattern"));
     assert!(tool_names.contains(&"play_sequence"));
     assert!(tool_names.contains(&"list_patterns"));
+    assert!(tool_names.contains(&"stop_playback"));
 
     // Verify the play_notes tool supports all the functionality
     let play_notes_tool = tools
@@ -789,16 +790,149 @@ fn test_play_sequence_pattern_not_found() {
     let response: Value =
         serde_json::from_str(&response_line).expect("Failed to parse JSON response");
 
+    // A missing pattern is a tool execution failure: reported in the result
+    // with isError so the model can read the message and recover.
     assert_eq!(response["jsonrpc"], "2.0");
     assert_eq!(response["id"], 2);
-    assert!(response["error"].is_object());
-    assert_eq!(response["error"]["code"], -32602);
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found")
-    );
+    assert_eq!(response["result"]["isError"], true);
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("not found"), "unexpected text: {text}");
 
     child.kill().expect("Failed to kill child process");
+}
+
+/// Spawn the server and complete the initialize handshake.
+struct TestServer {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    reader: BufReader<std::process::ChildStdout>,
+}
+
+impl TestServer {
+    fn start() -> Self {
+        let mut child = Command::new("cargo")
+            .args(["run", "--"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to start MCP server");
+        let stdin = child.stdin.take().unwrap();
+        let reader = BufReader::new(child.stdout.take().unwrap());
+        let mut server = Self {
+            child,
+            stdin,
+            reader,
+        };
+        let init = server.call(json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}
+        }));
+        assert_eq!(init["id"], 0);
+        server
+    }
+
+    fn send(&mut self, message: &Value) {
+        writeln!(self.stdin, "{}", message).unwrap();
+    }
+
+    fn send_raw(&mut self, line: &str) {
+        writeln!(self.stdin, "{}", line).unwrap();
+    }
+
+    fn read(&mut self) -> Value {
+        let mut line = String::new();
+        self.reader.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("bad JSON {line:?}: {e}"))
+    }
+
+    fn call(&mut self, message: Value) -> Value {
+        self.send(&message);
+        self.read()
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+#[test]
+fn ping_returns_empty_result() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({"jsonrpc": "2.0", "id": 7, "method": "ping"}));
+    assert_eq!(response["id"], 7);
+    assert_eq!(response["result"], json!({}));
+}
+
+#[test]
+fn notifications_get_no_response() {
+    let mut server = TestServer::start();
+    server.send(
+        &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}),
+    );
+    server.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    // The next line on stdout must be the answer to this request, not an
+    // error for either notification.
+    let response = server.call(json!({"jsonrpc": "2.0", "id": 8, "method": "tools/list"}));
+    assert_eq!(response["id"], 8);
+    assert!(response["result"]["tools"].is_array());
+}
+
+#[test]
+fn parse_error_has_null_id() {
+    let mut server = TestServer::start();
+    server.send_raw("{this is not json");
+    let response = server.read();
+    assert_eq!(response["error"]["code"], -32700);
+    assert!(
+        response["id"].is_null(),
+        "id should be null, got {}",
+        response["id"]
+    );
+}
+
+#[test]
+fn initialize_reports_crate_version() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}
+    }));
+    assert_eq!(
+        response["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
+fn unknown_preset_is_a_tool_error_not_a_piano() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"preset_name": "Definitely Not A Preset", "note": 60, "start_time": 0.0, "duration": 0.2}
+        ]}}
+    }));
+    let result = &response["result"];
+    // Either the audio device is unavailable (CI) or the preset is rejected;
+    // both must surface as isError rather than a protocol error.
+    assert_eq!(result["isError"], true, "response: {response}");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Definitely Not A Preset") || text.contains("Audio output unavailable"),
+        "unexpected text: {text}"
+    );
+}
+
+#[test]
+fn stop_playback_with_nothing_playing() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "stop_playback", "arguments": {}}
+    }));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Stopped 0"), "unexpected text: {text}");
 }

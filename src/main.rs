@@ -192,7 +192,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎹 Testing Classic Synthesizer Preset Integration!");
     println!("This will test the complete audio pipeline with presets...\n");
 
-    let player =
+    let mut player =
         midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 0: Specific test for reported non-working presets
@@ -388,7 +388,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
 async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔧 Debugging DX7 Slap Bass - Testing all components");
 
-    let player =
+    let mut player =
         midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 1: Simple FM (for comparison)
@@ -476,7 +476,7 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
     println!("🌊 Testing Enhanced Pad Presets - Authenticity Improvements!");
     println!("This will showcase the improved vintage character...\n");
 
-    let player =
+    let mut player =
         midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 1: Enhanced JP-8 Strings with authentic analog warmth
@@ -645,7 +645,7 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔊 Testing Volume Consistency Across Preset Categories");
     println!("This will test standardized amplitude levels...\n");
 
-    let player =
+    let mut player =
         midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test same note (C4=60) across different preset categories
@@ -835,7 +835,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
     println!("🥁 Testing Drum Synthesis - All Drum Types!");
     println!("This will test kick, snare, hi-hat, and cymbal synthesis...\n");
 
-    let player =
+    let mut player =
         midi::MidiPlayer::new().map_err(|e| format!("Failed to create MIDI player: {}", e))?;
 
     // Test 1: TR-808 Kick (existing preset)
@@ -1080,7 +1080,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎛️ TESTING EFFECTS SYSTEM 🎛️");
     println!("Listen for the difference between dry and processed sound!\n");
 
-    let player = MidiPlayer::new()?;
+    let mut player = MidiPlayer::new()?;
     let test_note = 60; // Middle C
     let test_velocity = 100;
     let test_duration = 3.0; // Longer to hear effects

@@ -1234,7 +1234,6 @@ dependencies = [
  "clap",
  "dirs",
  "fundsp",
- "lazy_static",
  "midly",
  "oxisynth",
  "rand",
