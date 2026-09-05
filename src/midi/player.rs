@@ -149,8 +149,6 @@ impl MidiPlayer {
                 "pad" => crate::expressive::PresetCategory::Pad,
                 "lead" => crate::expressive::PresetCategory::Lead,
                 "keys" => crate::expressive::PresetCategory::Keys,
-                "organ" => crate::expressive::PresetCategory::Organ,
-                "arp" => crate::expressive::PresetCategory::Arp,
                 "drums" => crate::expressive::PresetCategory::Drums,
                 "effects" => crate::expressive::PresetCategory::Effects,
                 _ => return Err(format!("Unknown preset category: {}", category_str)),
@@ -311,10 +309,8 @@ impl MidiPlayer {
             if note.start_time.is_none()
                 && let Some(musical_time) = &note.musical_time
             {
-                // Use the MusicalTime::to_seconds method
-                // Assuming 4/4 time signature (4 beats per bar) and 480 ticks per beat
                 let tempo = sequence.tempo;
-                note.start_time = Some(musical_time.to_seconds(tempo, 4, 480));
+                note.start_time = Some(musical_time.to_seconds(tempo, sequence.beats_per_bar, 480));
 
                 tracing::debug!(
                     "Converted musical_time {{bar:{}, beat:{}, tick:{}}} to start_time={:.3}s at tempo={}",
@@ -331,25 +327,7 @@ impl MidiPlayer {
                 && let Some(ref musical_duration) = note.musical_duration
             {
                 let tempo = sequence.tempo;
-                let seconds_per_beat = 60.0 / tempo as f64;
-
-                // Convert musical duration to seconds
-                let duration_secs = match musical_duration {
-                    crate::midi::MusicalDuration::Bars(bars) => bars * 4.0 * seconds_per_beat, // 4 beats per bar in 4/4 time
-                    crate::midi::MusicalDuration::Beats(beats) => beats * seconds_per_beat,
-                    crate::midi::MusicalDuration::Seconds(secs) => *secs, // Already in seconds
-                    crate::midi::MusicalDuration::NoteValue(value) => {
-                        let duration_in_beats = match value {
-                            crate::midi::NoteValue::Whole => 4.0,
-                            crate::midi::NoteValue::Half => 2.0,
-                            crate::midi::NoteValue::Quarter => 1.0,
-                            crate::midi::NoteValue::Eighth => 0.5,
-                            crate::midi::NoteValue::Sixteenth => 0.25,
-                            crate::midi::NoteValue::Triplet => 2.0 / 3.0, // Triplet quarter note
-                        };
-                        duration_in_beats * seconds_per_beat
-                    }
-                };
+                let duration_secs = musical_duration.to_seconds(tempo, sequence.beats_per_bar);
 
                 note.duration = Some(duration_secs);
 

@@ -200,13 +200,12 @@ Example: Define a 4-bar house beat once, then play it with variations throughout
                                     "description": "🎼 Musical timing (bar.beat.tick) - RECOMMENDED for perfect sync!",
                                     "properties": {
                                         "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
-                                        "beat": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Beat within bar (1-4)"},
+                                        "beat": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Beat within bar (1-based, up to beats_per_bar)"},
                                         "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
                                     },
                                     "required": ["bar", "beat", "tick"]
                                 },
                                 "musical_duration": {
-                                    "type": "object",
                                     "description": "🎵 Musical duration - RECOMMENDED for perfect sync!",
                                     "oneOf": [
                                         {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
@@ -391,6 +390,13 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                         "minimum": 60,
                         "maximum": 200,
                         "default": 120
+                    },
+                    "beats_per_bar": {
+                        "type": "integer",
+                        "description": "🎶 Time signature numerator used to convert musical_time and musical_duration (4 for 4/4, 3 for 3/4)",
+                        "minimum": 2,
+                        "maximum": 8,
+                        "default": 4
                     }
                 },
                 "anyOf": [
@@ -405,6 +411,22 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
             "inputSchema": {
                 "type": "object",
                 "properties": {},
+                "additionalProperties": false
+            }
+        },
+        {
+            "name": "list_sounds",
+            "description": "Catalog of every sound this server can make: classic synth presets by name and category, the 128 General MIDI instruments, drum keys for channel 9, synthesis types, R2D2 emotions, effect types and effects presets. Call this before guessing a preset or instrument name.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "section": {
+                        "type": "string",
+                        "description": "Limit the catalog to one section",
+                        "enum": ["all", "presets", "instruments", "drums", "synthesis", "r2d2", "effects"],
+                        "default": "all"
+                    }
+                },
                 "additionalProperties": false
             }
         },
@@ -459,13 +481,12 @@ Examples:
                                     "description": "🎼 Musical timing (bar.beat.tick) - Alternative to start_time for precise timing",
                                     "properties": {
                                         "bar": {"type": "integer", "minimum": 1, "description": "Bar number (1-based)"},
-                                        "beat": {"type": "integer", "minimum": 1, "maximum": 4, "description": "Beat within bar (1-4)"},
+                                        "beat": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Beat within bar (1-based, up to beats_per_bar)"},
                                         "tick": {"type": "integer", "minimum": 0, "maximum": 479, "description": "Tick within beat (0-479)"}
                                     },
                                     "required": ["bar", "beat", "tick"]
                                 },
                                 "musical_duration": {
-                                    "type": "object",
                                     "description": "🎵 Musical duration - Alternative to duration for precise timing",
                                     "oneOf": [
                                         {"type": "number", "description": "Duration in bars (e.g., 1.5 for one and a half bars)"},
@@ -679,8 +700,8 @@ Examples:
                                 },
                                 "preset_category": {
                                     "type": "string",
-                                    "description": "🎭 Preset category: Choose preset from category ('bass', 'pad', 'lead', 'keys', 'organ', 'arp', 'drums', 'effects'). Perfect for exploring different types of classic sounds!",
-                                    "enum": ["bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects"]
+                                    "description": "🎭 Preset category: pick a random preset from 'bass', 'pad', 'lead', 'keys', 'drums' or 'effects'. Call list_sounds to see every preset by name.",
+                                    "enum": ["bass", "pad", "lead", "keys", "drums", "effects"]
                                 },
                                 "preset_variation": {
                                     "type": "string",
@@ -800,6 +821,13 @@ Examples:
                         "description": "Tempo in BPM (optional, defaults to 120)",
                         "minimum": 60,
                         "maximum": 200
+                    },
+                    "beats_per_bar": {
+                        "type": "integer",
+                        "description": "🎶 Time signature numerator used to convert musical_time and musical_duration (4 for 4/4, 3 for 3/4)",
+                        "minimum": 2,
+                        "maximum": 8,
+                        "default": 4
                     }
                 },
                 "required": ["notes"]
@@ -843,6 +871,7 @@ fn handle_tool_call(
         "define_sequence_pattern" => handle_define_pattern(state, tool_params.arguments, id),
         "play_sequence" => handle_play_sequence(state, tool_params.arguments, id),
         "list_patterns" => handle_list_patterns(state, id),
+        "list_sounds" => handle_list_sounds(tool_params.arguments, id),
         "stop_playback" => handle_stop_playback(state, id),
         other => JsonRpcResponse::error(id, METHOD_NOT_FOUND, format!("Unknown tool: {}", other)),
     }
@@ -961,7 +990,7 @@ fn handle_define_pattern(
     arguments: Value,
     id: Option<Value>,
 ) -> JsonRpcResponse {
-    let pattern: SequencePattern = match serde_json::from_value(arguments) {
+    let mut pattern: SequencePattern = match serde_json::from_value(arguments) {
         Ok(p) => p,
         Err(e) => {
             return JsonRpcResponse::error(
@@ -977,6 +1006,7 @@ fn handle_define_pattern(
     if let Err(e) = validate_notes(&pattern.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
+    pattern.quantize_notes();
 
     let mut details = format!(
         "🎼 Defined pattern '{}': {} notes, {:.2} s at {} BPM, {} bars of {}/4",
@@ -1096,6 +1126,153 @@ fn handle_list_patterns(state: &ServerState, id: Option<Value>) -> JsonRpcRespon
         }
     }
     JsonRpcResponse::tool_text(id, output)
+}
+
+/// One-line descriptions of the `synth_type` values accepted by play_notes.
+const SYNTH_TYPES: [(&str, &str); 20] = [
+    ("sine", "pure tone"),
+    ("square", "hollow, use synth_pulse_width 0.1-0.9"),
+    ("sawtooth", "bright, buzzy (band-limited)"),
+    ("triangle", "soft, flute-like"),
+    ("noise", "white noise"),
+    (
+        "fm",
+        "two-operator FM, use synth_modulator_freq and synth_modulation_index",
+    ),
+    (
+        "dx7fm",
+        "DX7-style FM (algorithm 1, two operators from the fm parameters)",
+    ),
+    ("granular", "pitched grain cloud, use synth_grain_size"),
+    ("wavetable", "morphs sine → triangle → saw → square"),
+    ("kick", "synthesized kick drum"),
+    ("snare", "synthesized snare"),
+    ("hihat", "synthesized hi-hat"),
+    ("cymbal", "synthesized crash"),
+    ("swoosh", "filtered noise sweep"),
+    ("zap", "descending laser zap"),
+    ("chime", "bell with inharmonic partials"),
+    ("burst", "short spectral burst"),
+    ("pad", "evolving harmonic pad (use a slow synth_attack)"),
+    (
+        "texture",
+        "rough evolving texture, use synth_texture_roughness",
+    ),
+    ("drone", "sustained overtone drone"),
+];
+
+const R2D2_EMOTIONS: [(&str, &str); 9] = [
+    ("Happy", "cheerful bouncy warble"),
+    ("Sad", "slow descending whine"),
+    ("Excited", "rapid high staccato bursts"),
+    ("Worried", "nervous trembling"),
+    ("Curious", "rising question"),
+    ("Affirmative", "steady confident confirmation"),
+    ("Negative", "sharp low rejection"),
+    ("Surprised", "sudden upward sweep"),
+    ("Thoughtful", "deep slow pondering"),
+];
+
+fn handle_list_sounds(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+    let section = arguments
+        .get("section")
+        .and_then(Value::as_str)
+        .unwrap_or("all");
+    let want = |name: &str| section == "all" || section == name;
+    let mut out = String::new();
+
+    if want("presets") {
+        let library = crate::expressive::PresetLibrary::new();
+        out.push_str(&format!(
+            "# Classic synth presets ({}) — use preset_name, or preset_category for a random pick\n",
+            library.count()
+        ));
+        for (category, presets) in library.catalog() {
+            out.push_str(&format!("\n## {} ({})\n", category.as_str(), presets.len()));
+            for preset in presets {
+                out.push_str(&format!(
+                    "- {} — {} ({})",
+                    preset.name, preset.description, preset.inspiration
+                ));
+                if !preset.variations.is_empty() {
+                    let mut names: Vec<&String> = preset.variations.keys().collect();
+                    names.sort();
+                    out.push_str(&format!(
+                        " · preset_variation: {}",
+                        names
+                            .iter()
+                            .map(|n| n.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                out.push('\n');
+            }
+        }
+        out.push('\n');
+    }
+
+    if want("instruments") {
+        use crate::midi::gm_names::{GM_FAMILIES, GM_INSTRUMENTS};
+        out.push_str(
+            "# General MIDI instruments — use instrument: <number> on channels 0-8 and 10-15\n",
+        );
+        for (family_index, family) in GM_FAMILIES.iter().enumerate() {
+            out.push_str(&format!("\n## {}\n", family));
+            for offset in 0..8 {
+                let program = family_index * 8 + offset;
+                out.push_str(&format!("- {}: {}\n", program, GM_INSTRUMENTS[program]));
+            }
+        }
+        out.push('\n');
+    }
+
+    if want("drums") {
+        use crate::midi::gm_names::GM_DRUM_KEYS;
+        out.push_str("# GM drum kit — use channel: 9 and note: <key>\n");
+        for (key, name) in GM_DRUM_KEYS {
+            out.push_str(&format!("- {}: {}\n", key, name));
+        }
+        out.push_str("\nSynthesized drums are also available via synth_type kick/snare/hihat/cymbal or the drums preset category.\n\n");
+    }
+
+    if want("synthesis") {
+        out.push_str("# Synthesis types — use synth_type (pitch from note or synth_frequency)\n");
+        for (name, description) in SYNTH_TYPES {
+            out.push_str(&format!("- {}: {}\n", name, description));
+        }
+        out.push('\n');
+    }
+
+    if want("r2d2") {
+        out.push_str("# R2D2 emotions — note_type: \"r2d2\" with r2d2_emotion, r2d2_intensity (0-1), r2d2_complexity (1-5)\n");
+        for (name, description) in R2D2_EMOTIONS {
+            out.push_str(&format!("- {}: {}\n", name, description));
+        }
+        out.push('\n');
+    }
+
+    if want("effects") {
+        let library = crate::expressive::EffectsPresetLibrary::new();
+        let mut names: Vec<&String> = library.get_preset_names();
+        names.sort();
+        out.push_str("# Effects\n\n## Effect types for the `effects` chain\n");
+        out.push_str("- reverb: room_size, dampening, wet_level, pre_delay\n- delay: delay_time, feedback, wet_level\n- chorus: rate, depth, feedback\n- filter: filter_type (LowPass/HighPass/BandPass/Notch/Peak/LowShelf/HighShelf), cutoff, resonance\n- compressor: threshold (dB), ratio, attack, release\n- distortion: drive, tone, output_level\n");
+        out.push_str(&format!("\n## effects_preset names ({})\n", names.len()));
+        for name in names {
+            out.push_str(&format!("- {}\n", name));
+        }
+        out.push_str("\nMIDI notes also accept reverb and chorus depths 0-127 (SoundFont built-in effects).\n");
+    }
+
+    if out.is_empty() {
+        return JsonRpcResponse::error(
+            id,
+            INVALID_PARAMS,
+            format!("Unknown section '{}'", section),
+        );
+    }
+    JsonRpcResponse::tool_text(id, out.trim_end().to_string())
 }
 
 fn handle_stop_playback(state: &mut ServerState, id: Option<Value>) -> JsonRpcResponse {

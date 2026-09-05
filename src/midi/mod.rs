@@ -1,3 +1,4 @@
+pub mod gm_names;
 pub mod parser;
 pub mod player;
 
@@ -88,16 +89,13 @@ impl fmt::Display for MusicalTime {
     }
 }
 
-/// Duration in musical terms
+/// Duration in musical terms: a number is a length in bars, a string is a
+/// note value ("quarter", "eighth", ...).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MusicalDuration {
-    /// Duration in bars (e.g., "4 bars")
+    /// Duration in bars (e.g., 1.5 = one and a half bars)
     Bars(f64),
-    /// Duration in beats (e.g., "2 beats")  
-    Beats(f64),
-    /// Duration in seconds (backwards compatibility)
-    Seconds(f64),
     /// Musical note values
     NoteValue(NoteValue),
 }
@@ -125,8 +123,6 @@ impl MusicalDuration {
 
         match self {
             MusicalDuration::Bars(bars) => bars * beats_per_bar as f64 * seconds_per_beat,
-            MusicalDuration::Beats(beats) => beats * seconds_per_beat,
-            MusicalDuration::Seconds(secs) => *secs,
             MusicalDuration::NoteValue(note) => match note {
                 NoteValue::Whole => 4.0 * seconds_per_beat,
                 NoteValue::Half => 2.0 * seconds_per_beat,
@@ -140,7 +136,7 @@ impl MusicalDuration {
 }
 
 /// Quantization grid options
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub enum QuantizeGrid {
     #[serde(rename = "off")]
     #[default]
@@ -157,6 +153,50 @@ pub enum QuantizeGrid {
     ThirtySecond,
     #[serde(rename = "triplet")]
     Triplet,
+}
+
+impl QuantizeGrid {
+    /// Grid divisions per beat, or `None` for `Off` and `Bar` (handled separately).
+    fn divisions_per_beat(&self) -> Option<u32> {
+        match self {
+            QuantizeGrid::Off | QuantizeGrid::Bar => None,
+            QuantizeGrid::Beat => Some(1),
+            QuantizeGrid::Eighth => Some(2),
+            QuantizeGrid::Sixteenth => Some(4),
+            QuantizeGrid::ThirtySecond => Some(8),
+            QuantizeGrid::Triplet => Some(3),
+        }
+    }
+
+    /// Snap a musical position to this grid.
+    pub fn apply(
+        &self,
+        time: &MusicalTime,
+        ticks_per_beat: u32,
+        beats_per_bar: u32,
+    ) -> MusicalTime {
+        match self {
+            QuantizeGrid::Off => time.clone(),
+            QuantizeGrid::Bar => {
+                // Round to the nearest bar line.
+                let beats_in = (time.beat - 1) as f64 + time.tick as f64 / ticks_per_beat as f64;
+                let bar = if beats_in * 2.0 >= beats_per_bar as f64 {
+                    time.bar + 1
+                } else {
+                    time.bar
+                };
+                MusicalTime {
+                    bar,
+                    beat: 1,
+                    tick: 0,
+                }
+            }
+            _ => {
+                let divisions = self.divisions_per_beat().unwrap_or(1);
+                time.quantize(divisions, ticks_per_beat, beats_per_bar)
+            }
+        }
+    }
 }
 
 /// Custom deserializer that converts null to None for optional fields
@@ -529,6 +569,9 @@ pub struct SimpleSequence {
     /// Tempo in BPM (optional, defaults to 120)
     #[serde(default = "default_tempo")]
     pub tempo: u32,
+    /// Time signature numerator (beats per bar), defaults to 4
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u32,
 }
 
 fn default_tempo() -> u32 {
@@ -541,6 +584,7 @@ impl SimpleSequence {
         Self {
             notes: Vec::new(),
             tempo: 120,
+            beats_per_bar: 4,
         }
     }
 
@@ -909,6 +953,9 @@ pub struct ExtendedSequence {
     /// Tempo in BPM (optional, defaults to 120)
     #[serde(default = "default_tempo")]
     pub tempo: u32,
+    /// Time signature numerator (beats per bar), defaults to 4
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u32,
 }
 
 impl SequencePattern {
@@ -924,6 +971,18 @@ impl SequencePattern {
             quantize_grid: QuantizeGrid::Off,
             category: None,
             tags: Vec::new(),
+        }
+    }
+
+    /// Snap every note with a musical position to this pattern's quantize grid.
+    pub fn quantize_notes(&mut self) {
+        if self.quantize_grid == QuantizeGrid::Off {
+            return;
+        }
+        for note in &mut self.notes {
+            if let Some(time) = &note.musical_time {
+                note.musical_time = Some(self.quantize_grid.apply(time, 480, self.beats_per_bar));
+            }
         }
     }
 
@@ -1015,20 +1074,19 @@ impl SequencePattern {
 
                 // Apply duration scaling
                 if let Some(musical_duration) = &transformed_note.musical_duration {
-                    transformed_note.musical_duration = Some(match musical_duration {
+                    match musical_duration {
                         MusicalDuration::Bars(bars) => {
-                            MusicalDuration::Bars(bars * reference.duration_scale as f64)
+                            transformed_note.musical_duration = Some(MusicalDuration::Bars(
+                                bars * reference.duration_scale as f64,
+                            ));
                         }
-                        MusicalDuration::Beats(beats) => {
-                            MusicalDuration::Beats(beats * reference.duration_scale as f64)
+                        MusicalDuration::NoteValue(_) => {
+                            // Note values cannot be scaled symbolically; fall back to seconds.
+                            transformed_note.musical_duration = None;
+                            transformed_note.duration =
+                                Some(note_duration * reference.duration_scale as f64);
                         }
-                        MusicalDuration::Seconds(secs) => {
-                            MusicalDuration::Seconds(secs * reference.duration_scale as f64)
-                        }
-                        MusicalDuration::NoteValue(_val) => MusicalDuration::Seconds(
-                            note_duration * reference.duration_scale as f64,
-                        ),
-                    });
+                    }
                 } else {
                     transformed_note.duration =
                         Some(note_duration * reference.duration_scale as f64);
@@ -1155,6 +1213,7 @@ impl ExtendedSequence {
             notes: Vec::new(),
             patterns: Vec::new(),
             tempo: 120,
+            beats_per_bar: 4,
         }
     }
 
@@ -1171,14 +1230,15 @@ impl ExtendedSequence {
                 .get(&pattern_ref.pattern_name)
                 .ok_or_else(|| format!("Pattern '{}' not found", pattern_ref.pattern_name))?;
 
-            let resolved_notes = pattern.apply_reference(pattern_ref, self.tempo, 4)?; // Assuming 4/4 time for now
+            let resolved_notes =
+                pattern.apply_reference(pattern_ref, self.tempo, self.beats_per_bar)?;
             all_notes.extend(resolved_notes);
         }
 
         // Sort notes by start time for proper playback order
         all_notes.sort_by(|a, b| {
-            let a_time = a.get_start_time(self.tempo, 4); // Assuming 4/4 time
-            let b_time = b.get_start_time(self.tempo, 4);
+            let a_time = a.get_start_time(self.tempo, self.beats_per_bar);
+            let b_time = b.get_start_time(self.tempo, self.beats_per_bar);
             a_time
                 .partial_cmp(&b_time)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -1187,6 +1247,7 @@ impl ExtendedSequence {
         Ok(SimpleSequence {
             notes: all_notes,
             tempo: self.tempo,
+            beats_per_bar: self.beats_per_bar,
         })
     }
 }
@@ -1555,9 +1616,7 @@ impl SimpleNote {
 
         // Validate category if provided
         if let Some(category) = &self.preset_category {
-            let valid_categories = [
-                "bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects",
-            ];
+            let valid_categories = ["bass", "pad", "lead", "keys", "drums", "effects"];
             if !valid_categories.contains(&category.to_lowercase().as_str()) {
                 return Err(format!(
                     "Invalid preset category '{}'. Valid categories: {:?}",
@@ -1780,5 +1839,107 @@ impl SimpleNote {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn musical_duration_number_is_bars_and_string_is_note_value() {
+        let bars: MusicalDuration = serde_json::from_str("2").unwrap();
+        assert!(matches!(bars, MusicalDuration::Bars(b) if b == 2.0));
+        assert_eq!(bars.to_seconds(120, 4), 4.0);
+
+        let eighth: MusicalDuration = serde_json::from_str("\"eighth\"").unwrap();
+        assert!(matches!(
+            eighth,
+            MusicalDuration::NoteValue(NoteValue::Eighth)
+        ));
+        assert_eq!(eighth.to_seconds(120, 4), 0.25);
+    }
+
+    #[test]
+    fn quantize_grid_snaps_ticks() {
+        let t = MusicalTime::new(1, 2, 100);
+        assert_eq!(
+            QuantizeGrid::Sixteenth.apply(&t, 480, 4),
+            MusicalTime::new(1, 2, 120)
+        );
+        assert_eq!(
+            QuantizeGrid::Eighth.apply(&t, 480, 4),
+            MusicalTime::new(1, 2, 0)
+        );
+        assert_eq!(QuantizeGrid::Off.apply(&t, 480, 4), t);
+        // 3rd beat of a 4/4 bar rounds up to the next bar line
+        assert_eq!(
+            QuantizeGrid::Bar.apply(&MusicalTime::new(3, 3, 0), 480, 4),
+            MusicalTime::new(4, 1, 0)
+        );
+        assert_eq!(
+            QuantizeGrid::Bar.apply(&MusicalTime::new(3, 2, 0), 480, 4),
+            MusicalTime::new(3, 1, 0)
+        );
+    }
+
+    #[test]
+    fn pattern_quantizes_its_notes_on_request() {
+        let mut pattern = SequencePattern::new(
+            "p".to_string(),
+            vec![SimpleNote {
+                note: Some(60),
+                musical_time: Some(MusicalTime::new(1, 1, 100)),
+                musical_duration: Some(MusicalDuration::NoteValue(NoteValue::Quarter)),
+                start_time: None,
+                duration: None,
+                ..Default::default()
+            }],
+        );
+        pattern.quantize_grid = QuantizeGrid::Sixteenth;
+        pattern.quantize_notes();
+        assert_eq!(pattern.notes[0].musical_time.as_ref().unwrap().tick, 120);
+    }
+
+    #[test]
+    fn pattern_placement_honours_time_signature() {
+        // A one-bar pattern in 3/4 at 120 BPM: bar 2 starts at 1.5 s, not 2.0 s.
+        let mut pattern = SequencePattern::new(
+            "waltz".to_string(),
+            vec![SimpleNote {
+                note: Some(60),
+                start_time: Some(0.0),
+                duration: Some(0.5),
+                ..Default::default()
+            }],
+        );
+        pattern.pattern_bars = 1.0;
+        pattern.beats_per_bar = 3;
+        let mut store = std::collections::HashMap::new();
+        store.insert("waltz".to_string(), pattern);
+
+        let seq = ExtendedSequence {
+            notes: Vec::new(),
+            patterns: vec![SequenceReference {
+                pattern_name: "waltz".to_string(),
+                start_time_offset: None,
+                start_bar: Some(2),
+                start_beat: 1,
+                bars: None,
+                transpose: 0,
+                instrument_override: None,
+                velocity_scale: 1.0,
+                duration_scale: 1.0,
+                channel_override: None,
+                repeat_count: 1,
+                repeat_spacing_bars: 0.0,
+                align_to_bars: true,
+            }],
+            tempo: 120,
+            beats_per_bar: 3,
+        };
+        let resolved = seq.resolve_patterns(&store).unwrap();
+        assert_eq!(resolved.beats_per_bar, 3);
+        assert!((resolved.notes[0].start_time.unwrap() - 1.5).abs() < 1e-9);
     }
 }

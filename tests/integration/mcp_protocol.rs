@@ -106,7 +106,7 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 6);
 
     // Check that all tools are present
     let tool_names: Vec<&str> = tools
@@ -118,6 +118,7 @@ fn test_mcp_tools_list() {
     assert!(tool_names.contains(&"play_sequence"));
     assert!(tool_names.contains(&"list_patterns"));
     assert!(tool_names.contains(&"stop_playback"));
+    assert!(tool_names.contains(&"list_sounds"));
 
     // Verify the play_notes tool supports all the functionality
     let play_notes_tool = tools
@@ -935,4 +936,50 @@ fn stop_playback_with_nothing_playing() {
     }));
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("Stopped 0"), "unexpected text: {text}");
+}
+
+#[test]
+fn list_sounds_catalog_names_everything() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": {"name": "list_sounds", "arguments": {}}
+    }));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    for needle in [
+        "Minimoog Bass",
+        "TR-808 Kick",
+        "Acoustic Grand Piano",
+        "Closed Hi-Hat",
+        "Happy",
+        "studio",
+        "dx7fm",
+    ] {
+        assert!(text.contains(needle), "catalog missing {needle}");
+    }
+
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+        "params": {"name": "list_sounds", "arguments": {"section": "r2d2"}}
+    }));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Thoughtful") && !text.contains("Minimoog"));
+}
+
+#[test]
+fn musical_duration_number_means_bars_and_time_signature_is_honoured() {
+    let mut server = TestServer::start();
+    // 3/4 at 120 BPM: a note at bar 2 beat 1 starts at 1.5 s. Server-side we
+    // only see the summary, so assert the request is accepted with the new
+    // fields rather than rejected by the parser.
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+        "params": {"name": "define_sequence_pattern", "arguments": {
+            "name": "waltz", "beats_per_bar": 3, "pattern_bars": 1, "quantize_grid": "16th",
+            "notes": [{"note": 60, "musical_time": {"bar": 1, "beat": 3, "tick": 100}, "musical_duration": 0.5}]
+        }}
+    }));
+    assert!(response["result"]["isError"].is_null(), "{response}");
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("1 bars of 3/4"), "unexpected text: {text}");
 }

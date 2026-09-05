@@ -213,6 +213,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(jp8_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(3500)).await;
@@ -232,6 +233,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(dx7_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
@@ -268,6 +270,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
 
     player.play_enhanced_mixed(minimoog_sequence)?;
@@ -289,6 +292,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
 
     player.play_enhanced_mixed(random_bass_sequence)?;
@@ -311,6 +315,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
 
     player.play_enhanced_mixed(acid_sequence)?;
@@ -373,6 +378,7 @@ async fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
 
     player.play_enhanced_mixed(multi_preset_sequence)?;
@@ -405,6 +411,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(fm_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
@@ -423,6 +430,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(dx7_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
@@ -441,6 +449,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(moog_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
@@ -459,6 +468,7 @@ async fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(dx7_keys_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
@@ -515,6 +525,7 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(jp8_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -545,6 +556,7 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(ob_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -563,6 +575,7 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(d50_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -581,6 +594,7 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(space_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -624,6 +638,7 @@ async fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(mixed_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -666,6 +681,7 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(bass_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -683,6 +699,7 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(pad_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -700,6 +717,7 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(keys_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -717,6 +735,7 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(effects_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(750)).await;
@@ -760,6 +779,7 @@ async fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(mixed_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
@@ -854,6 +874,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(kick_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1200)).await;
@@ -874,6 +895,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(snare_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(700)).await;
@@ -894,6 +916,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(hihat_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
@@ -914,6 +937,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(cymbal_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2200)).await;
@@ -934,6 +958,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(hihat808_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
@@ -954,6 +979,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(custom_kick_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(1400)).await;
@@ -1063,6 +1089,7 @@ async fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
             },
         ],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(pattern_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
@@ -1097,6 +1124,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(dry_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
@@ -1123,6 +1151,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(reverb_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await; // Longer to hear reverb tail
@@ -1149,6 +1178,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(chorus_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
@@ -1174,6 +1204,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(distortion_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
@@ -1200,6 +1231,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(delay_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await; // Longer to hear delay repeats
@@ -1216,6 +1248,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(acid_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
@@ -1235,6 +1268,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(effects_preset_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4000)).await;
@@ -1257,6 +1291,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(dry_pad_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4500)).await;
@@ -1276,6 +1311,7 @@ async fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         }],
         tempo: 120,
+        beats_per_bar: 4,
     };
     player.play_enhanced_mixed(wet_pad_sequence)?;
     tokio::time::sleep(tokio::time::Duration::from_millis(4500)).await;

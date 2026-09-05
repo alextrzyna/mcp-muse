@@ -27,10 +27,32 @@ pub enum PresetCategory {
     Pad,
     Lead,
     Keys,
-    Organ,
-    Arp,
     Drums,
     Effects,
+}
+
+impl PresetCategory {
+    /// All categories in display order.
+    pub const ALL: [PresetCategory; 6] = [
+        PresetCategory::Bass,
+        PresetCategory::Pad,
+        PresetCategory::Lead,
+        PresetCategory::Keys,
+        PresetCategory::Drums,
+        PresetCategory::Effects,
+    ];
+
+    /// The lowercase name used in tool arguments.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PresetCategory::Bass => "bass",
+            PresetCategory::Pad => "pad",
+            PresetCategory::Lead => "lead",
+            PresetCategory::Keys => "keys",
+            PresetCategory::Drums => "drums",
+            PresetCategory::Effects => "effects",
+        }
+    }
 }
 
 /// Preset variations allow slight modifications to base presets
@@ -62,8 +84,6 @@ impl PresetLibrary {
         library.load_pad_presets();
         library.load_lead_presets();
         library.load_keys_presets();
-        library.load_organ_presets();
-        library.load_arp_presets();
         library.load_drum_presets();
         library.load_effects_presets();
 
@@ -109,6 +129,24 @@ impl PresetLibrary {
         }
 
         None
+    }
+
+    /// Every preset grouped by category, sorted by name within each group.
+    pub fn catalog(&self) -> Vec<(PresetCategory, Vec<&ClassicSynthPreset>)> {
+        PresetCategory::ALL
+            .iter()
+            .map(|category| {
+                let mut presets = self.get_by_category(category.clone());
+                presets.sort_by(|a, b| a.name.cmp(&b.name));
+                (category.clone(), presets)
+            })
+            .filter(|(_, presets)| !presets.is_empty())
+            .collect()
+    }
+
+    /// Total number of presets.
+    pub fn count(&self) -> usize {
+        self.presets.len()
     }
 
     /// Get all presets in a category
