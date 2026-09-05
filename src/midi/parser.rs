@@ -154,7 +154,7 @@ pub fn parse_midi_data(midi_bytes: &[u8]) -> Result<ParsedMidi, String> {
     }
 
     // Sort notes by start time
-    notes.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+    notes.sort_by_key(|note| note.start_time);
 
     tracing::info!("MIDI parsing complete: {} notes found", notes.len());
     for (i, note) in notes.iter().take(5).enumerate() {
