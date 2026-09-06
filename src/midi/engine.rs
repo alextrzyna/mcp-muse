@@ -424,6 +424,8 @@ impl MidiEngine {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::expressive::test_util::rms;
+    use crate::midi::EffectConfig;
 
     /// Render `frames` frames in engine-sized chunks and return (left, right).
     pub(crate) fn render_all(engine: &mut MidiEngine, frames: usize) -> (Vec<f32>, Vec<f32>) {
@@ -521,5 +523,113 @@ pub(crate) mod tests {
         assert_eq!(soft_clip(-0.5), -0.5);
         assert!(soft_clip(3.0) <= 1.0 && soft_clip(3.0) > 0.9);
         assert!(soft_clip(-3.0) >= -1.0);
+    }
+
+    fn reverb() -> EffectConfig {
+        serde_json::from_value(serde_json::json!({
+            "type": "reverb", "room_size": 0.6, "intensity": 0.4
+        }))
+        .unwrap()
+    }
+
+    fn play(buffers: Vec<(u64, Vec<f32>)>, mode: PlayMode) -> EngineCommand {
+        EngineCommand::Play(PlayCommand {
+            buffers,
+            mode,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn a_buffer_scheduled_at_t_is_mixed_from_t_on_both_sides() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play(vec![(10, vec![0.5; 1000])], PlayMode::Replace));
+        let (left, right) = render_all(&mut engine, 4 * CHUNK_FRAMES);
+        let start = LEAD_FRAMES as usize + 10;
+        assert_eq!(left[start - 1], 0.0);
+        assert_eq!(left[start], 0.5);
+        assert_eq!(left[start + 999], 0.5);
+        assert_eq!(left[start + 1000], 0.0);
+        assert_eq!(left, right, "mono buffers must be centered");
+        assert!(engine.buffers.is_empty(), "exhausted buffers are dropped");
+    }
+
+    #[test]
+    fn layer_keeps_the_current_buffer_and_replace_cuts_it() {
+        let a = vec![0.25f32; 3 * SAMPLE_RATE as usize];
+        let b = vec![0.5f32; 3 * SAMPLE_RATE as usize];
+
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play(vec![(0, a.clone())], PlayMode::Replace));
+        render_all(&mut engine, 4 * CHUNK_FRAMES); // A is now sounding
+        engine.apply(play(vec![(0, b.clone())], PlayMode::Layer));
+        let (left, _) = render_all(&mut engine, 8 * CHUNK_FRAMES);
+        assert_eq!(left[0], 0.25, "A still alone before B starts");
+        // B starts at LEAD_FRAMES into this render; well past that both are active.
+        assert!(
+            left[4 * CHUNK_FRAMES..].iter().all(|&s| s == 0.75),
+            "layer must mix A and B"
+        );
+
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play(vec![(0, a)], PlayMode::Replace));
+        render_all(&mut engine, 4 * CHUNK_FRAMES);
+        engine.apply(play(vec![(0, b)], PlayMode::Replace));
+        let (left, _) = render_all(&mut engine, 8 * CHUNK_FRAMES);
+        assert!(
+            left[FADE_FRAMES..LEAD_FRAMES as usize]
+                .iter()
+                .all(|&s| s == 0.0),
+            "A cut and faded, B not started yet"
+        );
+        assert!(
+            left[4 * CHUNK_FRAMES..].iter().all(|&s| s == 0.5),
+            "replace must leave only B"
+        );
+    }
+
+    #[test]
+    fn replace_and_stop_fade_within_one_chunk() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play(vec![(0, vec![0.5; 44_100])], PlayMode::Replace));
+        render_all(&mut engine, 4 * CHUNK_FRAMES);
+        engine.apply(EngineCommand::Stop);
+        let (left, _) = render_all(&mut engine, CHUNK_FRAMES);
+        assert!(left[0] > 0.4, "fade starts from the current level");
+        assert!(left[FADE_FRAMES / 2] > 0.0 && left[FADE_FRAMES / 2] < left[0]);
+        assert!(rms(&left[FADE_FRAMES..]) == 0.0, "silent after the fade");
+        assert!(engine.buffers.is_empty());
+    }
+
+    #[test]
+    fn bus_chain_follows_the_replace_and_layer_rules() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        let with = |effects: Option<Vec<EffectConfig>>, mode| {
+            EngineCommand::Play(PlayCommand {
+                midi_effects: effects,
+                mode,
+                ..Default::default()
+            })
+        };
+        engine.apply(with(Some(vec![reverb()]), PlayMode::Replace));
+        assert!(
+            engine.bus_has_effects(),
+            "replace installs the call's chain"
+        );
+        engine.apply(with(None, PlayMode::Layer));
+        assert!(engine.bus_has_effects(), "layer without a chain keeps it");
+        engine.apply(with(Some(Vec::new()), PlayMode::Layer));
+        assert!(
+            !engine.bus_has_effects(),
+            "layer with an explicit chain replaces it"
+        );
+        engine.apply(with(Some(vec![reverb()]), PlayMode::Layer));
+        engine.apply(with(None, PlayMode::Replace));
+        assert!(
+            !engine.bus_has_effects(),
+            "replace without a chain clears it"
+        );
+        engine.apply(EngineCommand::Stop);
+        assert!(!engine.bus_has_effects());
     }
 }
