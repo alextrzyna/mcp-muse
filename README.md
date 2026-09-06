@@ -484,7 +484,7 @@ Use `effects_preset` for quick professional-quality effects:
 - **🤖 ExpressiveSynth Engine**: Ring modulation synthesis for R2D2-style vocalizations (✅ **Tested**)  
 - **🎹 Classic Preset Engine**: 29 authentic vintage synthesizer recreations (✅ **Tested**)
 - **🎛️ Custom Synthesis Engine**: 20 synthesis types with band-limited oscillators, a state-variable filter and DX7 operator routing (✅ **Tested**)
-- **🔄 EnhancedHybridAudioSource**: Stereo mixer with stateful effects chains and a soft clipper (✅ **Tested**)
+- **🔄 MidiEngine**: One long-lived stereo mixer with stateful effects chains and a soft clipper (✅ **Tested**)
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
@@ -499,6 +499,7 @@ Use `effects_preset` for quick professional-quality effects:
 - **`define_sequence_pattern` / `play_sequence` / `list_patterns`**: reusable bar-based patterns with transposition, repeats and time signature
 - **`list_sounds`**: catalog of presets, GM instruments, drum keys, synthesis types, R2D2 emotions and effects
 - **`stop_playback`**: silence everything currently playing
+- Both play tools take `"mode": "replace"` (default: stop what is playing first) or `"mode": "layer"` (mix on top). One synthesizer serves the whole session, so overlapping calls do not multiply CPU or memory.
 
 Playback tools return immediately with the expected duration. Failures the agent can act on (unknown preset, missing pattern) come back as `isError` results.
 

@@ -36,8 +36,8 @@ Prefer that over listen-by-ear checks when changing synthesis or effects.
 ### MCP Server (`src/server/mcp.rs`)
 JSON-RPC 2.0 over stdio. `ServerState` holds the audio player (opened on
 first playback) and the session's patterns. Six tools:
-- `play_notes` - quick sounds and melodies; every note type in one array
-- `define_sequence_pattern` / `play_sequence` / `list_patterns` - reusable bar-based patterns with transposition, repeats and time signature
+- `play_notes` - quick sounds and melodies; every note type in one array; takes `mode: replace|layer`
+- `define_sequence_pattern` / `play_sequence` / `list_patterns` - reusable bar-based patterns with transposition, repeats and time signature; `play_sequence` also takes `mode`
 - `list_sounds` - catalog of presets, GM instruments, drum keys, synthesis types, R2D2 emotions and effects
 - `stop_playback` - silence everything currently playing
 
@@ -46,20 +46,24 @@ anything that fails while executing (unknown preset, missing pattern, no
 audio device) returns a result with `isError: true` so the model can read
 it. Requests without an id are notifications and get no response.
 
-### Audio pipeline (`src/midi/player.rs`)
-`MidiPlayer::play_enhanced_mixed` renders a `SimpleSequence` and starts it
-on a new rodio `Sink` (overlapping calls mix; `stop_all` stops them) and
-returns the total duration including effect tails.
+### Audio pipeline (`src/midi/engine.rs`, `translate.rs`, `player.rs`)
+One `MidiEngine` per process runs as a never-ending rodio source on the
+output mixer: a single OxiSynth (SoundFont loaded once, polyphony 256), a
+min-heap of MIDI events keyed to the engine's 44.1 kHz sample clock, the
+pre-rendered R2D2/synthesis buffers, and the MIDI bus `EffectsChain` (one
+per side). `MidiPlayer::play(sequence, mode)` translates and sends a
+`PlayCommand`; it returns the duration including effect tails.
 
-1. Presets are applied to notes; a missing preset is an error.
-2. Musical time is converted to seconds using the sequence's tempo and `beats_per_bar`.
-3. R2D2 and synthesis notes are pre-rendered to sample buffers *with their own effects*.
-4. MIDI notes are rendered live by OxiSynth (`OxiSynthSource`, stereo) and pass through the MIDI bus `EffectsChain` (one instance per side). The chain comes from the first MIDI note that specifies effects.
-5. `EnhancedHybridAudioSource` sums the buses per frame, soft-clips, and emits interleaved stereo.
+1. `Translator` applies presets (a missing preset is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
+2. R2D2 and synthesis notes are pre-rendered on the tool thread *with their own effects* and scheduled as mono buffers (`SYNTH_BUS_GAIN` applied).
+3. MIDI notes become time-ordered events: per call, the first note on a channel sends a program change (its instrument, or 0), controllers only when specified. Channel 9 is OxiSynth's drum channel; no bank select is needed.
+4. The engine drains commands per 1024-frame chunk and applies events at their exact frame (`LEAD_FRAMES` = 2048 after the command). It sums the buses, soft-clips, and emits stereo.
+5. `mode: replace` (default) fades 6 ms, sends SystemReset, clears the queue and installs the call's bus chain; `layer` mixes on top. `stop_playback` is the same reset with nothing scheduled.
 
 Known limitation: OxiSynth renders all 16 MIDI channels into one bus, so
 per-channel effects are not yet possible (pan, volume, reverb/chorus CCs do
-work per channel inside OxiSynth).
+work per channel inside OxiSynth). A dedicated render thread behind the same
+engine API is the next step if the callback still glitches.
 
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: R2D2 ring-modulation voice and the general synthesizer. Pipeline per note: oscillator → ADSR → `Svf` filter → `EffectsChain` → amplitude. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`). Includes PolyBLEP saw/square, DX7 operator routing for algorithms 1/2, 5/6, 16/17, 32.
@@ -82,7 +86,7 @@ Downloads FluidR3_GM.sf2 (verified against a pinned SHA-256), writes the
 Cursor MCP config, stores an optional custom SoundFont path.
 
 ## Important Architectural Decisions
-- **Unified playback**: every audio type goes through `play_enhanced_mixed`.
+- **Unified playback**: every audio type goes through `MidiPlayer::play` and the one `MidiEngine`.
 - **Effects are stateful and per note** for synthesis/R2D2, per bus for MIDI. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
 - **Stereo throughout** the mixer; mono sources are centered.
-- **No audio stream per call**: `ServerState` owns one `MidiPlayer` for the process.
+- **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call.
