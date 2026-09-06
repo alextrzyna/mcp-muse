@@ -80,8 +80,9 @@ Envelopes (`env`) are `attack`, `decay`, `release` in seconds (0.001 to 10)
 and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
 
 **subtractive**
-- `osc1.wave`, `osc2.wave`: `sine | saw | square | triangle`. Square takes
-  `pulse_width` 0.1 to 0.9 (default 0.5).
+- `osc1.wave`, `osc2.wave`: `sine | saw | square | triangle | noise`. Square
+  takes `pulse_width` 0.1 to 0.9 (default 0.5). `noise` is white noise (for
+  wind and breath layers) and ignores pitch.
 - `osc2.mix` 0 to 1 (blend osc1 to osc2), `osc2.detune_cents` -100 to 100,
   `osc2.octave` -2 to 2.
 - `filter.type`: `low_pass | high_pass | band_pass`; `cutoff` 20 to 20000 Hz;
@@ -111,17 +112,21 @@ and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
   `pitch_semitones` -24 to 24, `randomness` 0 to 1, `stereo_width` 0 to 1.
 
 **percussion**
-- `kind` plus that kind's parameters, using the names already on
-  `SynthType`: kick (`punch`, `sustain`, `click_freq`, `body_freq`), snare
-  (`snap`, `buzz`, `tone_freq`, `noise_amount`), hihat (`metallic`,
-  `decay`, `brightness`), cymbal (`size`, `metallic`, `strike_intensity`),
-  zap (`energy`, `decay`, `harmonic_content`), swoosh (`direction`,
-  `intensity`, `sweep`: `[start_hz, end_hz]`), chime (`harmonic_count`,
-  `decay`, `inharmonicity`), burst (`bandwidth`, `intensity`, `shape`).
+- `kind` plus `level` and that kind's parameters, using the names already
+  on `SynthType`: kick (`punch`, `sustain`, `click_freq`), snare (`snap`,
+  `buzz`, `noise_amount`), hihat (`metallic`, `decay`, `brightness`),
+  cymbal (`size`, `metallic`, `strike_intensity`), zap (`energy`, `decay`,
+  `harmonic_content`), swoosh (`direction`, `intensity`, `sweep`:
+  `[start_hz, end_hz]`), chime (`harmonic_count`, `decay`,
+  `inharmonicity`), burst (`bandwidth`, `intensity`, `shape`).
+- One `frequency` field serves every kind (kick body, snare tone, hi-hat
+  and cymbal base, zap start, chime fundamental, burst centre) with a
+  per-kind default. Percussion ignores the note's pitch, so `note` may be
+  omitted on a percussion-only patch. A parameter that does not belong to
+  the chosen kind is a validation error.
 - Percussion carries its own envelope; `env` is not accepted here.
-  Percussion ignores the note's pitch and uses its own frequency fields
-  (`body_freq`, `tone_freq`, `sweep`), so `note` may be omitted on a
-  percussion-only patch.
+- Percussion is a flat object rather than a tagged enum because serde
+  cannot combine `flatten` with `deny_unknown_fields`.
 
 **lfo**
 - `rate` 0.1 to 20 Hz, `depth` 0 to 1, `wave`:
@@ -298,11 +303,11 @@ plan:
 1. **Foundation.** Patch model and `PatchLibrary`, gate envelopes, stereo
    buffers, subtractive and percussion engines, `PatchRenderer`,
    `define_synth`, `synth` on notes, removal of the old fields and Rust
-   presets, built-in patches for bass, lead, keys and drums, `list_sounds`
-   changes, README section. Pad/texture/drone are temporarily covered by
-   subtractive-only pad patches.
-2. **FM and wavetable** engines and their built-in patches (DX7 E.Piano,
-   bells, organs).
+   presets, built-in patches for the subtractive basses, the lead, drums,
+   sound effects and subtractive approximations of the pads, `list_sounds`
+   changes, minimal demo rewrite, README section.
+2. **FM and wavetable** engines and their built-in patches: the three FM
+   presets (DX7 E.Piano, DX7 Slap Bass, TX81Z Lately), bells, organs.
 3. **Granular and LFO**, then the full pad, texture and drone patches.
 4. **Time Fracture** delay fields, `demos.rs` rewritten around patches,
    docs pass.
