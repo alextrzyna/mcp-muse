@@ -12,6 +12,23 @@ const CURSOR_CONFIG_PATH: &str = ".cursor/mcp.json";
 const SERVER_NAME: &str = "mcp-muse";
 const SOUNDFONT_URL: &str = "https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip";
 const SOUNDFONT_FILENAME: &str = "FluidR3_GM.sf2";
+/// SHA-256 of FluidR3_GM.sf2 as distributed in the archive above.
+const SOUNDFONT_SHA256: &str = "74594e8f4250680adf590507a306655a299935343583256f3b722c48a1bc1cb0";
+
+/// Check that `bytes` hash to `expected_hex` (lowercase SHA-256).
+fn verify_sha256(bytes: &[u8], expected_hex: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let actual = Sha256::digest(bytes);
+    let actual_hex: String = actual.iter().map(|b| format!("{:02x}", b)).collect();
+    if actual_hex == expected_hex {
+        Ok(())
+    } else {
+        Err(format!(
+            "checksum mismatch: expected {}, got {}",
+            expected_hex, actual_hex
+        ))
+    }
+}
 
 /// Get the platform-specific data directory path for display purposes
 fn get_data_dir_info() -> String {
@@ -148,6 +165,16 @@ fn download_soundfont() -> anyhow::Result<()> {
             {
                 return Err(anyhow::anyhow!("Extracted file is not a valid SoundFont"));
             }
+
+            println!("   Verifying SHA-256 checksum...");
+            verify_sha256(&sf2_content, SOUNDFONT_SHA256).map_err(|e| {
+                anyhow::anyhow!(
+                    "Downloaded SoundFont failed verification ({}). The file was not saved; \
+                     if the upstream archive changed, download it manually and point the \
+                     setup at it with a custom SoundFont path.",
+                    e
+                )
+            })?;
 
             println!(
                 "   Writing SoundFont to disk ({:.1} MB)...",
@@ -381,5 +408,18 @@ fn setup_cursor_config() {
             Ok(_) => println!("✓ Saved Cursor MCP config to {:?}", config_path),
             Err(e) => eprintln!("❌ Failed to save Cursor MCP config: {}", e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_sha256;
+
+    #[test]
+    fn sha256_matches_known_vector() {
+        let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert!(verify_sha256(b"abc", abc).is_ok());
+        let err = verify_sha256(b"abd", abc).unwrap_err();
+        assert!(err.contains("checksum mismatch"));
     }
 }

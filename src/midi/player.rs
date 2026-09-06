@@ -1,5 +1,5 @@
 use crate::expressive::{
-    EffectsPresetLibrary, ExpressiveSynth, FunDSPEffectsProcessor, PresetLibrary, R2D2Emotion,
+    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, PresetLibrary, R2D2Emotion,
     R2D2Expression, R2D2Voice,
 };
 use crate::midi::SimpleSequence;
@@ -12,26 +12,50 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+/// Owns the audio output stream for the process and every playback started
+/// on it. Each call to [`MidiPlayer::play_enhanced_mixed`] gets its own sink so
+/// overlapping calls mix rather than queue; [`MidiPlayer::stop_all`] silences
+/// them all.
 pub struct MidiPlayer {
-    _stream: OutputStream,
-    sink: Sink,
+    stream: OutputStream,
+    sinks: Vec<Sink>,
     preset_library: PresetLibrary,
     effects_library: EffectsPresetLibrary,
 }
 
 impl MidiPlayer {
     pub fn new() -> Result<Self, String> {
-        let stream_handle = rodio::OutputStreamBuilder::open_default_stream()
+        let stream = rodio::OutputStreamBuilder::open_default_stream()
             .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
 
-        let sink = Sink::connect_new(stream_handle.mixer());
-
         Ok(MidiPlayer {
-            _stream: stream_handle,
-            sink,
+            stream,
+            sinks: Vec::new(),
             preset_library: PresetLibrary::new(),
             effects_library: EffectsPresetLibrary::new(),
         })
+    }
+
+    /// Stop every active playback. Returns how many were still playing.
+    pub fn stop_all(&mut self) -> usize {
+        self.prune_finished();
+        let active = self.sinks.len();
+        for sink in self.sinks.drain(..) {
+            sink.stop();
+        }
+        tracing::info!("Stopped {} active playbacks", active);
+        active
+    }
+
+    /// Number of playbacks that have not finished yet.
+    #[allow(dead_code)]
+    pub fn active_playbacks(&mut self) -> usize {
+        self.prune_finished();
+        self.sinks.len()
+    }
+
+    fn prune_finished(&mut self) {
+        self.sinks.retain(|sink| !sink.empty());
     }
 
     /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
@@ -125,8 +149,6 @@ impl MidiPlayer {
                 "pad" => crate::expressive::PresetCategory::Pad,
                 "lead" => crate::expressive::PresetCategory::Lead,
                 "keys" => crate::expressive::PresetCategory::Keys,
-                "organ" => crate::expressive::PresetCategory::Organ,
-                "arp" => crate::expressive::PresetCategory::Arp,
                 "drums" => crate::expressive::PresetCategory::Drums,
                 "effects" => crate::expressive::PresetCategory::Effects,
                 _ => return Err(format!("Unknown preset category: {}", category_str)),
@@ -203,22 +225,6 @@ impl MidiPlayer {
             note.synth_filter_resonance = Some(filter.resonance);
         }
 
-        // Apply effects
-        for effect in &synth_params.effects {
-            match &effect.effect_type {
-                crate::expressive::EffectType::Reverb => {
-                    note.synth_reverb = Some(effect.intensity);
-                }
-                crate::expressive::EffectType::Chorus => {
-                    note.synth_chorus = Some(effect.intensity);
-                }
-                crate::expressive::EffectType::Delay { delay_time } => {
-                    note.synth_delay = Some(effect.intensity);
-                    note.synth_delay_time = Some(*delay_time);
-                }
-            }
-        }
-
         // Apply synthesis-specific parameters based on synth type
         match &synth_params.synth_type {
             crate::expressive::SynthType::Square { pulse_width } => {
@@ -240,9 +246,14 @@ impl MidiPlayer {
             _ => {} // Other synth types don't have specific parameters to set
         }
 
-        // Apply signature effects from preset
-        if note.effects.is_none() && !preset.signature_effects.is_empty() {
-            note.effects = Some(preset.signature_effects.clone());
+        // Preset effects (built-in reverb/chorus) plus the preset's signature
+        // chain apply unless the caller supplied an explicit effects list.
+        if note.effects.is_none() {
+            let mut effects = synth_params.effects.clone();
+            effects.extend(preset.signature_effects.iter().cloned());
+            if !effects.is_empty() {
+                note.effects = Some(effects);
+            }
         }
 
         tracing::info!("Applied preset '{}' to note", preset.name);
@@ -265,8 +276,9 @@ impl MidiPlayer {
         Ok(())
     }
 
-    /// Play an enhanced mixed sequence supporting MIDI, R2D2, and synthesis notes (pre-computed approach)
-    pub fn play_enhanced_mixed(&self, sequence: SimpleSequence) -> Result<(), String> {
+    /// Start playing a sequence (MIDI, R2D2, synthesis and presets mixed).
+    /// Returns immediately with the total playback time, effect tails included.
+    pub fn play_enhanced_mixed(&mut self, sequence: SimpleSequence) -> Result<Duration, String> {
         tracing::info!(
             "Playing enhanced mixed sequence with {} notes (pre-computed approach)",
             sequence.notes.len()
@@ -274,17 +286,16 @@ impl MidiPlayer {
 
         if sequence.notes.is_empty() {
             tracing::warn!("No notes to play - sequence is empty");
-            return Ok(());
+            return Ok(Duration::ZERO);
         }
 
         // Process each note and apply presets if specified
         let mut processed_notes = Vec::new();
-        for mut note in sequence.notes {
-            // Apply preset configuration if present
-            if let Err(e) = self.apply_preset_to_note(&mut note) {
-                tracing::warn!("Failed to apply preset to note: {}", e);
-                // Continue with the note without preset - don't fail completely
-            }
+        for (i, mut note) in sequence.notes.into_iter().enumerate() {
+            // A preset the caller named but we cannot find is an error, not a
+            // silent fallback to the default piano.
+            self.apply_preset_to_note(&mut note)
+                .map_err(|e| format!("Note {}: {}", i + 1, e))?;
 
             // Validate effects if present
             if let Err(e) = note.validate_effects() {
@@ -298,10 +309,8 @@ impl MidiPlayer {
             if note.start_time.is_none()
                 && let Some(musical_time) = &note.musical_time
             {
-                // Use the MusicalTime::to_seconds method
-                // Assuming 4/4 time signature (4 beats per bar) and 480 ticks per beat
                 let tempo = sequence.tempo;
-                note.start_time = Some(musical_time.to_seconds(tempo, 4, 480));
+                note.start_time = Some(musical_time.to_seconds(tempo, sequence.beats_per_bar, 480));
 
                 tracing::debug!(
                     "Converted musical_time {{bar:{}, beat:{}, tick:{}}} to start_time={:.3}s at tempo={}",
@@ -318,25 +327,7 @@ impl MidiPlayer {
                 && let Some(ref musical_duration) = note.musical_duration
             {
                 let tempo = sequence.tempo;
-                let seconds_per_beat = 60.0 / tempo as f64;
-
-                // Convert musical duration to seconds
-                let duration_secs = match musical_duration {
-                    crate::midi::MusicalDuration::Bars(bars) => bars * 4.0 * seconds_per_beat, // 4 beats per bar in 4/4 time
-                    crate::midi::MusicalDuration::Beats(beats) => beats * seconds_per_beat,
-                    crate::midi::MusicalDuration::Seconds(secs) => *secs, // Already in seconds
-                    crate::midi::MusicalDuration::NoteValue(value) => {
-                        let duration_in_beats = match value {
-                            crate::midi::NoteValue::Whole => 4.0,
-                            crate::midi::NoteValue::Half => 2.0,
-                            crate::midi::NoteValue::Quarter => 1.0,
-                            crate::midi::NoteValue::Eighth => 0.5,
-                            crate::midi::NoteValue::Sixteenth => 0.25,
-                            crate::midi::NoteValue::Triplet => 2.0 / 3.0, // Triplet quarter note
-                        };
-                        duration_in_beats * seconds_per_beat
-                    }
-                };
+                let duration_secs = musical_duration.to_seconds(tempo, sequence.beats_per_bar);
 
                 note.duration = Some(duration_secs);
 
@@ -351,39 +342,26 @@ impl MidiPlayer {
             processed_notes.push(note);
         }
 
-        // For the initial implementation, apply all effects globally to avoid MIDI channel separation complexity
-        let mut all_effects = Vec::new();
-        let mut r2d2_effects = Vec::new();
-        let mut synthesis_effects = Vec::new();
-
-        for note in &processed_notes {
-            if let Some(effects) = &note.effects {
-                if note.note_type == "r2d2" {
-                    // R2D2 effects
-                    r2d2_effects.extend(effects.clone());
-                } else if note.is_synthesis() {
-                    // Synthesis effects
-                    synthesis_effects.extend(effects.clone());
-                } else {
-                    // MIDI effects - for now, collect all MIDI effects together
-                    all_effects.extend(effects.clone());
-                }
-            }
-        }
-
-        // Put all MIDI effects on channel 0 for simplicity
+        // Synthesis and R2D2 notes render their own effects into their sample
+        // buffers. MIDI comes out of OxiSynth as one mixed bus, so the first
+        // MIDI note that specifies effects defines the chain for that bus.
         let mut channel_effects: std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>> =
             std::collections::HashMap::new();
-        if !all_effects.is_empty() {
-            channel_effects.insert(0, all_effects);
+        for note in &processed_notes {
+            if note.note_type == "r2d2" || note.is_synthesis() {
+                continue;
+            }
+            if let Some(effects) = &note.effects
+                && !effects.is_empty()
+            {
+                channel_effects.entry(0).or_insert_with(|| effects.clone());
+            }
         }
-
-        tracing::info!(
-            "Collected effects for {} MIDI channels, R2D2 effects: {}, synthesis effects: {}",
-            channel_effects.len(),
-            r2d2_effects.len(),
-            synthesis_effects.len()
-        );
+        if channel_effects.is_empty() {
+            tracing::debug!("No MIDI bus effects");
+        } else {
+            tracing::info!("MIDI bus effects: {} effects", channel_effects[&0].len());
+        }
 
         // Separate MIDI, R2D2, and synthesis notes
         let mut midi_notes = Vec::new();
@@ -434,6 +412,7 @@ impl MidiPlayer {
                 r2d2_events.push(R2D2Event {
                     start_time: note.start_time.unwrap_or(0.0),
                     expression,
+                    effects: note.effects.clone().unwrap_or_default(),
                 });
             } else if note.is_synthesis() {
                 // Handle synthesis notes
@@ -535,33 +514,22 @@ impl MidiPlayer {
             synthesis_events,
             total_time,
             channel_effects,
-            r2d2_effects,
-            synthesis_effects,
         )
         .map_err(|e| format!("Failed to create enhanced hybrid audio source: {}", e))?;
 
-        tracing::info!("Created enhanced hybrid audio source, starting playback");
-
-        // Check sink status before playing
-        tracing::info!(
-            "Sink status - is_paused: {}, empty: {}",
-            self.sink.is_paused(),
-            self.sink.empty()
-        );
-
-        self.sink.append(enhanced_source);
-        self.sink.play();
-
-        // Set volume to ensure it's audible
-        self.sink.set_volume(1.0);
+        self.prune_finished();
+        let sink = Sink::connect_new(self.stream.mixer());
+        sink.append(enhanced_source);
+        sink.play();
+        self.sinks.push(sink);
 
         tracing::info!(
-            "Playback started (non-blocking) - volume: {}, duration: {:.2}s",
-            self.sink.volume(),
-            total_time.as_secs_f64()
+            "Playback started (non-blocking) - duration: {:.2}s, active playbacks: {}",
+            total_time.as_secs_f64(),
+            self.sinks.len()
         );
 
-        Ok(())
+        Ok(total_time)
     }
 }
 
@@ -612,7 +580,17 @@ fn find_soundfont() -> Result<PathBuf, String> {
     Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
 }
 
-// OxiSynth-based audio source
+/// Synthesizer gain passed to OxiSynth (its default of 0.2 is very quiet).
+/// At 1.0 a single velocity-100 note peaks around 0.35 and a four-note
+/// chord around 0.5, leaving headroom before the soft clipper (knee 0.8).
+const OXISYNTH_GAIN: f32 = 1.0;
+/// Extra linear gain applied to each OxiSynth output channel.
+const MIDI_GAIN: f32 = 1.0;
+/// Gain on the pre-rendered synthesis bus so preset notes (amplitude ~0.8)
+/// sit at the same level as MIDI instruments.
+const SYNTH_BUS_GAIN: f32 = 0.5;
+
+/// Renders scheduled MIDI notes through OxiSynth as stereo frames.
 pub struct OxiSynthSource {
     synth: Synth,
     notes: Vec<MidiNote>,
@@ -623,7 +601,7 @@ pub struct OxiSynthSource {
     right_buffer: Vec<f32>,
     buffer_size: usize,
     buffer_pos: usize,
-    playing_notes: std::collections::HashMap<(u32, u8), Duration>, // (start_sample, note) -> duration
+    playing_notes: std::collections::HashMap<(u32, u8, u8), Duration>, // (start_sample, note, channel) -> duration
     samples_generated: usize,
     channel_instruments: std::collections::HashMap<u8, u8>, // channel -> current instrument
     channel_reverb: std::collections::HashMap<u8, u8>,      // channel -> current reverb depth
@@ -649,6 +627,7 @@ impl OxiSynthSource {
 
         // Create synthesizer
         let mut synth = Synth::default();
+        synth.set_gain(OXISYNTH_GAIN);
         synth.add_font(soundfont, true);
 
         tracing::info!("Loaded SoundFont from: {:?}", soundfont_path);
@@ -700,7 +679,7 @@ impl OxiSynthSource {
 
             // Check if we should start this note in this chunk
             if note_start_sample >= current_sample_u32 && note_start_sample < chunk_end {
-                let key = (note_start_sample, note.note);
+                let key = (note_start_sample, note.note, note.channel);
                 if !self.playing_notes.contains_key(&key) {
                     // Handle drums (channel 9) specially
                     if note.channel == 9 {
@@ -913,7 +892,7 @@ impl OxiSynthSource {
 
             // Check if we should end this note in this chunk
             if note_end_sample >= current_sample_u32 && note_end_sample < chunk_end {
-                let key = (note_start_sample, note.note);
+                let key = (note_start_sample, note.note, note.channel);
                 if self.playing_notes.remove(&key).is_some() {
                     let midi_event = MidiEvent::NoteOff {
                         channel: note.channel,
@@ -938,83 +917,42 @@ impl OxiSynthSource {
         self.synth
             .write((&mut self.left_buffer[..], &mut self.right_buffer[..]));
 
-        // Log some debug info about the audio levels
-        let max_left = self.left_buffer.iter().map(|x| x.abs()).fold(0.0, f32::max);
-        let max_right = self
-            .right_buffer
-            .iter()
-            .map(|x| x.abs())
-            .fold(0.0, f32::max);
-
-        if max_left > 0.001 || max_right > 0.001 {
-            tracing::debug!(
-                "Audio chunk: max_left={:.4}, max_right={:.4}, samples={}",
-                max_left,
-                max_right,
-                self.buffer_size
-            );
-        }
-
         // Reset buffer position
         self.buffer_pos = 0;
         self.samples_generated += self.buffer_size;
     }
 }
 
-impl Iterator for OxiSynthSource {
-    type Item = f32;
-
-    fn next(&mut self) -> Option<Self::Item> {
+impl OxiSynthSource {
+    /// Next (left, right) frame, or `None` once the total duration has elapsed.
+    fn next_frame(&mut self) -> Option<(f32, f32)> {
         let current_time =
             Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-
         if current_time > self.total_duration {
             tracing::info!(
-                "Audio playback finished after {} samples ({:.2}s)",
+                "MIDI rendering finished after {} samples ({:.2}s)",
                 self.samples_generated,
                 current_time.as_secs_f32()
             );
             return None;
         }
 
-        // If we've consumed the current buffer, process the next chunk
         if self.buffer_pos >= self.buffer_size {
             self.process_audio_chunk();
         }
 
-        // Get the next sample (mix left and right channels with better balance)
-        let sample = if self.buffer_pos < self.left_buffer.len() {
-            // Amplify and properly mix left and right channels for drums
-            let left = self.left_buffer[self.buffer_pos] * 20.0;
-            let right = self.right_buffer[self.buffer_pos] * 20.0;
-            // Better stereo-to-mono conversion maintaining drum punch
-            (left + right) * 0.7 // Slight reduction to prevent clipping
+        let frame = if self.buffer_pos < self.left_buffer.len() {
+            (
+                self.left_buffer[self.buffer_pos] * MIDI_GAIN,
+                self.right_buffer[self.buffer_pos] * MIDI_GAIN,
+            )
         } else {
-            0.0
+            (0.0, 0.0)
         };
 
         self.buffer_pos += 1;
         self.current_sample += 1;
-
-        Some(sample)
-    }
-}
-
-impl Source for OxiSynthSource {
-    fn current_span_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        1 // Mono output (but with better mixing)
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        Some(self.total_duration)
+        Some(frame)
     }
 }
 
@@ -1023,6 +961,7 @@ impl Source for OxiSynthSource {
 struct R2D2Event {
     start_time: f64, // seconds
     expression: R2D2Expression,
+    effects: Vec<crate::midi::EffectConfig>,
 }
 
 /// Pre-computed R2D2 event with generated audio samples
@@ -1046,256 +985,68 @@ struct SynthPrecomputedEvent {
     samples: Vec<f32>,
 }
 
-/// Per-channel effects chain for independent audio processing
-struct ChannelEffectsChain {
-    /// Effects applied to this channel
-    effects: Vec<crate::midi::EffectConfig>,
-    /// Channel volume (0.0-1.0)
-    volume: f32,
-    /// Pan position (-1.0=left, 0.0=center, 1.0=right)
-    pan: f32,
-    /// Channel mute state
-    mute: bool,
-    /// Channel solo state  
-    solo: bool,
-    /// Effects processor for this channel
-    effects_processor: Option<FunDSPEffectsProcessor>,
-}
-
-impl ChannelEffectsChain {
-    fn new(_buffer_size: usize, sample_rate: f64) -> Self {
-        Self {
-            effects: Vec::new(),
-            volume: 1.0,
-            pan: 0.0,
-            mute: false,
-            solo: false,
-            effects_processor: Some(FunDSPEffectsProcessor::new(sample_rate)),
-        }
-    }
-
-    fn set_effects(&mut self, effects: Vec<crate::midi::EffectConfig>) {
-        self.effects = effects;
-    }
-
-    fn process_sample(&mut self, input_sample: f32) -> f32 {
-        if self.mute {
-            return 0.0;
-        }
-
-        // Apply effects if present (limit to prevent signal destruction)
-        let processed_sample = if !self.effects.is_empty() {
-            // SAFETY: Limit effects to prevent signal attenuation - too many effects destroy audio
-            let max_effects = 3; // Reasonable limit for musical quality
-            let effects_to_apply = if self.effects.len() > max_effects {
-                tracing::warn!(
-                    "Limiting effects from {} to {} to prevent signal destruction",
-                    self.effects.len(),
-                    max_effects
-                );
-                &self.effects[..max_effects]
-            } else {
-                &self.effects[..]
-            };
-
-            if let Some(ref effects_processor) = self.effects_processor {
-                match effects_processor.process_effects(&[input_sample], effects_to_apply) {
-                    Ok(processed) => {
-                        let result = processed.first().copied().unwrap_or(input_sample);
-
-                        // Add gain compensation if signal was attenuated too much
-                        let gain_compensation = if result.abs() < input_sample.abs() * 0.1 {
-                            2.0 // Boost signal if heavily attenuated
-                        } else {
-                            1.0
-                        };
-                        let compensated_result = result * gain_compensation;
-
-                        if input_sample.abs() > 0.001 {
-                            tracing::debug!(
-                                "Effects processed: input={:.4}, output={:.4}, compensated={:.4}, effects_count={}",
-                                input_sample,
-                                result,
-                                compensated_result,
-                                effects_to_apply.len()
-                            );
-                        }
-                        compensated_result
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Effects processing failed: {} - falling back to dry signal",
-                            e
-                        );
-                        input_sample
-                    }
-                }
-            } else {
-                tracing::warn!(
-                    "Effects processor is None but {} effects are present",
-                    self.effects.len()
-                );
-                input_sample
-            }
-        } else {
-            input_sample
-        };
-
-        // Apply volume
-        let final_sample = processed_sample * self.volume;
-        if final_sample.abs() > 0.001 {
-            tracing::debug!(
-                "Channel output: processed={:.4}, volume={:.2}, final={:.4}",
-                processed_sample,
-                self.volume,
-                final_sample
-            );
-        }
-        final_sample
-    }
-
-    fn is_active(&self) -> bool {
-        !self.mute && self.volume > 0.0
-    }
-}
-
-/// Multi-channel processor for independent effects processing
+/// Mixes the stereo MIDI bus (through its stateful effects chains, one per
+/// side so stereo image survives) with the pre-rendered mono R2D2 and
+/// synthesis buffers, which already carry their own effects.
 struct ChannelProcessor {
-    /// MIDI channels 0-15
-    midi_channels: [ChannelEffectsChain; 16],
-    /// R2D2 synthesis channel
-    r2d2_channel: ChannelEffectsChain,
-    /// Custom synthesis channel  
-    synthesis_channel: ChannelEffectsChain,
-    /// Master effects applied after mixing
-    master_effects: Vec<crate::midi::EffectConfig>,
-    /// Master effects processor
-    master_effects_processor: Option<FunDSPEffectsProcessor>,
-    /// Any channel soloed?
-    has_solo: bool,
-    /// Bypass all effects processing for debugging
-    bypass_mode: bool,
+    /// MIDI channels 0-15, left side (all OxiSynth output currently arrives on channel 0)
+    midi_left: Vec<EffectsChain>,
+    /// Same configuration as `midi_left`, separate state for the right side
+    midi_right: Vec<EffectsChain>,
+    #[cfg(test)]
+    probe_unclipped: bool,
 }
 
 impl ChannelProcessor {
-    fn new(buffer_size: usize, sample_rate: f64) -> Self {
-        // Initialize all MIDI channels
-        let midi_channels =
-            std::array::from_fn(|_| ChannelEffectsChain::new(buffer_size, sample_rate));
-
+    fn new(
+        sample_rate: f32,
+        channel_effects: &std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>>,
+    ) -> Self {
+        let build = || -> Vec<EffectsChain> {
+            (0..16u8)
+                .map(|ch| {
+                    channel_effects
+                        .get(&ch)
+                        .map(|effects| EffectsChain::new(sample_rate, effects))
+                        .unwrap_or_default()
+                })
+                .collect()
+        };
         Self {
-            midi_channels,
-            r2d2_channel: ChannelEffectsChain::new(buffer_size, sample_rate),
-            synthesis_channel: ChannelEffectsChain::new(buffer_size, sample_rate),
-            master_effects: Vec::new(),
-            master_effects_processor: Some(FunDSPEffectsProcessor::new(sample_rate)),
-            has_solo: false,
-            bypass_mode: false, // Start with effects enabled
+            midi_left: build(),
+            midi_right: build(),
+            #[cfg(test)]
+            probe_unclipped: false,
         }
     }
 
-    fn set_channel_effects(&mut self, channel: u8, effects: Vec<crate::midi::EffectConfig>) {
-        if (channel as usize) < self.midi_channels.len() {
-            self.midi_channels[channel as usize].set_effects(effects);
+    /// Returns the (left, right) mix. `mono` (R2D2 + synthesis) goes to both sides.
+    #[inline]
+    fn process_and_mix(&mut self, midi_left: &[f32], midi_right: &[f32], mono: f32) -> (f32, f32) {
+        let mut left = mono;
+        let mut right = mono;
+        for (chain, &sample) in self.midi_left.iter_mut().zip(midi_left) {
+            left += chain.process(sample);
         }
+        for (chain, &sample) in self.midi_right.iter_mut().zip(midi_right) {
+            right += chain.process(sample);
+        }
+        #[cfg(test)]
+        if self.probe_unclipped {
+            return (left, right);
+        }
+        (soft_clip(left), soft_clip(right))
     }
+}
 
-    fn set_r2d2_effects(&mut self, effects: Vec<crate::midi::EffectConfig>) {
-        self.r2d2_channel.set_effects(effects);
-    }
-
-    fn set_synthesis_effects(&mut self, effects: Vec<crate::midi::EffectConfig>) {
-        self.synthesis_channel.set_effects(effects);
-    }
-
-    fn update_solo_state(&mut self) {
-        self.has_solo = self.midi_channels.iter().any(|ch| ch.solo)
-            || self.r2d2_channel.solo
-            || self.synthesis_channel.solo;
-    }
-
-    fn process_and_mix(
-        &mut self,
-        midi_samples: &[f32],
-        r2d2_sample: f32,
-        synthesis_sample: f32,
-    ) -> f32 {
-        // If bypass mode is enabled, do simple mixing without effects
-        if self.bypass_mode {
-            let midi_sum: f32 = midi_samples.iter().sum();
-            let result = midi_sum + r2d2_sample + synthesis_sample;
-            if result.abs() > 0.001 {
-                tracing::debug!(
-                    "Bypass mode: midi_sum={:.4}, r2d2={:.4}, synth={:.4}, total={:.4}",
-                    midi_sum,
-                    r2d2_sample,
-                    synthesis_sample,
-                    result
-                );
-            }
-            return result;
-        }
-
-        let mut mixed_sample = 0.0;
-
-        // Process MIDI channels
-        for (channel_idx, channel) in self.midi_channels.iter_mut().enumerate() {
-            if channel_idx < midi_samples.len() {
-                let input_sample = midi_samples[channel_idx];
-                let should_play = if self.has_solo {
-                    channel.solo
-                } else {
-                    !channel.mute
-                };
-
-                if should_play && channel.is_active() {
-                    let processed = channel.process_sample(input_sample);
-                    // Apply stereo panning (calculate inline to avoid borrow checker issues)
-                    let pan_gain = 1.0 - (channel.pan.abs() * 0.3);
-                    mixed_sample += processed * pan_gain;
-                }
-            }
-        }
-
-        // Process R2D2 channel
-        let should_play_r2d2 = if self.has_solo {
-            self.r2d2_channel.solo
-        } else {
-            !self.r2d2_channel.mute
-        };
-        if should_play_r2d2 && self.r2d2_channel.is_active() {
-            let processed = self.r2d2_channel.process_sample(r2d2_sample);
-            let pan_gain = 1.0 - (self.r2d2_channel.pan.abs() * 0.3);
-            mixed_sample += processed * pan_gain;
-        }
-
-        // Process synthesis channel
-        let should_play_synth = if self.has_solo {
-            self.synthesis_channel.solo
-        } else {
-            !self.synthesis_channel.mute
-        };
-        if should_play_synth && self.synthesis_channel.is_active() {
-            let processed = self.synthesis_channel.process_sample(synthesis_sample);
-            let pan_gain = 1.0 - (self.synthesis_channel.pan.abs() * 0.3);
-            mixed_sample += processed * pan_gain;
-        }
-
-        // Apply master effects
-        if !self.master_effects.is_empty()
-            && let Some(ref master_processor) = self.master_effects_processor
-        {
-            match master_processor.process_effects(&[mixed_sample], &self.master_effects) {
-                Ok(processed) => {
-                    mixed_sample = processed.first().copied().unwrap_or(mixed_sample);
-                }
-                Err(e) => {
-                    tracing::warn!("Master effects processing failed: {}", e);
-                }
-            }
-        }
-
-        mixed_sample
+/// Transparent below ±0.8, then a smooth tanh knee so summed buses cannot hard-clip.
+#[inline]
+fn soft_clip(x: f32) -> f32 {
+    const KNEE: f32 = 0.8;
+    if x.abs() <= KNEE {
+        x
+    } else {
+        x.signum() * (KNEE + (1.0 - KNEE) * ((x.abs() - KNEE) / (1.0 - KNEE)).tanh())
     }
 }
 
@@ -1316,6 +1067,9 @@ struct EnhancedHybridAudioSource {
 
     // Per-channel effects processing
     channel_processor: ChannelProcessor,
+
+    /// Right sample of the current frame, waiting to be emitted after the left.
+    pending_right: Option<f32>,
 }
 
 impl EnhancedHybridAudioSource {
@@ -1325,11 +1079,8 @@ impl EnhancedHybridAudioSource {
         synthesis_events: Vec<SynthEvent>,
         total_duration: Duration,
         channel_effects: std::collections::HashMap<u8, Vec<crate::midi::EffectConfig>>,
-        r2d2_effects: Vec<crate::midi::EffectConfig>,
-        synthesis_effects: Vec<crate::midi::EffectConfig>,
     ) -> Result<Self, String> {
         let sample_rate = 44100;
-        let buffer_size = 512; // Smaller buffer for lower latency
 
         // Create MIDI synthesizer source if there are MIDI notes
         let oxisynth_source = if !midi_notes.is_empty() {
@@ -1345,8 +1096,7 @@ impl EnhancedHybridAudioSource {
         let mut precomputed_r2d2_events = Vec::new();
 
         if !r2d2_events.is_empty() {
-            let expressive_synth = ExpressiveSynth::new()
-                .map_err(|e| format!("Failed to create ExpressiveSynth: {}", e))?;
+            let expressive_synth = ExpressiveSynth::new();
 
             let r2d2_voice = R2D2Voice::new();
 
@@ -1357,12 +1107,17 @@ impl EnhancedHybridAudioSource {
                     .generate_expression_params(&event.expression)
                     .ok_or("Failed to generate R2D2 synthesis parameters")?;
 
-                let samples = expressive_synth.generate_r2d2_samples_with_contour(
+                let mut samples = expressive_synth.generate_r2d2_samples_with_contour(
                     synth_params.base_freq,
                     event.expression.intensity,
                     synth_params.duration,
                     &synth_params.pitch_contour,
                 );
+                let mut chain = EffectsChain::new(sample_rate as f32, &event.effects);
+                if !chain.is_empty() {
+                    samples.resize(samples.len() + sample_rate as usize, 0.0);
+                    chain.process_buffer(&mut samples);
+                }
 
                 precomputed_r2d2_events.push(R2D2PrecomputedEvent {
                     start_sample,
@@ -1375,8 +1130,7 @@ impl EnhancedHybridAudioSource {
         let mut precomputed_synthesis_events = Vec::new();
 
         if !synthesis_events.is_empty() {
-            let expressive_synth = ExpressiveSynth::new()
-                .map_err(|e| format!("Failed to create ExpressiveSynth for synthesis: {}", e))?;
+            let expressive_synth = ExpressiveSynth::new();
 
             for event in synthesis_events {
                 let start_sample = (event.start_time * sample_rate as f64) as u32;
@@ -1396,23 +1150,7 @@ impl EnhancedHybridAudioSource {
             }
         }
 
-        // Initialize channel processor
-        let mut channel_processor = ChannelProcessor::new(buffer_size, sample_rate as f64);
-
-        // Per-channel effects processing enabled
-        channel_processor.bypass_mode = false;
-
-        // Set up channel effects
-        for (channel, effects) in channel_effects {
-            channel_processor.set_channel_effects(channel, effects);
-        }
-
-        // Set up R2D2 and synthesis effects
-        channel_processor.set_r2d2_effects(r2d2_effects);
-        channel_processor.set_synthesis_effects(synthesis_effects);
-
-        // Update solo state
-        channel_processor.update_solo_state();
+        let channel_processor = ChannelProcessor::new(sample_rate as f32, &channel_effects);
 
         Ok(EnhancedHybridAudioSource {
             oxisynth_source,
@@ -1422,6 +1160,7 @@ impl EnhancedHybridAudioSource {
             current_sample: 0,
             total_duration,
             channel_processor,
+            pending_right: None,
         })
     }
 
@@ -1430,8 +1169,7 @@ impl EnhancedHybridAudioSource {
         note: &crate::midi::SimpleNote,
     ) -> Result<crate::expressive::SynthParams, String> {
         use crate::expressive::{
-            EffectParams, EffectType, EnvelopeParams, FilterParams, FilterType, NoiseColor,
-            SynthParams, SynthType,
+            EnvelopeParams, FilterParams, FilterType, NoiseColor, SynthParams, SynthType,
         };
 
         let synth_type_str = note
@@ -1612,87 +1350,34 @@ impl EnhancedHybridAudioSource {
             None
         };
 
-        // Create effects
-        let mut effects = Vec::new();
-
+        // Effects: shorthand synth_reverb/chorus/delay fields plus any explicit chain.
+        let mut effects: Vec<crate::midi::EffectConfig> = Vec::new();
         if let Some(reverb) = note.synth_reverb
             && reverb > 0.0
         {
-            effects.push(EffectParams {
-                effect_type: EffectType::Reverb,
-                intensity: reverb,
-            });
+            effects.push(PresetLibrary::create_reverb(reverb));
         }
-
         if let Some(chorus) = note.synth_chorus
             && chorus > 0.0
         {
-            effects.push(EffectParams {
-                effect_type: EffectType::Chorus,
-                intensity: chorus,
-            });
+            effects.push(PresetLibrary::create_chorus(chorus));
         }
-
         if let Some(delay) = note.synth_delay
             && delay > 0.0
         {
-            let delay_time = note.synth_delay_time.unwrap_or(0.25);
-            effects.push(EffectParams {
-                effect_type: EffectType::Delay { delay_time },
+            effects.push(crate::midi::EffectConfig {
+                effect: crate::midi::EffectType::Delay {
+                    delay_time: note.synth_delay_time.unwrap_or(0.25),
+                    feedback: 0.35,
+                    wet_level: 0.5,
+                    sync_tempo: false,
+                },
                 intensity: delay,
+                enabled: true,
             });
         }
-
-        // Process universal effects from the new effects system
-        if let Some(universal_effects) = &note.effects {
-            for effect_config in universal_effects {
-                if effect_config.enabled {
-                    // Convert EffectConfig to EffectParams for audio processing
-                    match &effect_config.effect {
-                        crate::midi::EffectType::Reverb {
-                            room_size: _,
-                            dampening: _,
-                            wet_level: _,
-                            pre_delay: _,
-                        } => {
-                            effects.push(EffectParams {
-                                effect_type: EffectType::Reverb,
-                                intensity: effect_config.intensity,
-                            });
-                        }
-                        crate::midi::EffectType::Delay {
-                            delay_time,
-                            feedback: _,
-                            wet_level: _,
-                            sync_tempo: _,
-                        } => {
-                            effects.push(EffectParams {
-                                effect_type: EffectType::Delay {
-                                    delay_time: *delay_time,
-                                },
-                                intensity: effect_config.intensity,
-                            });
-                        }
-                        crate::midi::EffectType::Chorus {
-                            rate: _,
-                            depth: _,
-                            feedback: _,
-                            stereo_width: _,
-                        } => {
-                            effects.push(EffectParams {
-                                effect_type: EffectType::Chorus,
-                                intensity: effect_config.intensity,
-                            });
-                        }
-                        // Note: Filter, Compressor, Distortion are not yet implemented in EffectParams
-                        // They would need to be added to the EffectType enum in the expressive module
-                        _ => {
-                            // For now, skip unsupported effect types
-                            // In the future, these would be implemented in the audio processing chain
-                        }
-                    }
-                }
-            }
+        if let Some(chain) = &note.effects {
+            effects.extend(chain.iter().filter(|e| e.enabled).cloned());
         }
 
         Ok(SynthParams {
@@ -1731,23 +1416,42 @@ impl EnhancedHybridAudioSource {
             }
         }
 
-        sample
+        sample * SYNTH_BUS_GAIN
+    }
+}
+
+impl EnhancedHybridAudioSource {
+    /// Render one stereo frame, or `None` at the end of the sequence.
+    fn next_frame(&mut self) -> Option<(f32, f32)> {
+        let current_time =
+            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
+        if current_time > self.total_duration {
+            return None;
+        }
+
+        let mono = self.get_r2d2_sample(self.current_sample)
+            + self.get_synthesis_sample(self.current_sample);
+
+        let mut midi_left = [0.0f32; 16];
+        let mut midi_right = [0.0f32; 16];
+        if let Some(ref mut oxisynth) = self.oxisynth_source
+            && let Some((l, r)) = oxisynth.next_frame()
+        {
+            midi_left[0] = l;
+            midi_right[0] = r;
+        }
+
+        let frame = self
+            .channel_processor
+            .process_and_mix(&midi_left, &midi_right, mono);
+        self.current_sample += 1;
+        Some(frame)
     }
 
-    /// Check if drums are currently playing (for channel routing)
-    fn has_drums_playing(&self) -> bool {
-        if let Some(ref oxisynth) = self.oxisynth_source {
-            // Check if any notes on channel 9 are currently playing
-            let current_time =
-                Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-            oxisynth.notes.iter().any(|note| {
-                note.channel == 9
-                    && current_time >= note.start_time
-                    && current_time <= note.start_time + note.duration
-            })
-        } else {
-            false
-        }
+    #[cfg(test)]
+    fn next_frame_unclipped(&mut self) -> Option<(f32, f32)> {
+        self.channel_processor.probe_unclipped = true;
+        self.next_frame()
     }
 }
 
@@ -1755,51 +1459,12 @@ impl Iterator for EnhancedHybridAudioSource {
     type Item = f32;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Check if we've reached the end of the sequence
-        let current_time =
-            Duration::from_secs_f32(self.current_sample as f32 / self.sample_rate as f32);
-
-        if current_time > self.total_duration {
-            return None;
+        if let Some(right) = self.pending_right.take() {
+            return Some(right);
         }
-
-        // Get R2D2 sample
-        let r2d2_sample = self.get_r2d2_sample(self.current_sample);
-
-        // Get synthesis sample
-        let synthesis_sample = self.get_synthesis_sample(self.current_sample);
-
-        // Get MIDI samples with proper per-channel separation
-        let mut midi_channels = vec![0.0; 16]; // 16 MIDI channels
-
-        if let Some(ref mut oxisynth) = self.oxisynth_source {
-            // Get the mixed sample from OxiSynth
-            let midi_sample = oxisynth.next().unwrap_or(0.0);
-
-            // Enhanced channel routing with special drum handling
-            if self.has_drums_playing() {
-                // Drums are playing - give them special routing and volume boost
-                midi_channels[9] = midi_sample * 3.0; // Significant drum volume boost
-                // Also put on channel 0 for compatibility, but at normal volume
-                midi_channels[0] = midi_sample;
-
-                // Debug log when drums are detected
-                if self.current_sample.is_multiple_of(22050) {
-                    // Log every 0.5 seconds
-                    tracing::info!("🥁 Drums detected playing on channel 9, boosted volume");
-                }
-            } else {
-                midi_channels[0] = midi_sample;
-            }
-        }
-
-        // Use channel processor to mix and apply effects
-        let final_sample =
-            self.channel_processor
-                .process_and_mix(&midi_channels, r2d2_sample, synthesis_sample);
-
-        self.current_sample += 1;
-        Some(final_sample)
+        let (left, right) = self.next_frame()?;
+        self.pending_right = Some(right);
+        Some(left)
     }
 }
 
@@ -1809,7 +1474,7 @@ impl Source for EnhancedHybridAudioSource {
     }
 
     fn channels(&self) -> u16 {
-        1 // Mono output
+        2
     }
 
     fn sample_rate(&self) -> u32 {
@@ -1824,12 +1489,252 @@ impl Source for EnhancedHybridAudioSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expressive::test_util::rms;
+    use crate::midi::SimpleNote;
+
+    fn soundfont_available() -> bool {
+        if find_soundfont().is_ok() {
+            true
+        } else {
+            eprintln!("skipping: SoundFont not installed (run `mcp-muse setup`)");
+            false
+        }
+    }
 
     #[test]
-    fn test_midi_player_creation() {
-        // This test might fail in CI environments without audio
-        if let Ok(_player) = MidiPlayer::new() {
-            // Success
+    fn hybrid_source_is_stereo_and_mono_buses_are_centered() {
+        let note = SimpleNote {
+            synth_type: Some("sine".to_string()),
+            synth_frequency: Some(440.0),
+            start_time: Some(0.0),
+            duration: Some(0.2),
+            ..Default::default()
+        };
+        let source = EnhancedHybridAudioSource::new(
+            Vec::new(),
+            Vec::new(),
+            vec![SynthEvent {
+                start_time: 0.0,
+                note,
+            }],
+            Duration::from_millis(300),
+            std::collections::HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(source.channels(), 2);
+
+        let samples: Vec<f32> = source.collect();
+        assert!(samples.len() > 2 * 44100 / 10);
+        let left: Vec<f32> = samples.iter().step_by(2).copied().collect();
+        let right: Vec<f32> = samples.iter().skip(1).step_by(2).copied().collect();
+        assert!(rms(&left) > 0.01, "silent output");
+        assert_eq!(left, right, "mono buses must be identical on both sides");
+    }
+
+    #[test]
+    fn soft_clip_is_transparent_then_bounded() {
+        assert_eq!(soft_clip(0.5), 0.5);
+        assert_eq!(soft_clip(-0.5), -0.5);
+        assert!(soft_clip(3.0) <= 1.0 && soft_clip(3.0) > 0.9);
+        assert!(soft_clip(-3.0) >= -1.0);
+    }
+
+    fn render_panned_flute(pan: u8) -> (f32, f32) {
+        let note = MidiNote {
+            note: 60,
+            velocity: 100,
+            channel: 0,
+            start_time: Duration::ZERO,
+            duration: Duration::from_millis(500),
+            instrument: Some(73),
+            reverb: Some(0),
+            chorus: Some(0),
+            volume: None,
+            pan: Some(pan),
+            balance: None,
+            expression: None,
+            sustain: None,
+        };
+        let mut source = OxiSynthSource::new(vec![note], Duration::from_millis(600)).unwrap();
+        let (mut left, mut right) = (Vec::new(), Vec::new());
+        while let Some((l, r)) = source.next_frame() {
+            left.push(l);
+            right.push(r);
         }
+        (rms(&left[4410..22050]), rms(&right[4410..22050]))
+    }
+
+    #[test]
+    fn pan_moves_the_stereo_image() {
+        if !soundfont_available() {
+            return;
+        }
+        let (l_hard_left, r_hard_left) = render_panned_flute(0);
+        let (l_hard_right, r_hard_right) = render_panned_flute(127);
+        assert!(r_hard_right > 0.01, "no audio rendered");
+        assert!(
+            l_hard_left > l_hard_right * 1.5 && r_hard_right > r_hard_left * 1.5,
+            "pan had no effect: pan0=({l_hard_left},{r_hard_left}) pan127=({l_hard_right},{r_hard_right})"
+        );
+    }
+}
+
+#[cfg(test)]
+mod level_tests {
+    //! Headroom checks: typical material must stay clear of the soft-clip knee.
+    use super::*;
+    use crate::midi::SimpleNote;
+
+    /// Peak and fraction of samples above the clipper knee, before clipping.
+    fn measure(seq: SimpleSequence) -> (f32, f32) {
+        let player = MidiPlayer::new().unwrap();
+        let mut midi = Vec::new();
+        let mut synth = Vec::new();
+        for n in seq.notes {
+            if n.is_synthesis() || n.is_preset() {
+                let mut n = n;
+                player.apply_preset_to_note(&mut n).unwrap();
+                synth.push(SynthEvent {
+                    start_time: n.start_time.unwrap_or(0.0),
+                    note: n,
+                });
+            } else {
+                midi.push(MidiNote {
+                    note: n.note.unwrap(),
+                    velocity: n.velocity.unwrap_or(80),
+                    channel: n.channel,
+                    start_time: Duration::from_secs_f64(n.start_time.unwrap_or(0.0)),
+                    duration: Duration::from_secs_f64(n.duration.unwrap_or(1.0)),
+                    instrument: n.instrument,
+                    reverb: n.reverb,
+                    chorus: n.chorus,
+                    volume: n.volume,
+                    pan: n.pan,
+                    balance: n.balance,
+                    expression: n.expression,
+                    sustain: n.sustain,
+                });
+            }
+        }
+        let mut src = EnhancedHybridAudioSource::new(
+            midi,
+            Vec::new(),
+            synth,
+            Duration::from_millis(1500),
+            Default::default(),
+        )
+        .unwrap();
+        let (mut peak, mut over, mut count) = (0.0f32, 0usize, 0usize);
+        while let Some((l, r)) = src.next_frame_unclipped() {
+            for v in [l, r] {
+                peak = peak.max(v.abs());
+                if v.abs() > 0.8 {
+                    over += 1;
+                }
+                count += 1;
+            }
+        }
+        (peak, over as f32 / count as f32)
+    }
+
+    fn midi(notes: &[(u8, u8, u8, Option<u8>)]) -> SimpleSequence {
+        SimpleSequence {
+            notes: notes
+                .iter()
+                .map(|&(note, vel, ch, inst)| SimpleNote {
+                    note: Some(note),
+                    velocity: Some(vel),
+                    channel: ch,
+                    instrument: inst,
+                    ..Default::default()
+                })
+                .collect(),
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    fn preset(name: &str, notes: &[u8]) -> SimpleSequence {
+        SimpleSequence {
+            notes: notes
+                .iter()
+                .map(|&n| SimpleNote {
+                    preset_name: Some(name.to_string()),
+                    note: Some(n),
+                    velocity: Some(100),
+                    duration: Some(1.4),
+                    ..Default::default()
+                })
+                .collect(),
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    #[test]
+    fn typical_material_stays_below_the_clipper_knee() {
+        if find_soundfont().is_err() {
+            eprintln!("skipping: SoundFont not installed");
+            return;
+        }
+        let cases: Vec<(&str, SimpleSequence, f32)> = vec![
+            ("flute", midi(&[(76, 100, 0, Some(73))]), 0.6),
+            (
+                "piano chord",
+                midi(&[
+                    (60, 90, 0, Some(0)),
+                    (64, 90, 0, Some(0)),
+                    (67, 90, 0, Some(0)),
+                    (72, 90, 0, Some(0)),
+                ]),
+                0.8,
+            ),
+            (
+                "strings chord",
+                midi(&[
+                    (60, 90, 0, Some(48)),
+                    (64, 90, 0, Some(48)),
+                    (67, 90, 0, Some(48)),
+                    (72, 90, 0, Some(48)),
+                ]),
+                0.8,
+            ),
+            (
+                "drums",
+                midi(&[(36, 110, 9, None), (38, 110, 9, None), (42, 110, 9, None)]),
+                1.0,
+            ),
+            ("minimoog bass", preset("Minimoog Bass", &[36]), 0.6),
+            (
+                "jp8 strings chord",
+                preset("JP-8 Strings", &[60, 64, 67]),
+                0.8,
+            ),
+            ("tr808 kick", preset("TR-808 Kick", &[36]), 0.6),
+        ];
+        for (name, seq, max_peak) in cases {
+            let (peak, over) = measure(seq);
+            eprintln!(
+                "LEVEL {name:20} peak={peak:.2} above_knee={:.1}%",
+                over * 100.0
+            );
+            assert!(peak < max_peak, "{name}: peak {peak} exceeds {max_peak}");
+            assert!(
+                over < 0.01,
+                "{name}: {:.1}% of samples in the clipper",
+                over * 100.0
+            );
+        }
+    }
+
+    #[test]
+    fn material_is_not_too_quiet_either() {
+        if find_soundfont().is_err() {
+            return;
+        }
+        let (flute, _) = measure(midi(&[(76, 100, 0, Some(73))]));
+        let (bass, _) = measure(preset("Minimoog Bass", &[36]));
+        assert!(flute > 0.15, "flute peak {flute} is too quiet");
+        assert!(bass > 0.15, "bass peak {bass} is too quiet");
     }
 }

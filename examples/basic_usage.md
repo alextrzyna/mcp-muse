@@ -1,172 +1,138 @@
-# MCP MIDI Usage Examples
+# mcp-muse Usage Examples
 
-This document provides practical examples of using the `mcp-muse` server with various AI agents.
+Practical examples of using the `mcp-muse` server from an AI agent. Every
+example is a `play_notes` tool call; the JSON shown is the `arguments`
+object.
 
-## Example 1: Simple Single Note
+## Example 1: Single Note
 
-The most basic MIDI example - playing a single C4 note for 1 second.
+Middle C for one second on the default piano.
 
-### Base64 MIDI Data
-```
-TVRoZAAAAAYAAAABAGBNVHJrAAAADgCQPGQwgDwAAP8vAA==
-```
-
-### Tool Call
 ```json
 {
-  "tool": "play_midi",
-  "arguments": {
-    "midi_data": "TVRoZAAAAAYAAAABAGBNVHJrAAAADgCQPGQwgDwAAP8vAA=="
-  }
+  "notes": [
+    {"note": 60, "velocity": 80, "start_time": 0.0, "duration": 1.0}
+  ]
 }
 ```
-
-### What You'll Hear
-A single C4 note (middle C) played for approximately 1 second.
 
 ## Example 2: C Major Scale
 
-A ascending C major scale: C-D-E-F-G-A-B-C.
-
-### Base64 MIDI Data
-```
-TVRoZAAAAAYAAAABAF9NVHJrAAAATgAAAACQPEBAUAAAAACAP0BAkD5AQFAAAACAPkBAkEBAQFAAAACAQEBAkEJAQFAAAACCQkBAkERAQFAAAACERkBAkERAQFAAAACEREBAlEdAQFAAAACEREBAkEdAQFAAAAAAAP8vAA==
-```
-
-### Tool Call
 ```json
 {
-  "tool": "play_midi",
-  "arguments": {
-    "midi_data": "TVRoZAAAAAYAAAABAF9NVHJrAAAATgAAAACQPEBAUAAAAACAP0BAkD5AQFAAAACAPkBAkEBAQFAAAACAQEBAkEJAQFAAAACCQkBAkERAQFAAAACERkBAkERAQFAAAACEREBAlEdAQFAAAACEREBAkEdAQFAAAAAAAP8vAA=="
-  }
+  "notes": [
+    {"note": 60, "start_time": 0.0, "duration": 0.4},
+    {"note": 62, "start_time": 0.4, "duration": 0.4},
+    {"note": 64, "start_time": 0.8, "duration": 0.4},
+    {"note": 65, "start_time": 1.2, "duration": 0.4},
+    {"note": 67, "start_time": 1.6, "duration": 0.4},
+    {"note": 69, "start_time": 2.0, "duration": 0.4},
+    {"note": 71, "start_time": 2.4, "duration": 0.4},
+    {"note": 72, "start_time": 2.8, "duration": 0.8}
+  ]
 }
 ```
 
-### What You'll Hear
-Each note of the C major scale played in sequence, with each note lasting about 500ms.
+## Example 3: Chord with an Instrument and Reverb
 
-## Example 3: Simple Chord
+A C major chord on string ensemble (GM program 48) in a hall.
 
-A C major chord (C-E-G) played simultaneously.
-
-### Base64 MIDI Data
-```
-TVRoZAAAAAYAAAABAGBNVHJrAAAAIgCQPGQggDwAAJBAZCCAQAAAkENkIIBDAAD/LwA=
-```
-
-### Tool Call
 ```json
 {
-  "tool": "play_midi",
-  "arguments": {
-    "midi_data": "TVRoZAAAAAYAAAABAGBNVHJrAAAAIgCQPGQggDwAAJBAZCCAQAAAkENkIIBDAAD/LwA="
-  }
+  "notes": [
+    {"note": 60, "instrument": 48, "reverb": 70, "start_time": 0.0, "duration": 2.0},
+    {"note": 64, "instrument": 48, "reverb": 70, "start_time": 0.0, "duration": 2.0},
+    {"note": 67, "instrument": 48, "reverb": 70, "start_time": 0.0, "duration": 2.0}
+  ]
 }
 ```
 
-### What You'll Hear
-Three notes played simultaneously forming a harmonious C major chord.
+## Example 4: Musical Time and a Drum Beat
 
-## Example 4: Happy Birthday Melody
+Timing in bars and beats at 100 BPM. Channel 9 is the GM drum kit
+(36 = kick, 38 = snare, 42 = closed hi-hat).
 
-The opening notes of "Happy Birthday to You".
-
-### Base64 MIDI Data
-```
-TVRoZAAAAAYAAAABAF9NVHJrAAAAWgAAAACQPEBAUAAAAACAPEBAkDxAQFAAAACAPEBAkD5AQFAAAACAPkBAkEBAQGAAAACAQEBAkD5AQFAAAACAPkBAkDxAQFAAAACAPEBAkDpAQFAAAACAOkBA/y8A
-```
-
-### Tool Call
 ```json
 {
-  "tool": "play_midi",
-  "arguments": {
-    "midi_data": "TVRoZAAAAAYAAAABAF9NVHJrAAAAWgAAAACQPEBAUAAAAACAPEBAkDxAQFAAAACAPEBAkD5AQFAAAACAPkBAkEBAQGAAAACAQEBAkD5AQFAAAACAPkBAkDxAQFAAAACAPEBAkDpAQFAAAACAOkBA/y8A"
-  }
+  "tempo": 100,
+  "notes": [
+    {"channel": 9, "note": 36, "musical_time": {"bar": 1, "beat": 1, "tick": 0}, "musical_duration": "eighth"},
+    {"channel": 9, "note": 42, "musical_time": {"bar": 1, "beat": 2, "tick": 0}, "musical_duration": "eighth"},
+    {"channel": 9, "note": 38, "musical_time": {"bar": 1, "beat": 3, "tick": 0}, "musical_duration": "eighth"},
+    {"channel": 9, "note": 42, "musical_time": {"bar": 1, "beat": 4, "tick": 0}, "musical_duration": "eighth"}
+  ]
 }
 ```
 
-### What You'll Hear
-The recognizable opening melody of "Happy Birthday" (Hap-py Birth-day to...).
+## Example 5: Classic Synth Preset
+
+Call `list_sounds` (section `presets`) to see every name. Presets bring
+their own effects unless you pass `effects` yourself.
+
+```json
+{
+  "notes": [
+    {"preset_name": "Minimoog Bass", "note": 36, "velocity": 110, "start_time": 0.0, "duration": 0.5},
+    {"preset_name": "Minimoog Bass", "note": 43, "velocity": 100, "start_time": 0.5, "duration": 0.5},
+    {"preset_name": "JP-8 Strings", "note": 64, "start_time": 0.0, "duration": 3.0},
+    {"preset_name": "JP-8 Strings", "note": 67, "start_time": 0.0, "duration": 3.0}
+  ]
+}
+```
+
+## Example 6: R2D2 Reaction plus Synthesis Effect
+
+```json
+{
+  "notes": [
+    {"note_type": "r2d2", "r2d2_emotion": "Excited", "r2d2_intensity": 0.8, "r2d2_complexity": 3, "start_time": 0.0, "duration": 1.2},
+    {"synth_type": "zap", "synth_frequency": 900, "start_time": 1.2, "duration": 0.4}
+  ]
+}
+```
+
+## Stopping and Timing
+
+Playback tools return immediately; the reply says how long the audio will
+run including effect tails. Call `stop_playback` to cut it short.
 
 ## Using with AI Agents
 
 ### In Cursor
 
-1. Make sure mcp-muse is set up: `./target/release/mcp-muse --setup`
+1. Run `mcp-muse setup` (or `./target/release/mcp-muse setup` from a source build)
 2. Restart Cursor
 3. In a new chat, ask:
 
 ```
-"Can you play me a C major scale using the play_midi tool?"
+"Play me a C major scale on a harpsichord."
 ```
-
-The AI will use the tool to generate and play the scale.
 
 ### Creative Prompts
 
-Try these prompts with your AI:
-
-- "Play a simple lullaby melody"
-- "Create a chord progression in the key of G major"
-- "Play the opening of Beethoven's 5th Symphony"
-- "Generate a 4-beat drum pattern" (note: will be pitched percussion)
-- "Play a blues scale in E minor"
-- "Create a simple waltz melody"
+- "Play a short victory fanfare with brass and a cymbal crash"
+- "Give me a moody synth pad and an R2D2 that sounds worried"
+- "Make a four-bar house beat with a TB-303 bassline"
+- "Play a blues scale in E minor on overdriven guitar"
 
 ## MIDI Technical Notes
 
-### Note Numbers
-- C4 (Middle C) = 60
-- Each octave adds/subtracts 12
-- C3 = 48, C5 = 72
-
-### Velocity (Volume)
-- Range: 0-127
-- 64 = medium volume
-- 127 = maximum volume
-- 0 = note off
-
-### Timing
-- 480 ticks per quarter note (typical)
-- Quarter note at 120 BPM = 500ms
-- Adjust delta times between events for rhythm
-
-## Creating Custom MIDI
-
-If you want to create your own MIDI files:
-
-1. Use a DAW (Digital Audio Workstation) like GarageBand, Reaper, or Logic
-2. Export as Type 0 MIDI file
-3. Convert to base64:
-
-```bash
-base64 -i your_file.mid
-```
-
-4. Use the base64 output with the `play_midi` tool
+- C4 (middle C) = 60; each octave adds or subtracts 12 (C3 = 48, C5 = 72)
+- `velocity` 0-127: 64 medium, 127 maximum
+- `instrument` is the General MIDI program number; `list_sounds` lists all 128 by family
+- Channel 9 is always the drum kit; `note` selects the drum
+- With `musical_time`, ticks run 0-479 per beat (480 PPQ)
 
 ## Troubleshooting Examples
 
 ### No Sound
-If examples don't produce sound:
-1. Check system volume
-2. Test with Example 1 (single note)
-3. Check the logs:
-   - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
-   - **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
-   - **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log`
+1. Check system volume and the selected output device
+2. Test with Example 1
+3. Look at the newest `mcp-muse.log.*` file (see `api_reference.md` for locations)
 
-### Invalid MIDI Error
-- Ensure base64 data is not corrupted
-- Try Example 1 to verify the tool works
-- Check that the MIDI file is Type 0 format
-
-### Performance Issues
-- Keep MIDI files under 1MB for best performance
-- Use shorter sequences for real-time interaction
-- Consider reducing polyphony (simultaneous notes)
+### Tool result says isError
+The text explains why: usually a preset or pattern name that does not
+exist. `list_sounds` and `list_patterns` show the valid names.
 
 ## Sequence Patterns Examples
 
