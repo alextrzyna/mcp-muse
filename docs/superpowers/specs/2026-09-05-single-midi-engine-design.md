@@ -43,7 +43,7 @@ tool thread                         audio callback thread
 -----------                         ---------------------
 MidiPlayer                          EngineSource (rodio Source, never ends)
   apply presets, musical time         └─ MidiEngine
-  pre-render R2D2 / synthesis              ├─ oxisynth::Synth (one, polyphony 64)
+  pre-render R2D2 / synthesis              ├─ oxisynth::Synth (one, polyphony 256)
   translate -> PlayCommand                 ├─ BinaryHeap<ScheduledEvent>
   EngineHandle ── mpsc ──────────────────► ├─ Vec<ScheduledBuffer>
   reads AtomicU64 clock ◄─────────────────  ├─ MIDI bus EffectsChain (L, R)
@@ -96,7 +96,11 @@ MidiPlayer                          EngineSource (rodio Source, never ends)
   3. adds the active buffers;
   4. runs the MIDI bus `EffectsChain` per side on the OxiSynth output;
   5. soft-clips and writes stereo frames.
-- Polyphony is set to 64 voices.
+- Polyphony is set to 256 voices, OxiSynth's own default. (The 64 cap
+  originally planned here was dropped after review: idle voices cost
+  nothing in the render loop, and layered, sustained FluidR3 material
+  needs more headroom, since stereo-layered presets use two or more voices
+  per note.)
 - OxiSynth keeps rendering while idle so releases finish; there is no
   separate idle path.
 

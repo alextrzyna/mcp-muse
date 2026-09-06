@@ -48,7 +48,7 @@ it. Requests without an id are notifications and get no response.
 
 ### Audio pipeline (`src/midi/engine.rs`, `translate.rs`, `player.rs`)
 One `MidiEngine` per process runs as a never-ending rodio source on the
-output mixer: a single OxiSynth (SoundFont loaded once, polyphony 64), a
+output mixer: a single OxiSynth (SoundFont loaded once, polyphony 256), a
 min-heap of MIDI events keyed to the engine's 44.1 kHz sample clock, the
 pre-rendered R2D2/synthesis buffers, and the MIDI bus `EffectsChain` (one
 per side). `MidiPlayer::play(sequence, mode)` translates and sends a

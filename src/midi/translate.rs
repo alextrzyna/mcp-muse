@@ -188,7 +188,8 @@ impl Translator {
                 let expression = R2D2Expression {
                     emotion,
                     intensity: note.r2d2_intensity.unwrap_or(0.7),
-                    duration: note.duration.unwrap_or(1.0) as f32,
+                    // A negative duration would panic in `Duration::from_secs_f32` below.
+                    duration: note.duration.unwrap_or(1.0).max(0.0) as f32,
                     phrase_complexity: note.r2d2_complexity.unwrap_or(2),
                     pitch_range: match &note.r2d2_pitch_range {
                         Some(range) if range.len() == 2 => (range[0], range[1]),
@@ -223,11 +224,11 @@ impl Translator {
                 for s in &mut samples {
                     *s *= SYNTH_BUS_GAIN;
                 }
-                note_end =
-                    note_end.max(start + Duration::from_secs_f64(note.duration.unwrap_or(1.0)));
+                note_end = note_end
+                    .max(start + Duration::from_secs_f64(note.duration.unwrap_or(1.0).max(0.0)));
                 buffers.push((seconds_to_frames(start), samples));
             } else if let Some(key) = note.note {
-                let duration = Duration::from_secs_f64(note.duration.unwrap_or(1.0));
+                let duration = Duration::from_secs_f64(note.duration.unwrap_or(1.0).max(0.0));
                 note_end = note_end.max(start + duration);
                 midi_notes.push(MidiNote {
                     note: key,
@@ -1036,6 +1037,54 @@ mod tests {
             Some(0),
             "a negative start time must land at offset 0"
         );
+    }
+
+    #[test]
+    fn a_negative_duration_on_a_midi_note_is_clamped_instead_of_panicking() {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    note: Some(60),
+                    velocity: Some(100),
+                    duration: Some(-1.0),
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+            )
+            .unwrap();
+        let note_off = t
+            .command
+            .events
+            .iter()
+            .find(|(_, e)| matches!(e, EventKind::NoteOff { .. }))
+            .expect("a note off must still be scheduled");
+        assert_eq!(
+            note_off.0, 1,
+            "a negative duration must clamp to 0 and hit the max(1) floor in midi_events"
+        );
+    }
+
+    #[test]
+    fn a_negative_duration_on_a_synthesis_note_does_not_panic() {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    synth_type: Some("sine".into()),
+                    synth_frequency: Some(440.0),
+                    duration: Some(-1.0),
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+            )
+            .unwrap();
+        assert!(t.command.buffers.len() <= 1);
+        if let Some((_, samples)) = t.command.buffers.first() {
+            assert!(
+                samples.len() <= 44_100,
+                "expected an empty or very short buffer, got {} samples",
+                samples.len()
+            );
+        }
     }
 
     #[test]

@@ -663,7 +663,7 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                         "type": "string",
                         "enum": ["replace", "layer"],
                         "default": "replace",
-                        "description": "replace (default) stops whatever is playing before this starts; layer mixes this on top of the current playback"
+                        "description": "replace (default) stops whatever is playing before this starts; layer mixes this on top of the current playback. Layered calls share MIDI channel state (program, pan, volume, sustain) with what is already playing, and a layered call that specifies effects swaps the MIDI bus chain immediately."
                     }
                 },
                 "anyOf": [
@@ -741,7 +741,7 @@ Pass \"mode\": \"layer\" to play over what is already sounding; the default repl
                         "type": "string",
                         "enum": ["replace", "layer"],
                         "default": "replace",
-                        "description": "replace (default) stops whatever is playing before this starts; layer mixes this on top of the current playback"
+                        "description": "replace (default) stops whatever is playing before this starts; layer mixes this on top of the current playback. Layered calls share MIDI channel state (program, pan, volume, sustain) with what is already playing, and a layered call that specifies effects swaps the MIDI bus chain immediately."
                     }
                 },
                 "required": ["notes"]

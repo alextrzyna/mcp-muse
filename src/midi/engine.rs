@@ -27,8 +27,11 @@ pub const CHUNK_FRAMES: usize = 1024;
 pub const LEAD_FRAMES: u64 = 2048;
 /// Length of the declick fade applied before a replace or stop (6 ms).
 const FADE_FRAMES: usize = 256;
-/// Voice cap; FluidR3 material never needs OxiSynth's default 256.
-const POLYPHONY: u16 = 64;
+/// Voice cap. Idle voices cost nothing in the render loop, so this is left
+/// at OxiSynth's own default rather than trimmed; a lower cap caused
+/// audible note stealing with layered, sustained FluidR3 material, since
+/// stereo-layered presets use two or more voices per note.
+const POLYPHONY: u16 = 256;
 /// Synthesizer gain passed to OxiSynth (its default of 0.2 is very quiet).
 /// At 1.0 a single velocity-100 note peaks around 0.35 and a four-note
 /// chord around 0.5, leaving headroom before the soft clipper (knee 0.8).
@@ -159,7 +162,7 @@ pub fn find_soundfont() -> Result<PathBuf, String> {
         }
     }
 
-    Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
+    Err("SoundFont not found. Please run 'mcp-muse setup' to download it.".to_string())
 }
 
 /// Parse the SoundFont and build the process's one synthesizer.
@@ -307,7 +310,7 @@ impl MidiEngine {
                 pos: 0,
             });
         }
-        tracing::info!(
+        tracing::debug!(
             "Scheduled {} at frame {}: {} MIDI events, {} buffers queued",
             play.mode.as_str(),
             start,

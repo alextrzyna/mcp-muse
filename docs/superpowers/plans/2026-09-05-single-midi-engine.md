@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Internal sample rate stays `44_100` Hz, chunk size `1024` frames, schedule lead `2048` frames, fade `256` frames, polyphony `64`.
+- Internal sample rate stays `44_100` Hz, chunk size `1024` frames, schedule lead `2048` frames, fade `256` frames, polyphony `256`.
 - Tool names, `note_schema()`, and `list_sounds` output are unchanged. `mode` is the only new tool argument, enum `["replace", "layer"]`, default `replace`.
 - Never log inside per-sample loops (CLAUDE.md). Debug logging of OxiSynth errors happens per event, not per sample.
 - `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` must pass at every commit. `cargo test` must pass; MIDI tests skip (with an `eprintln!`) when no SoundFont is installed.
