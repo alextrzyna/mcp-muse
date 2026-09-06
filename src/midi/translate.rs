@@ -1054,6 +1054,18 @@ mod tests {
                         effects: Some(vec![reverb()]),
                         ..Default::default()
                     },
+                    SimpleNote {
+                        note: Some(67),
+                        duration: Some(0.2),
+                        effects: Some(vec![
+                            serde_json::from_value(serde_json::json!({
+                                "type": "delay", "delay_time": 0.25,
+                                "feedback": 0.3, "intensity": 0.5
+                            }))
+                            .unwrap(),
+                        ]),
+                        ..Default::default()
+                    },
                 ]),
                 PlayMode::Replace,
             )
@@ -1062,7 +1074,7 @@ mod tests {
             .command
             .midi_effects
             .expect("a MIDI note supplied effects");
-        assert_eq!(chain.len(), 1);
+        assert_eq!(chain.len(), 1, "later MIDI effects must not join the chain");
         assert!(matches!(
             chain[0].effect,
             crate::midi::EffectType::Reverb { .. }

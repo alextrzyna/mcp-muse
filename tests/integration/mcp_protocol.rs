@@ -1049,3 +1049,76 @@ fn custom_effects_chains_are_accepted_in_both_forms() {
     );
     let _ = server.call(json!({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "stop_playback", "arguments": {}}}));
 }
+
+#[test]
+fn play_mode_is_in_both_schemas_and_validated() {
+    let mut server = TestServer::start();
+    let tools = server.call(json!({"jsonrpc": "2.0", "id": 30, "method": "tools/list"}));
+    for name in ["play_notes", "play_sequence"] {
+        let tool = tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap();
+        let mode = &tool["inputSchema"]["properties"]["mode"];
+        assert_eq!(mode["type"], "string", "{name}: {mode}");
+        assert_eq!(mode["enum"], json!(["replace", "layer"]), "{name}");
+        assert_eq!(mode["default"], "replace", "{name}");
+    }
+
+    let bad = server.call(json!({
+        "jsonrpc": "2.0", "id": 31, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {
+            "mode": "queue",
+            "notes": [{"note": 60, "duration": 0.1}]
+        }}
+    }));
+    assert_eq!(bad["error"]["code"], -32602, "{bad}");
+    assert!(bad["error"]["message"].as_str().unwrap().contains("queue"));
+}
+
+#[test]
+fn consecutive_plays_layer_or_replace_and_stop_reports_the_count() {
+    let mut server = TestServer::start();
+    let note = json!([{"synth_type": "sine", "synth_frequency": 440, "duration": 3.0}]);
+    let first = server.call(json!({
+        "jsonrpc": "2.0", "id": 32, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": note.clone()}}
+    }));
+    if first["result"]["isError"] == true {
+        eprintln!("skipping: {}", first["result"]["content"][0]["text"]);
+        return; // no audio device (CI)
+    }
+    let text = first["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("replace"), "{text}");
+
+    let second = server.call(json!({
+        "jsonrpc": "2.0", "id": 33, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"mode": "layer", "notes": note.clone()}}
+    }));
+    let text = second["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("layer"), "{text}");
+
+    let stop = server.call(json!({
+        "jsonrpc": "2.0", "id": 34, "method": "tools/call",
+        "params": {"name": "stop_playback", "arguments": {}}
+    }));
+    let text = stop["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Stopped 2"), "{text}");
+
+    let third = server.call(json!({
+        "jsonrpc": "2.0", "id": 35, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": note.clone()}}
+    }));
+    assert!(third["result"]["isError"].is_null(), "{third}");
+    let stop = server.call(json!({
+        "jsonrpc": "2.0", "id": 36, "method": "tools/call",
+        "params": {"name": "stop_playback", "arguments": {}}
+    }));
+    let text = stop["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Stopped 1"),
+        "replace should have dropped the earlier count: {text}"
+    );
+}

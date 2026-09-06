@@ -47,12 +47,20 @@ impl MidiPlayer {
     /// Schedule a sequence. Returns the time until it finishes, including
     /// effect tails. `Replace` cuts whatever is playing first.
     pub fn play(&mut self, sequence: SimpleSequence, mode: PlayMode) -> Result<Duration, String> {
+        let now = self.engine.clock();
+        self.playback_ends.retain(|&end| end > now);
         let Translation { command, duration } = self.translator.translate(sequence, mode)?;
         if command.events.is_empty() && command.buffers.is_empty() {
             tracing::warn!("Nothing to play");
+            if mode == PlayMode::Layer {
+                return Ok(Duration::ZERO);
+            }
+            // A `Replace` with nothing in it still means "silence what is
+            // playing": the engine stops on the empty command's mode.
+            self.playback_ends.clear();
+            self.engine.send(EngineCommand::Play(command))?;
             return Ok(Duration::ZERO);
         }
-        let now = self.engine.clock();
         if mode == PlayMode::Replace {
             self.playback_ends.clear();
         }
@@ -80,7 +88,7 @@ impl MidiPlayer {
     }
 
     /// Number of started playbacks that have not reached their end frame.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // public API kept for callers outside the tool layer (the demos and future tools)
     pub fn active_playbacks(&mut self) -> usize {
         let now = self.engine.clock();
         self.playback_ends.retain(|&end| end > now);

@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::midi::{ExtendedSequence, MidiPlayer, SequencePattern, SimpleNote, SimpleSequence};
+use crate::midi::{
+    ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
+};
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::time::Duration;
@@ -656,6 +658,12 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                         "minimum": 2,
                         "maximum": 8,
                         "default": 4
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "layer"],
+                        "default": "replace",
+                        "description": "replace (default) stops whatever is playing before this starts; layer mixes this on top of the current playback"
                     }
                 },
                 "anyOf": [
@@ -705,7 +713,9 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
 Examples:
 - Success chime: [{\"note\": 72, \"instrument\": 9, \"duration\": 0.5}]
 - R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
-- Kick drum: [{\"synth_type\": \"kick\", \"synth_frequency\": 60, \"duration\": 0.5}]",
+- Kick drum: [{\"synth_type\": \"kick\", \"synth_frequency\": 60, \"duration\": 0.5}]
+
+Pass \"mode\": \"layer\" to play over what is already sounding; the default replaces it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -726,6 +736,12 @@ Examples:
                         "minimum": 2,
                         "maximum": 8,
                         "default": 4
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "layer"],
+                        "default": "replace",
+                        "description": "replace (default) stops whatever is playing before this starts; layer mixes this on top of the current playback"
                     }
                 },
                 "required": ["notes"]
@@ -848,10 +864,25 @@ fn describe_sources(notes: &[SimpleNote]) -> String {
     }
 }
 
-fn playback_started_text(summary: String, duration: Duration) -> String {
+/// `mode` is read separately from the sequence structs so patterns and the
+/// demos keep their plain data shapes; unknown values are a parameter error.
+fn parse_mode(arguments: &Value) -> Result<PlayMode, String> {
+    match arguments.get("mode") {
+        None | Some(Value::Null) => Ok(PlayMode::default()),
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|_| format!("Invalid mode {}: expected \"replace\" or \"layer\"", value)),
+    }
+}
+
+fn playback_started_text(summary: String, duration: Duration, mode: PlayMode) -> String {
+    let how = match mode {
+        PlayMode::Replace => "replaced what was playing",
+        PlayMode::Layer => "layered over the current playback",
+    };
     format!(
-        "🎵 Playback started ({}). It will finish in about {:.1} seconds including effect tails; call stop_playback to cut it short.",
+        "🎵 Playback started ({}; {}). It will finish in about {:.1} seconds including effect tails; call stop_playback to cut it short.",
         summary,
+        how,
         duration.as_secs_f64()
     )
 }
@@ -859,6 +890,7 @@ fn playback_started_text(summary: String, duration: Duration) -> String {
 fn start_playback(
     state: &mut ServerState,
     sequence: SimpleSequence,
+    mode: PlayMode,
     id: Option<Value>,
     summary: String,
 ) -> JsonRpcResponse {
@@ -869,8 +901,10 @@ fn start_playback(
             return JsonRpcResponse::tool_error(id, format!("Audio output unavailable: {}", e));
         }
     };
-    match player.play(sequence, crate::midi::PlayMode::Replace) {
-        Ok(duration) => JsonRpcResponse::tool_text(id, playback_started_text(summary, duration)),
+    match player.play(sequence, mode) {
+        Ok(duration) => {
+            JsonRpcResponse::tool_text(id, playback_started_text(summary, duration, mode))
+        }
         Err(e) => {
             tracing::error!("Playback failed: {}", e);
             JsonRpcResponse::tool_error(id, format!("Playback failed: {}", e))
@@ -883,6 +917,10 @@ fn handle_play_notes(
     arguments: Value,
     id: Option<Value>,
 ) -> JsonRpcResponse {
+    let mode = match parse_mode(&arguments) {
+        Ok(mode) => mode,
+        Err(e) => return JsonRpcResponse::error(id, INVALID_PARAMS, e),
+    };
     let sequence: SimpleSequence = match serde_json::from_value(arguments) {
         Ok(seq) => seq,
         Err(e) => {
@@ -905,7 +943,7 @@ fn handle_play_notes(
         sequence.notes.len(),
         describe_sources(&sequence.notes)
     );
-    start_playback(state, sequence, id, summary)
+    start_playback(state, sequence, mode, id, summary)
 }
 
 fn handle_define_pattern(
@@ -964,6 +1002,10 @@ fn handle_play_sequence(
     arguments: Value,
     id: Option<Value>,
 ) -> JsonRpcResponse {
+    let mode = match parse_mode(&arguments) {
+        Ok(mode) => mode,
+        Err(e) => return JsonRpcResponse::error(id, INVALID_PARAMS, e),
+    };
     let extended: ExtendedSequence = match serde_json::from_value(arguments) {
         Ok(seq) => seq,
         Err(e) => {
@@ -1006,7 +1048,7 @@ fn handle_play_sequence(
         resolved.notes.len(),
         describe_sources(&resolved.notes)
     );
-    start_playback(state, resolved, id, summary)
+    start_playback(state, resolved, mode, id, summary)
 }
 
 fn handle_list_patterns(state: &ServerState, id: Option<Value>) -> JsonRpcResponse {
