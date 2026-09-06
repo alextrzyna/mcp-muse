@@ -487,6 +487,64 @@ impl MidiEngine {
     }
 }
 
+/// Adapts the engine to rodio: renders a chunk at a time and hands out
+/// interleaved stereo samples forever (silence when idle).
+pub struct EngineSource {
+    engine: MidiEngine,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    frame: usize,
+    pending_right: Option<f32>,
+}
+
+impl EngineSource {
+    pub fn new(engine: MidiEngine) -> Self {
+        Self {
+            engine,
+            left: vec![0.0; CHUNK_FRAMES],
+            right: vec![0.0; CHUNK_FRAMES],
+            frame: CHUNK_FRAMES, // force a render on the first pull
+            pending_right: None,
+        }
+    }
+}
+
+impl Iterator for EngineSource {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<f32> {
+        if let Some(right) = self.pending_right.take() {
+            return Some(right);
+        }
+        if self.frame >= CHUNK_FRAMES {
+            self.engine.render(&mut self.left, &mut self.right);
+            self.frame = 0;
+        }
+        let (left, right) = (self.left[self.frame], self.right[self.frame]);
+        self.frame += 1;
+        self.pending_right = Some(right);
+        Some(left)
+    }
+}
+
+impl rodio::Source for EngineSource {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        2
+    }
+
+    fn sample_rate(&self) -> u32 {
+        SAMPLE_RATE
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -853,6 +911,35 @@ pub(crate) mod tests {
             kit.name(),
             piano.name(),
             "channel 9 must draw from the percussion bank"
+        );
+    }
+
+    #[test]
+    fn engine_source_is_stereo_interleaved_and_never_ends() {
+        use rodio::Source;
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play(vec![(0, vec![0.5; 100])], PlayMode::Replace));
+        let mut source = EngineSource::new(engine);
+        assert_eq!(source.channels(), 2);
+        assert_eq!(source.sample_rate(), SAMPLE_RATE);
+        assert_eq!(source.total_duration(), None);
+        let samples: Vec<f32> = source
+            .by_ref()
+            .take(2 * (LEAD_FRAMES as usize + 50))
+            .collect();
+        assert_eq!(
+            samples[2 * LEAD_FRAMES as usize],
+            0.5,
+            "left of the first buffer frame"
+        );
+        assert_eq!(
+            samples[2 * LEAD_FRAMES as usize + 1],
+            0.5,
+            "right of the first buffer frame"
+        );
+        assert!(
+            source.by_ref().take(10 * CHUNK_FRAMES).count() == 10 * CHUNK_FRAMES,
+            "must not end"
         );
     }
 }
