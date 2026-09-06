@@ -3,14 +3,13 @@ use crate::expressive::{
     R2D2Expression, R2D2Voice,
 };
 use crate::midi::SimpleSequence;
+use crate::midi::engine::find_soundfont;
 use crate::midi::parser::MidiNote;
 use oxisynth::{MidiEvent, SoundFont, Synth};
 use rodio::{OutputStream, Sink, Source};
 use std::time::Duration;
 
-use std::env;
 use std::fs;
-use std::path::PathBuf;
 
 /// Owns the audio output stream for the process and every playback started
 /// on it. Each call to [`MidiPlayer::play_enhanced_mixed`] gets its own sink so
@@ -531,53 +530,6 @@ impl MidiPlayer {
 
         Ok(total_time)
     }
-}
-
-fn find_soundfont() -> Result<PathBuf, String> {
-    // First check if there's a custom soundfont path configured
-    if let Ok(config) = crate::setup::config::SetupConfig::load()
-        && let Some(custom_path) = config.soundfont_path
-    {
-        let path = PathBuf::from(custom_path);
-        if path.exists() {
-            tracing::info!("Using custom SoundFont from config: {:?}", path);
-            return Ok(path);
-        } else {
-            tracing::warn!("Configured custom SoundFont not found: {:?}", path);
-        }
-    }
-
-    // Try to find the SoundFont in various locations
-    let exe_path = env::current_exe().map_err(|e| format!("Cannot find executable: {}", e))?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or("Cannot find executable directory")?;
-
-    let possible_paths = vec![
-        exe_dir.join("../assets/FluidR3_GM.sf2"), // Development
-        exe_dir.join("assets/FluidR3_GM.sf2"),    // Installed
-        PathBuf::from("assets/FluidR3_GM.sf2"),   // Current directory
-        PathBuf::from("FluidR3_GM.sf2"),          // Current directory
-        // Also check target/debug/assets for development
-        PathBuf::from("target/debug/assets/FluidR3_GM.sf2"),
-        PathBuf::from("target/release/assets/FluidR3_GM.sf2"),
-        // Fallback to old soundfont if it exists
-        exe_dir.join("../assets/TimGM6mb.sf2"), // Development (old)
-        exe_dir.join("assets/TimGM6mb.sf2"),    // Installed (old)
-        PathBuf::from("assets/TimGM6mb.sf2"),   // Current directory (old)
-        PathBuf::from("TimGM6mb.sf2"),          // Current directory (old)
-        PathBuf::from("target/debug/assets/TimGM6mb.sf2"), // Development (old)
-        PathBuf::from("target/release/assets/TimGM6mb.sf2"), // Release (old)
-    ];
-
-    for path in possible_paths {
-        if path.exists() {
-            tracing::info!("Found SoundFont at: {:?}", path);
-            return Ok(path);
-        }
-    }
-
-    Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
 }
 
 /// Synthesizer gain passed to OxiSynth (its default of 0.2 is very quiet).

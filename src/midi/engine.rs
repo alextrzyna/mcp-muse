@@ -9,10 +9,12 @@
 
 use crate::expressive::EffectsChain;
 use crate::midi::EffectConfig;
-use oxisynth::{MidiEvent, Synth};
+use oxisynth::{MidiEvent, SoundFont, Synth};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::env;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -112,6 +114,70 @@ pub fn soft_clip(x: f32) -> f32 {
     } else {
         x.signum() * (KNEE + (1.0 - KNEE) * ((x.abs() - KNEE) / (1.0 - KNEE)).tanh())
     }
+}
+
+pub fn find_soundfont() -> Result<PathBuf, String> {
+    // First check if there's a custom soundfont path configured
+    if let Ok(config) = crate::setup::config::SetupConfig::load()
+        && let Some(custom_path) = config.soundfont_path
+    {
+        let path = PathBuf::from(custom_path);
+        if path.exists() {
+            tracing::info!("Using custom SoundFont from config: {:?}", path);
+            return Ok(path);
+        } else {
+            tracing::warn!("Configured custom SoundFont not found: {:?}", path);
+        }
+    }
+
+    // Try to find the SoundFont in various locations
+    let exe_path = env::current_exe().map_err(|e| format!("Cannot find executable: {}", e))?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Cannot find executable directory")?;
+
+    let possible_paths = vec![
+        exe_dir.join("../assets/FluidR3_GM.sf2"), // Development
+        exe_dir.join("assets/FluidR3_GM.sf2"),    // Installed
+        PathBuf::from("assets/FluidR3_GM.sf2"),   // Current directory
+        PathBuf::from("FluidR3_GM.sf2"),          // Current directory
+        // Also check target/debug/assets for development
+        PathBuf::from("target/debug/assets/FluidR3_GM.sf2"),
+        PathBuf::from("target/release/assets/FluidR3_GM.sf2"),
+        // Fallback to old soundfont if it exists
+        exe_dir.join("../assets/TimGM6mb.sf2"), // Development (old)
+        exe_dir.join("assets/TimGM6mb.sf2"),    // Installed (old)
+        PathBuf::from("assets/TimGM6mb.sf2"),   // Current directory (old)
+        PathBuf::from("TimGM6mb.sf2"),          // Current directory (old)
+        PathBuf::from("target/debug/assets/TimGM6mb.sf2"), // Development (old)
+        PathBuf::from("target/release/assets/TimGM6mb.sf2"), // Release (old)
+    ];
+
+    for path in possible_paths {
+        if path.exists() {
+            tracing::info!("Found SoundFont at: {:?}", path);
+            return Ok(path);
+        }
+    }
+
+    Err("SoundFont not found. Please run 'mcp-muse --setup' to download it.".to_string())
+}
+
+/// Parse the SoundFont and build the process's one synthesizer.
+pub fn load_synth(path: &Path) -> Result<Synth, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("Failed to open SoundFont file {:?}: {}", path, e))?;
+    let soundfont =
+        SoundFont::load(&mut file).map_err(|e| format!("Failed to parse SoundFont: {}", e))?;
+    let mut synth = Synth::default();
+    synth.set_sample_rate(SAMPLE_RATE as f32);
+    synth.set_gain(OXISYNTH_GAIN);
+    synth
+        .set_polyphony(POLYPHONY)
+        .map_err(|e| format!("Failed to set polyphony: {:?}", e))?;
+    synth.add_font(soundfont, true);
+    tracing::info!("Loaded SoundFont from {:?}", path);
+    Ok(synth)
 }
 
 struct ScheduledEvent {
@@ -631,5 +697,181 @@ pub(crate) mod tests {
         );
         engine.apply(EngineCommand::Stop);
         assert!(!engine.bus_has_effects());
+    }
+
+    /// Engine with the real SoundFont, or `None` (after printing why) when it is not installed.
+    ///
+    /// OxiSynth's built-in reverb/chorus default to active with a nonzero wet
+    /// level; their comb/allpass filters seed their delay lines with a tiny
+    /// DC offset (freeverb's standard anti-denormal trick), which otherwise
+    /// leaks a permanent, deterministic ~1e-7 hum into every sample from the
+    /// very first render call, even with no voice ever triggered. That is
+    /// real OxiSynth behavior (unrelated to anything `MidiEngine` does) and
+    /// far below audible/measurable levels, but it defeats a bit-exact
+    /// silence assertion. Zero both wet levels here, in the test fixture
+    /// only, so the timing tests observe true silence; `load_synth` itself
+    /// is untouched and channel-level reverb/chorus CCs keep working in
+    /// production.
+    pub(crate) fn engine_with_soundfont() -> Option<(MidiEngine, EngineHandle)> {
+        let path = match find_soundfont() {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("skipping: SoundFont not installed (run `mcp-muse setup`)");
+                return None;
+            }
+        };
+        let mut synth = load_synth(&path).unwrap();
+        synth.set_reverb_params(&oxisynth::ReverbParams {
+            level: 0.0,
+            ..Default::default()
+        });
+        synth.set_chorus_params(&oxisynth::ChorusParams {
+            level: 0.0,
+            ..Default::default()
+        });
+        Some(MidiEngine::new(Some(synth)))
+    }
+
+    fn flute(offset: u64, seconds: f64, pan: Option<u8>) -> Vec<(u64, EventKind)> {
+        let mut events = vec![(
+            offset,
+            EventKind::ProgramChange {
+                channel: 0,
+                program: 73,
+            },
+        )];
+        if let Some(pan) = pan {
+            events.push((
+                offset,
+                EventKind::ControlChange {
+                    channel: 0,
+                    controller: 10,
+                    value: pan,
+                },
+            ));
+        }
+        events.push((
+            offset,
+            EventKind::NoteOn {
+                channel: 0,
+                key: 76,
+                velocity: 100,
+            },
+        ));
+        events.push((
+            offset + seconds_to_frames(Duration::from_secs_f64(seconds)),
+            EventKind::NoteOff {
+                channel: 0,
+                key: 76,
+            },
+        ));
+        events
+    }
+
+    fn play_events(events: Vec<(u64, EventKind)>, mode: PlayMode) -> EngineCommand {
+        EngineCommand::Play(PlayCommand {
+            events,
+            mode,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn a_note_scheduled_at_n_sounds_from_n_not_from_the_chunk_boundary() {
+        let Some((mut engine, _handle)) = engine_with_soundfont() else {
+            return;
+        };
+        engine.apply(play_events(flute(100, 0.5, None), PlayMode::Replace));
+        // 5 chunks: the brief's 4 (4096 frames) is short of start+2000 (4148).
+        let (left, _) = render_all(&mut engine, 5 * CHUNK_FRAMES);
+        let start = LEAD_FRAMES as usize + 100;
+        assert!(
+            left[..start].iter().all(|s| *s == 0.0),
+            "sound before the scheduled frame"
+        );
+        assert!(
+            rms(&left[start..start + 2000]) > 0.001,
+            "no sound after the scheduled frame"
+        );
+    }
+
+    fn render_panned_flute(pan: u8) -> (f32, f32) {
+        let (mut engine, _handle) = engine_with_soundfont().expect("checked by caller");
+        engine.apply(play_events(flute(0, 0.5, Some(pan)), PlayMode::Replace));
+        let (left, right) = render_all(&mut engine, LEAD_FRAMES as usize + 26_460);
+        let window = LEAD_FRAMES as usize + 4410..LEAD_FRAMES as usize + 22_050;
+        (rms(&left[window.clone()]), rms(&right[window]))
+    }
+
+    #[test]
+    fn pan_moves_the_stereo_image() {
+        if engine_with_soundfont().is_none() {
+            return;
+        }
+        let (l_hard_left, r_hard_left) = render_panned_flute(0);
+        let (l_hard_right, r_hard_right) = render_panned_flute(127);
+        assert!(r_hard_right > 0.01, "no audio rendered");
+        assert!(
+            l_hard_left > l_hard_right * 1.5 && r_hard_right > r_hard_left * 1.5,
+            "pan had no effect: pan0=({l_hard_left},{r_hard_left}) pan127=({l_hard_right},{r_hard_right})"
+        );
+    }
+
+    #[test]
+    fn stop_resets_programs_and_channel_9_stays_a_drum_kit() {
+        let Some((mut engine, _handle)) = engine_with_soundfont() else {
+            return;
+        };
+        engine.apply(play_events(flute(0, 0.5, None), PlayMode::Replace));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        assert_eq!(engine.synth().unwrap().program(0).unwrap().2, 73);
+
+        engine.apply(EngineCommand::Stop);
+        assert_eq!(
+            engine.synth().unwrap().program(0).unwrap().2,
+            0,
+            "SystemReset restores program 0"
+        );
+
+        engine.apply(play_events(
+            vec![
+                (
+                    0,
+                    EventKind::ProgramChange {
+                        channel: 9,
+                        program: 0,
+                    },
+                ),
+                (
+                    0,
+                    EventKind::NoteOn {
+                        channel: 9,
+                        key: 36,
+                        velocity: 110,
+                    },
+                ),
+                (
+                    4410,
+                    EventKind::NoteOff {
+                        channel: 9,
+                        key: 36,
+                    },
+                ),
+            ],
+            PlayMode::Layer,
+        ));
+        let (left, _) = render_all(&mut engine, 4 * CHUNK_FRAMES);
+        assert!(
+            rms(&left[LEAD_FRAMES as usize..]) > 0.001,
+            "kick did not sound"
+        );
+        let synth = engine.synth().unwrap();
+        let kit = synth.channel_preset(9).unwrap();
+        let piano = synth.channel_preset(0).unwrap();
+        assert_ne!(
+            kit.name(),
+            piano.name(),
+            "channel 9 must draw from the percussion bank"
+        );
     }
 }
