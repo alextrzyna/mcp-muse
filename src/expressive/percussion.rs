@@ -5,7 +5,8 @@
 //! Every swept oscillator accumulates phase; `sin(2π·f(t)·t)` would shift the
 //! perceived pitch by `t·f'(t)` and make descending sweeps bounce back up.
 
-use crate::expressive::synth::{PhaseAccumulator, SynthType};
+use crate::expressive::oscillator::PhaseAccumulator;
+use crate::expressive::synth::SynthType;
 use rand::{Rng, RngExt};
 use std::f32::consts::TAU;
 

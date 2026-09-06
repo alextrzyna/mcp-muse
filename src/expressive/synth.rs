@@ -6,6 +6,7 @@
 //! ADSR because their generators already shape the sound.
 
 use crate::expressive::effects::{EffectsChain, Svf, SvfMode};
+use crate::expressive::oscillator::{PhaseAccumulator, poly_blep};
 use crate::expressive::percussion;
 use crate::midi::EffectConfig;
 use anyhow::Result;
@@ -236,57 +237,6 @@ impl Default for DX7Operator {
                 release: 0.5,
             },
         }
-    }
-}
-
-/// Sine oscillator that integrates instantaneous frequency, so it stays
-/// correct when the frequency changes every sample.
-#[derive(Debug, Clone, Copy)]
-pub struct PhaseAccumulator {
-    phase: f32,
-    sample_rate: f32,
-}
-
-impl PhaseAccumulator {
-    pub fn new(sample_rate: f32) -> Self {
-        Self {
-            phase: 0.0,
-            sample_rate,
-        }
-    }
-
-    /// Advance by one sample at `freq` Hz and return the phase *before* advancing.
-    #[inline]
-    pub fn next_phase(&mut self, freq: f32) -> f32 {
-        let current = self.phase;
-        self.phase = (self.phase + TAU * freq / self.sample_rate).rem_euclid(TAU);
-        current
-    }
-
-    /// Advance by one sample and return `sin(phase)`.
-    #[inline]
-    pub fn next(&mut self, freq: f32) -> f32 {
-        self.next_phase(freq).sin()
-    }
-
-    /// Advance and return phase normalized to 0..1 (for non-sine waveforms).
-    #[inline]
-    fn next_unit(&mut self, freq: f32) -> f32 {
-        self.next_phase(freq) / TAU
-    }
-}
-
-/// Polynomial band-limited step correction for saw/square discontinuities.
-#[inline]
-fn poly_blep(t: f32, dt: f32) -> f32 {
-    if t < dt {
-        let t = t / dt;
-        2.0 * t - t * t - 1.0
-    } else if t > 1.0 - dt {
-        let t = (t - 1.0) / dt;
-        t * t + 2.0 * t + 1.0
-    } else {
-        0.0
     }
 }
 
