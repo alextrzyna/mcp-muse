@@ -546,28 +546,27 @@ impl ExpressiveSynth {
         let sample_count = (self.sample_rate * params.duration.max(0.0)) as usize;
         let sr = self.sample_rate;
 
-        let mut samples =
-            match percussion::render(sr, &params.synth_type, params.frequency, sample_count) {
-                Some(rendered) => rendered,
-                None => {
-                    let mut osc = Oscillator::new(sr);
-                    let shape_with_adsr = !matches!(
-                        params.synth_type,
-                        SynthType::Chime { .. } | SynthType::Burst { .. }
-                    );
-                    (0..sample_count)
-                        .map(|i| {
-                            let t = i as f32 / sr;
-                            let raw = osc.sample(params, t);
-                            if shape_with_adsr {
-                                raw * params.envelope.level_at(t, params.duration)
-                            } else {
-                                raw
-                            }
-                        })
-                        .collect()
-                }
-            };
+        let mut samples = match percussion_config(&params.synth_type, params.frequency) {
+            Some(cfg) => percussion::render(sr, &cfg, sample_count),
+            None => {
+                let mut osc = Oscillator::new(sr);
+                let shape_with_adsr = !matches!(
+                    params.synth_type,
+                    SynthType::Chime { .. } | SynthType::Burst { .. }
+                );
+                (0..sample_count)
+                    .map(|i| {
+                        let t = i as f32 / sr;
+                        let raw = osc.sample(params, t);
+                        if shape_with_adsr {
+                            raw * params.envelope.level_at(t, params.duration)
+                        } else {
+                            raw
+                        }
+                    })
+                    .collect()
+            }
+        };
 
         if let Some(filter) = &params.filter {
             let mut svf = filter.to_svf(sr);
@@ -717,6 +716,107 @@ impl ExpressiveSynth {
             x.signum() * (0.5 + (x.abs() - 0.5) * 0.6)
         }
     }
+}
+
+/// Bridge from the legacy `SynthType` percussion variants (removed in the
+/// patch migration) to the new config struct.
+fn percussion_config(
+    synth_type: &SynthType,
+    frequency: f32,
+) -> Option<crate::expressive::Percussion> {
+    use crate::expressive::{Percussion, PercussionKind};
+    let base = |kind| Percussion {
+        kind,
+        level: 1.0,
+        frequency: Some(frequency),
+        punch: None,
+        sustain: None,
+        click_freq: None,
+        snap: None,
+        buzz: None,
+        noise_amount: None,
+        metallic: None,
+        decay: None,
+        brightness: None,
+        size: None,
+        strike_intensity: None,
+        energy: None,
+        harmonic_content: None,
+        direction: None,
+        intensity: None,
+        sweep: None,
+        harmonic_count: None,
+        inharmonicity: None,
+        bandwidth: None,
+        shape: None,
+    };
+    Some(match synth_type {
+        SynthType::Kick {
+            punch,
+            sustain,
+            click_freq,
+            body_freq,
+        } => Percussion {
+            punch: Some(*punch),
+            sustain: Some(*sustain),
+            click_freq: Some(*click_freq),
+            frequency: Some(*body_freq),
+            ..base(PercussionKind::Kick)
+        },
+        SynthType::Snare {
+            snap,
+            buzz,
+            tone_freq,
+            noise_amount,
+        } => Percussion {
+            snap: Some(*snap),
+            buzz: Some(*buzz),
+            noise_amount: Some(*noise_amount),
+            frequency: Some(*tone_freq),
+            ..base(PercussionKind::Snare)
+        },
+        SynthType::HiHat {
+            metallic,
+            decay,
+            brightness,
+        } => Percussion {
+            metallic: Some(*metallic),
+            decay: Some(*decay),
+            brightness: Some(*brightness),
+            ..base(PercussionKind::Hihat)
+        },
+        SynthType::Cymbal {
+            size,
+            metallic,
+            strike_intensity,
+        } => Percussion {
+            size: Some(*size),
+            metallic: Some(*metallic),
+            strike_intensity: Some(*strike_intensity),
+            ..base(PercussionKind::Cymbal)
+        },
+        SynthType::Zap {
+            energy,
+            decay,
+            harmonic_content,
+        } => Percussion {
+            energy: Some(*energy),
+            decay: Some(*decay),
+            harmonic_content: Some(*harmonic_content),
+            ..base(PercussionKind::Zap)
+        },
+        SynthType::Swoosh {
+            direction,
+            intensity,
+            frequency_sweep,
+        } => Percussion {
+            direction: Some(*direction),
+            intensity: Some(*intensity),
+            sweep: Some([frequency_sweep.0, frequency_sweep.1]),
+            ..base(PercussionKind::Swoosh)
+        },
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
