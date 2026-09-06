@@ -245,30 +245,31 @@ chmod 755 ~/.cursor
 
 ### Enable Debug Logging
 
-**Temporary**:
+**Temporary** (or set it in your MCP host's `env` block):
 ```bash
-RUST_LOG=debug ./mcp-muse
+MCP_MUSE_LOG=debug ./mcp-muse
 ```
 
-**Check Log Files**:
-- **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
-- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
-- **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log`
+**Check Log Files** (rotated daily, pruned after seven days):
+- **Linux**: `~/.local/share/mcp-muse/mcp-muse.log.YYYY-MM-DD`
+- **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log.YYYY-MM-DD`
+- **Windows**: `%APPDATA%\mcp-muse\mcp-muse.log.YYYY-MM-DD`
 
 ### Common Log Messages
 
 **Normal Operation**:
 ```
-Starting MCP MIDI Server (stdio mode)...
+MCP server starting (mcp-muse 2025.11.1)
 Handling initialize request
-Handling tools/list request
+Opened audio output stream
+Playback started (non-blocking) - duration: 3.20s, active playbacks: 1
 ```
 
 **Errors to Investigate**:
 ```
-Audio playback failed: [details]
-Failed to parse MIDI data: [details]
-Invalid base64 encoding: [details]
+Audio output unavailable: [details]
+Playback failed: [details]
+SoundFont not found. Please run 'mcp-muse setup' to download it.
 ```
 
 ## Performance Issues
@@ -276,19 +277,17 @@ Invalid base64 encoding: [details]
 ### High CPU Usage
 
 **Solutions**:
-1. Reduce MIDI complexity (fewer simultaneous notes)
-2. Lower audio quality settings
-3. Close unnecessary applications
-4. Check for audio driver issues
+1. Reduce the number of simultaneous notes and effects
+2. Make sure `MCP_MUSE_LOG` is not set to `debug` or `trace` during normal use
+3. Check for audio driver issues
 
 ### Memory Usage
 
 **Problem**: High memory consumption
 
 **Solutions**:
-1. Use smaller MIDI files
-2. Restart server periodically for long-running sessions
-3. Check for memory leaks in logs
+1. Use shorter sequences; every synthesis note is rendered up front
+2. Call `stop_playback` before starting long overlapping sequences
 
 ## Getting Help
 
@@ -296,7 +295,7 @@ Invalid base64 encoding: [details]
 
 1. **Test with examples**: Try examples from `examples/basic_usage.md`
 2. **Check logs**: Review log files for error details
-3. **Verify setup**: Re-run `--setup` command
+3. **Verify setup**: Re-run `mcp-muse setup` (`--setup` also works)
 4. **Test environment**: Try on different system if available
 
 ### Information to Include

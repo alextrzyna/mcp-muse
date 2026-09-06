@@ -8,124 +8,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo build` - Build the project in debug mode
 - `cargo build --release` - Build optimized release binary
 - `cargo run` - Run the MCP server (default command)
-- `cargo run -- --setup` - Run the interactive setup process
+- `cargo run -- setup` - Run the interactive setup process
 
 ### Testing Commands
-- `cargo test` - Run all unit and integration tests
-- `cargo clippy -- -D warnings` - Check code quality (must pass for CI)
+- `cargo test` - Run all unit and integration tests (integration tests spawn the server binary)
+- `cargo clippy --all-targets -- -D warnings` - Check code quality (must pass for CI)
 - `cargo fmt` - Format code (required before PR)
-- `cargo run -- test-presets` - Test classic synthesizer preset integration
-- `cargo run -- test-polyphony` - Test polyphonic voice management
-- `cargo run -- test-drums` - Test drum synthesis and preset functionality
-- `cargo run -- debug-dx7` - Debug DX7 synthesis issues
 
-### Development Utilities
-- `cargo run -- server` - Explicitly start MCP server
-- `./target/release/mcp-muse --setup` - Production setup command
+DSP behaviour is verified by rendering to sample buffers and measuring
+(Goertzel power, RMS, zero-crossing rate); see `src/expressive/test_util.rs`.
+Prefer that over listen-by-ear checks when changing synthesis or effects.
+
+### Listen-by-ear demos (`src/demos.rs`, play audio locally)
+- `cargo run -- test-presets` - Classic synthesizer presets
+- `cargo run -- test-drums` - Drum synthesis and drum presets
+- `cargo run -- test-pads`, `test-volumes`, `test-effects`, `debug-dx7`
 
 ### Logging and Debugging
-- **Log Location** (cross-platform):
-  - **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log`
-  - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log`
-  - **Windows**: `%APPDATA%/mcp-muse/mcp-muse.log`
-- **View Logs**: `tail -f ~/Library/Application\ Support/mcp-muse/mcp-muse.log` (macOS)
-- **When Cursor runs the server**: Logs are captured by Cursor and may not appear in the file
-- **Log Level**: TRACE (all events logged, see src/main.rs:50)
+- **Log Location** (cross-platform, daily rotated, pruned after 7 days):
+  - **macOS**: `~/Library/Application Support/mcp-muse/mcp-muse.log.YYYY-MM-DD`
+  - **Linux**: `~/.local/share/mcp-muse/mcp-muse.log.YYYY-MM-DD`
+  - **Windows**: `%APPDATA%/mcp-muse/mcp-muse.log.YYYY-MM-DD`
+- **Log Level**: `MCP_MUSE_LOG` env var (EnvFilter syntax, e.g. `debug` or `mcp_muse::midi=trace`); default `info`. Never log inside per-sample audio loops.
 
 ## Architecture Overview
 
-### Core Components
+### MCP Server (`src/server/mcp.rs`)
+JSON-RPC 2.0 over stdio. `ServerState` holds the audio player (opened on
+first playback) and the session's patterns. Six tools:
+- `play_notes` - quick sounds and melodies; every note type in one array
+- `define_sequence_pattern` / `play_sequence` / `list_patterns` - reusable bar-based patterns with transposition, repeats and time signature
+- `list_sounds` - catalog of presets, GM instruments, drum keys, synthesis types, R2D2 emotions and effects
+- `stop_playback` - silence everything currently playing
 
-**MCP Server (src/server/)**
-- `mcp.rs` - Complete MCP protocol implementation with three tools:
-  - `play_midi` - Legacy base64 MIDI support
-  - `play_notes` - JSON-based music creation (primary interface)
-  - `play_r2d2_expression` - Robotic emotional expressions
+Conventions: malformed or invalid arguments return JSON-RPC `-32602`;
+anything that fails while executing (unknown preset, missing pattern, no
+audio device) returns a result with `isError: true` so the model can read
+it. Requests without an id are notifications and get no response.
 
-**Audio Engines**
-- **OxiSynth Engine** - Professional SoundFont synthesis for SNES-style gaming sounds
-- **ExpressiveSynth Engine** - R2D2-style robotic vocalizations with 9 emotions
-- **HybridAudioSource** - Real-time mixing of both engines
+### Audio pipeline (`src/midi/player.rs`)
+`MidiPlayer::play_enhanced_mixed` renders a `SimpleSequence` and starts it
+on a new rodio `Sink` (overlapping calls mix; `stop_all` stops them) and
+returns the total duration including effect tails.
 
-**MIDI System (src/midi/)**
-- `player.rs` - Unified audio playback with MidiPlayer class:
-  - `play_enhanced_mixed()` - Universal playback method supporting ALL audio types (MIDI, synthesis, R2D2, presets, effects)
-  - Per-channel effects processing with intelligent limiting (max 3 effects per channel)
-  - Automatic gain compensation for heavily processed signals
-- `parser.rs` - MIDI file parsing and timing conversion
+1. Presets are applied to notes; a missing preset is an error.
+2. Musical time is converted to seconds using the sequence's tempo and `beats_per_bar`.
+3. R2D2 and synthesis notes are pre-rendered to sample buffers *with their own effects*.
+4. MIDI notes are rendered live by OxiSynth (`OxiSynthSource`, stereo) and pass through the MIDI bus `EffectsChain` (one instance per side). The chain comes from the first MIDI note that specifies effects.
+5. `EnhancedHybridAudioSource` sums the buses per frame, soft-clips, and emits interleaved stereo.
 
-**Synthesis System (src/expressive/)**
-- `synth.rs` - PolyphonicVoiceManager for real-time voice allocation
-- `r2d2.rs` - Ring modulation synthesis with emotion-specific parameters
-- `presets/` - 31 classic synthesizer presets (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
-- `fundsp_effects.rs` - Professional audio effects processor:
-  - Reverb (Schroeder algorithm), Delay, Chorus, Filter, Compressor, Distortion
-  - Per-channel processing with automatic limiting
-  - Effects presets for common scenarios
+Known limitation: OxiSynth renders all 16 MIDI channels into one bus, so
+per-channel effects are not yet possible (pan, volume, reverb/chorus CCs do
+work per channel inside OxiSynth).
 
-**Setup System (src/setup/)**
-- Automatic FluidR3_GM SoundFont download (142MB)
-- MCP host configuration (Cursor integration)
-- Cross-platform data directory management
+### Synthesis (`src/expressive/`)
+- `synth.rs` - `ExpressiveSynth`: R2D2 ring-modulation voice and the general synthesizer. Pipeline per note: oscillator → ADSR → `Svf` filter → `EffectsChain` → amplitude. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`). Includes PolyBLEP saw/square, DX7 operator routing for algorithms 1/2, 5/6, 16/17, 32.
+- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh; these carry their own envelopes so the ADSR is skipped.
+- `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::new(sample_rate, &[EffectConfig])` then `process` per sample or `process_buffer`.
+- `effects_presets.rs` - named chains ("studio", "concert_hall", ...).
+- `presets/` - 29 classic synth presets in six categories (bass 10, pad 10, drums 5, effects 2, lead 1, keys 1). Preset effects plus `signature_effects` merge into the note's effect chain unless the caller supplies `effects` explicitly.
+- `r2d2.rs` - emotion parameter tables (pitch contours, ranges).
 
-### Audio Capabilities
+### Data model (`src/midi/mod.rs`)
+`SimpleNote` is one flat struct covering MIDI, R2D2, synthesis, preset and
+effects fields (use `..Default::default()`). `SimpleSequence` carries
+`tempo` and `beats_per_bar`. `MusicalDuration` is a number (bars) or a
+note-value string. `SequencePattern::quantize_notes` applies
+`quantize_grid` when a pattern is defined. `gm_names.rs` has the GM
+program and drum-key names used by `list_sounds`.
 
-**165+ Sound Options:**
-- 128 GM instruments (FluidR3_GM SoundFont)
-- 9 R2D2 emotional expressions
-- 31 classic synthesizer presets (including 5 drum machine presets)
-- 19 custom synthesis types
+### Setup (`src/setup/`)
+Downloads FluidR3_GM.sf2 (verified against a pinned SHA-256), writes the
+Cursor MCP config, stores an optional custom SoundFont path.
 
-**Key Features:**
-- Mixed mode sequences (all audio systems work together)
-- Real-time polyphonic voice management (32+ voices)
-- Professional audio quality (44.1kHz stereo synthesis)
-- Zero-latency performance for AI conversations
-
-### Data Structures
-
-**SimpleNote (src/midi/mod.rs)** - Universal note representation supporting:
-- MIDI parameters (note, velocity, channel, instrument)
-- R2D2 parameters (emotion, intensity, complexity, pitch_range)
-- Synthesis parameters (synth_type, frequency, envelope, effects)
-- Classic preset parameters (preset_name, preset_category, preset_variation)
-
-**SimpleSequence** - Collection of SimpleNote objects with tempo control
-
-### Development Notes
-
-**Audio Architecture:**
-- OxiSynth for SoundFont-based MIDI synthesis (FluidR3_GM.sf2)
-- ExpressiveSynth for R2D2 emotional vocalizations
-- rodio-based audio pipeline with proper buffering
-- Real-time mixing with sample-accurate timing
-- Per-channel effects processing (16 MIDI channels + R2D2 + synthesis)
-- Intelligent effects limiting to prevent signal destruction
-- Automatic gain compensation for heavily attenuated signals
-
-**Polyphony Management:**
-- Voice allocation with intelligent voice stealing
-- Real-time envelope processing
-- Support for 32+ simultaneous voices
-- Dynamic parameter modulation
-
-**Testing Infrastructure:**
-- Comprehensive polyphony validation tests
-- Classic preset integration testing
-- Mixed mode audio system validation
-- Real-time audio quality verification
-
-**Setup System:**
-- Interactive SoundFont configuration
-- Automatic MCP host integration
-- Cross-platform data directory handling
-- Robust error recovery with manual fallbacks
-
-**Important Architectural Decisions:**
-- **Unified Playback**: All audio types use `play_enhanced_mixed()` - no separate methods needed
-- **Effects Limiting**: Maximum 3 effects per channel to prevent signal destruction (>3 effects can cause inaudible output)
-- **Gain Compensation**: Automatic 2x gain boost when effects attenuate signal below 10% of original
-- **Channel Routing**: Currently all MIDI routes to channel 0 (TODO: implement per-channel MIDI separation)
-- **Effects Collection**: Effects are collected per audio type (MIDI, R2D2, synthesis) not per individual note
-
-The system is production-ready with professional audio quality, supporting both nostalgic SNES gaming sounds and expressive R2D2 robotic vocalizations for AI conversation enhancement.
+## Important Architectural Decisions
+- **Unified playback**: every audio type goes through `play_enhanced_mixed`.
+- **Effects are stateful and per note** for synthesis/R2D2, per bus for MIDI. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
+- **Stereo throughout** the mixer; mono sources are centered.
+- **No audio stream per call**: `ServerState` owns one `MidiPlayer` for the process.
