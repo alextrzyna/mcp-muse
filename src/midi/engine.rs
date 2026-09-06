@@ -268,7 +268,7 @@ impl MidiEngine {
     fn silence(&mut self) {
         let (mut left, mut right) = (vec![0.0f32; FADE_FRAMES], vec![0.0f32; FADE_FRAMES]);
         self.render_frames(&mut left, &mut right);
-        self.fade_tail = left
+        let mut tail: Vec<(f32, f32)> = left
             .iter()
             .zip(&right)
             .enumerate()
@@ -277,6 +277,18 @@ impl MidiEngine {
                 (l * gain, r * gain)
             })
             .collect();
+        // A previous fade may still be playing out - two resets in one command
+        // drain, or a replace during an earlier fade. Sum the unconsumed
+        // remainder into the new tail instead of discarding it; in the
+        // same-drain case the new tail is silent and only the old one is heard.
+        for (new, &(old_l, old_r)) in tail
+            .iter_mut()
+            .zip(self.fade_tail.iter().skip(self.fade_pos))
+        {
+            new.0 += old_l;
+            new.1 += old_r;
+        }
+        self.fade_tail = tail;
         self.fade_pos = 0;
         if let Some(synth) = &mut self.synth
             && let Err(e) = synth.send_event(MidiEvent::SystemReset)
@@ -458,6 +470,42 @@ pub(crate) mod tests {
         drop(handle);
         let (left, _) = render_all(&mut engine, CHUNK_FRAMES);
         assert_eq!(left.len(), CHUNK_FRAMES);
+    }
+
+    #[test]
+    fn a_second_reset_in_the_same_drain_keeps_the_first_fade_tail() {
+        let (mut engine, handle) = MidiEngine::new(None);
+        handle
+            .send(EngineCommand::Play(PlayCommand {
+                buffers: vec![(0, vec![0.5; SAMPLE_RATE as usize])],
+                ..Default::default()
+            }))
+            .unwrap();
+        // Four chunks: the buffer (scheduled at LEAD_FRAMES) is sounding.
+        let (sounding, _) = render_all(&mut engine, 4 * CHUNK_FRAMES);
+        assert!(sounding[4 * CHUNK_FRAMES - 1] > 0.4, "buffer is audible");
+
+        // Two resetting commands land in the same drain. The second one sees an
+        // already-silent engine, so it must not throw away the first one's tail.
+        handle.send(EngineCommand::Stop).unwrap();
+        handle
+            .send(EngineCommand::Play(PlayCommand {
+                mode: PlayMode::Replace,
+                ..Default::default()
+            }))
+            .unwrap();
+
+        let (mut l, mut r) = (vec![0.0f32; CHUNK_FRAMES], vec![0.0f32; CHUNK_FRAMES]);
+        engine.render(&mut l, &mut r);
+        assert!(l[0] > 0.4, "fade starts from the audio that was playing");
+        assert!(
+            l[FADE_FRAMES / 2] > 0.0 && l[FADE_FRAMES / 2] < l[0],
+            "fade decays instead of hard-cutting"
+        );
+        assert!(
+            l[FADE_FRAMES..].iter().all(|s| *s == 0.0),
+            "silence once the fade is over"
+        );
     }
 
     #[test]
