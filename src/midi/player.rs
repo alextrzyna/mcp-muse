@@ -1401,6 +1401,7 @@ impl EnhancedHybridAudioSource {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // unused now that level_tests renders through MidiEngine; removed with the rest of this struct in a later task
     fn next_frame_unclipped(&mut self) -> Option<(f32, f32)> {
         self.channel_processor.probe_unclipped = true;
         self.next_frame()
@@ -1539,46 +1540,23 @@ mod level_tests {
 
     /// Peak and fraction of samples above the clipper knee, before clipping.
     fn measure(seq: SimpleSequence) -> (f32, f32) {
-        let player = MidiPlayer::new().unwrap();
-        let mut midi = Vec::new();
-        let mut synth = Vec::new();
-        for n in seq.notes {
-            if n.is_synthesis() || n.is_preset() {
-                let mut n = n;
-                player.apply_preset_to_note(&mut n).unwrap();
-                synth.push(SynthEvent {
-                    start_time: n.start_time.unwrap_or(0.0),
-                    note: n,
-                });
-            } else {
-                midi.push(MidiNote {
-                    note: n.note.unwrap(),
-                    velocity: n.velocity.unwrap_or(80),
-                    channel: n.channel,
-                    start_time: Duration::from_secs_f64(n.start_time.unwrap_or(0.0)),
-                    duration: Duration::from_secs_f64(n.duration.unwrap_or(1.0)),
-                    instrument: n.instrument,
-                    reverb: n.reverb,
-                    chorus: n.chorus,
-                    volume: n.volume,
-                    pan: n.pan,
-                    balance: n.balance,
-                    expression: n.expression,
-                    sustain: n.sustain,
-                });
-            }
-        }
-        let mut src = EnhancedHybridAudioSource::new(
-            midi,
-            Vec::new(),
-            synth,
-            Duration::from_millis(1500),
-            Default::default(),
-        )
-        .unwrap();
+        use crate::midi::engine::{CHUNK_FRAMES, EngineCommand, LEAD_FRAMES, PlayMode};
+        use crate::midi::translate::Translator;
+        let (mut engine, _handle) =
+            crate::midi::engine::tests::engine_with_soundfont().expect("caller checked");
+        let translation = Translator::new(Ok(()))
+            .translate(seq, PlayMode::Replace)
+            .unwrap();
+        engine.apply(EngineCommand::Play(translation.command));
+
+        let total = LEAD_FRAMES as usize + 66_150; // 1.5 s of material
+        let (mut l, mut r) = (vec![0.0f32; CHUNK_FRAMES], vec![0.0f32; CHUNK_FRAMES]);
         let (mut peak, mut over, mut count) = (0.0f32, 0usize, 0usize);
-        while let Some((l, r)) = src.next_frame_unclipped() {
-            for v in [l, r] {
+        let mut rendered = 0;
+        while rendered < total {
+            engine.render_unclipped(&mut l, &mut r);
+            rendered += CHUNK_FRAMES;
+            for v in l.iter().chain(r.iter()) {
                 peak = peak.max(v.abs());
                 if v.abs() > 0.8 {
                     over += 1;
