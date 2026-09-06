@@ -156,6 +156,14 @@ enum PlayMode { Replace, Layer }
   `play_enhanced_mixed` returns an error and the tool reports it.
 - `CLAUDE.md` "Audio pipeline" section and the README tool docs are updated.
 
+Implementation notes (2026-09-05): `mode` is parsed from the tool arguments
+by `parse_mode` in `mcp.rs` rather than stored on the sequence structs, so
+the 40+ struct literals in demos and tests are untouched. The engine picks
+`start = clock + LEAD_FRAMES` itself when it applies a command, so the tool
+thread never schedules against a stale clock. The channel-9 bank-select
+sequence was dropped: OxiSynth's `drums_channel_active` (default on) makes
+program changes on channel 9 resolve in bank 128.
+
 ### Error handling
 
 - Unknown preset, invalid R2D2 or synthesis note, missing SoundFont for

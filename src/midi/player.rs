@@ -64,6 +64,11 @@ impl MidiPlayer {
         if mode == PlayMode::Replace {
             self.playback_ends.clear();
         }
+        // Re-read the clock after translation: translating can take long
+        // enough (pre-rendering synth/R2D2 buffers) that the earlier read
+        // would under-count the end frame and let the prune above drop this
+        // playback too soon.
+        let now = self.engine.clock();
         self.engine.send(EngineCommand::Play(command))?;
         self.playback_ends
             .push(now + LEAD_FRAMES + seconds_to_frames(duration));
