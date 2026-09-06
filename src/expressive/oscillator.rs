@@ -146,8 +146,14 @@ mod tests {
     fn noise_is_broadband_and_bounded() {
         let s = render(Wave::Noise, 440.0, 0.5);
         assert!(s.iter().all(|x| x.abs() <= 1.0));
-        let low = goertzel_power(&s, 500.0, SR);
-        let high = goertzel_power(&s, 9000.0, SR);
+        // A single Goertzel bin of white noise has high variance; average over
+        // several bins per band so the comparison is stable run to run.
+        let avg_power = |center: f32| -> f32 {
+            let bins: Vec<f32> = (0..10).map(|i| center + i as f32 * 100.0).collect();
+            bins.iter().map(|&f| goertzel_power(&s, f, SR)).sum::<f32>() / bins.len() as f32
+        };
+        let low = avg_power(500.0);
+        let high = avg_power(9000.0);
         assert!(db(low / high).abs() < 15.0, "white noise is roughly flat");
     }
 
