@@ -700,18 +700,6 @@ pub(crate) mod tests {
     }
 
     /// Engine with the real SoundFont, or `None` (after printing why) when it is not installed.
-    ///
-    /// OxiSynth's built-in reverb/chorus default to active with a nonzero wet
-    /// level; their comb/allpass filters seed their delay lines with a tiny
-    /// DC offset (freeverb's standard anti-denormal trick), which otherwise
-    /// leaks a permanent, deterministic ~1e-7 hum into every sample from the
-    /// very first render call, even with no voice ever triggered. That is
-    /// real OxiSynth behavior (unrelated to anything `MidiEngine` does) and
-    /// far below audible/measurable levels, but it defeats a bit-exact
-    /// silence assertion. Zero both wet levels here, in the test fixture
-    /// only, so the timing tests observe true silence; `load_synth` itself
-    /// is untouched and channel-level reverb/chorus CCs keep working in
-    /// production.
     pub(crate) fn engine_with_soundfont() -> Option<(MidiEngine, EngineHandle)> {
         let path = match find_soundfont() {
             Ok(p) => p,
@@ -720,16 +708,7 @@ pub(crate) mod tests {
                 return None;
             }
         };
-        let mut synth = load_synth(&path).unwrap();
-        synth.set_reverb_params(&oxisynth::ReverbParams {
-            level: 0.0,
-            ..Default::default()
-        });
-        synth.set_chorus_params(&oxisynth::ChorusParams {
-            level: 0.0,
-            ..Default::default()
-        });
-        Some(MidiEngine::new(Some(synth)))
+        Some(MidiEngine::new(Some(load_synth(&path).unwrap())))
     }
 
     fn flute(offset: u64, seconds: f64, pan: Option<u8>) -> Vec<(u64, EventKind)> {
@@ -785,8 +764,10 @@ pub(crate) mod tests {
         // 5 chunks: the brief's 4 (4096 frames) is short of start+2000 (4148).
         let (left, _) = render_all(&mut engine, 5 * CHUNK_FRAMES);
         let start = LEAD_FRAMES as usize + 100;
+        // OxiSynth's built-in reverb idles at a ~1e-7 anti-denormal offset even
+        // with no voice active; a real note-on is orders of magnitude louder.
         assert!(
-            left[..start].iter().all(|s| *s == 0.0),
+            left[..start].iter().all(|s| s.abs() < 1e-6),
             "sound before the scheduled frame"
         );
         assert!(
