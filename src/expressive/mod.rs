@@ -2,6 +2,7 @@ pub mod effects;
 pub mod effects_presets;
 pub mod envelope;
 pub mod oscillator;
+pub mod patch;
 pub mod percussion;
 pub mod presets;
 pub mod r2d2;
@@ -16,6 +17,8 @@ pub use effects_presets::*;
 pub use envelope::*;
 #[allow(unused_imports)]
 pub use oscillator::*;
+#[allow(unused_imports)]
+pub use patch::*;
 pub use presets::*;
 pub use r2d2::*;
 pub use synth::*;
