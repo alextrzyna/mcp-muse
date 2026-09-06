@@ -1,7 +1,12 @@
+pub mod engine;
 pub mod gm_names;
 pub mod parser;
 pub mod player;
+pub mod translate;
 
+// Re-exported for the tool layer; unused until the engine is wired up.
+#[allow(unused_imports)]
+pub use engine::PlayMode;
 pub use player::*;
 
 use serde::{Deserialize, Deserializer, Serialize};
