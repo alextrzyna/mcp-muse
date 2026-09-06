@@ -9,7 +9,7 @@ use crate::expressive::effects::{EffectsChain, Svf, SvfMode};
 use crate::expressive::percussion;
 use crate::midi::EffectConfig;
 use anyhow::Result;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::f32::consts::TAU;
 
