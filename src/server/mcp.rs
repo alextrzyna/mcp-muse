@@ -869,7 +869,7 @@ fn start_playback(
             return JsonRpcResponse::tool_error(id, format!("Audio output unavailable: {}", e));
         }
     };
-    match player.play_enhanced_mixed(sequence) {
+    match player.play(sequence, crate::midi::PlayMode::Replace) {
         Ok(duration) => JsonRpcResponse::tool_text(id, playback_started_text(summary, duration)),
         Err(e) => {
             tracing::error!("Playback failed: {}", e);

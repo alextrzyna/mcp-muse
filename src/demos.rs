@@ -3,7 +3,7 @@
 //! These play audio on the local device and are meant for manual checks,
 //! not CI. Automated DSP checks live in the unit tests next to the code.
 
-use crate::midi::{MidiPlayer, SimpleNote, SimpleSequence};
+use crate::midi::{MidiPlayer, PlayMode, SimpleNote, SimpleSequence};
 
 /// Test the preset integration with actual audio playback
 pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
@@ -33,7 +33,7 @@ pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(jp8_sequence)?;
+    player.play(jp8_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(3500));
 
     println!("  🎹 Testing DX7 E.Piano...");
@@ -53,7 +53,7 @@ pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(dx7_sequence)?;
+    player.play(dx7_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(2500));
 
     println!("✅ Problematic preset test completed\n");
@@ -91,7 +91,7 @@ pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
         beats_per_bar: 4,
     };
 
-    player.play_enhanced_mixed(minimoog_sequence)?;
+    player.play(minimoog_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Test 2: Random preset from bass category
@@ -113,7 +113,7 @@ pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
         beats_per_bar: 4,
     };
 
-    player.play_enhanced_mixed(random_bass_sequence)?;
+    player.play(random_bass_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Test 3: Preset with variation
@@ -136,7 +136,7 @@ pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
         beats_per_bar: 4,
     };
 
-    player.play_enhanced_mixed(acid_sequence)?;
+    player.play(acid_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Test 4: Multiple presets together
@@ -199,7 +199,7 @@ pub fn test_preset_integration() -> Result<(), Box<dyn std::error::Error>> {
         beats_per_bar: 4,
     };
 
-    player.play_enhanced_mixed(multi_preset_sequence)?;
+    player.play(multi_preset_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     println!("✅ All preset tests completed successfully!");
@@ -231,7 +231,7 @@ pub fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(fm_sequence)?;
+    player.play(fm_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1500));
 
     // Test 2: DX7 Slap Bass preset (suspected issue)
@@ -250,7 +250,7 @@ pub fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(dx7_sequence)?;
+    player.play(dx7_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(2500));
 
     // Test 3: Check if other presets work
@@ -269,7 +269,7 @@ pub fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(moog_sequence)?;
+    player.play(moog_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1500));
 
     // Test 4: DX7 Keys preset (to see if all DX7FM presets have issues)
@@ -288,7 +288,7 @@ pub fn test_dx7_debugging() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(dx7_keys_sequence)?;
+    player.play(dx7_keys_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(2500));
 
     println!("\n✅ DX7 debugging test complete!");
@@ -345,7 +345,7 @@ pub fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(jp8_sequence)?;
+    player.play(jp8_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     // Test 2: Enhanced OB Brass with creamy Oberheim character
@@ -376,7 +376,7 @@ pub fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(ob_sequence)?;
+    player.play(ob_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     // Test 3: D-50 Fantasia - Complex LA synthesis
@@ -395,7 +395,7 @@ pub fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(d50_sequence)?;
+    player.play(d50_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     // Test 4: Space Pad - Atmospheric texture
@@ -414,7 +414,7 @@ pub fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(space_sequence)?;
+    player.play(space_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     // Test 5: Mixed pad progression showing authenticity improvements
@@ -458,7 +458,7 @@ pub fn test_enhanced_pads() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(mixed_sequence)?;
+    player.play(mixed_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     println!("\n✅ Enhanced pad preset testing complete!");
@@ -501,7 +501,7 @@ pub fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(bass_sequence)?;
+    player.play(bass_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Pad presets (should be 0.75)
@@ -519,7 +519,7 @@ pub fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(pad_sequence)?;
+    player.play(pad_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Keys presets (should be 0.8)
@@ -537,7 +537,7 @@ pub fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(keys_sequence)?;
+    player.play(keys_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Effects presets (should be 0.8)
@@ -555,7 +555,7 @@ pub fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(effects_sequence)?;
+    player.play(effects_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(750));
 
     // Mixed progression to test layering
@@ -599,7 +599,7 @@ pub fn test_volume_consistency() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(mixed_sequence)?;
+    player.play(mixed_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1000));
 
     println!("\n✅ Volume consistency testing complete!");
@@ -641,7 +641,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(kick_sequence)?;
+    player.play(kick_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1200));
 
     // Test 2: TR-909 Snare (existing preset)
@@ -662,7 +662,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(snare_sequence)?;
+    player.play(snare_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(700));
 
     // Test 3: TR-909 Hi-Hat (new preset)
@@ -683,7 +683,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(hihat_sequence)?;
+    player.play(hihat_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Test 4: Crash Cymbal (new preset)
@@ -704,7 +704,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(cymbal_sequence)?;
+    player.play(cymbal_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(2200));
 
     // Test 4b: TR-808 Hi-Hat (new preset)
@@ -725,7 +725,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(hihat808_sequence)?;
+    player.play(hihat808_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(300));
 
     // Test 5: Custom kick parameters
@@ -746,7 +746,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(custom_kick_sequence)?;
+    player.play(custom_kick_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(1400));
 
     // Test 6: Drum pattern - All together
@@ -856,7 +856,7 @@ pub fn test_drum_synthesis() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(pattern_sequence)?;
+    player.play(pattern_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(2500));
 
     println!("✅ Drum synthesis test completed!");
@@ -891,7 +891,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(dry_sequence)?;
+    player.play(dry_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4000));
 
     // 2. MASSIVE REVERB (much more dramatic)
@@ -918,7 +918,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(reverb_sequence)?;
+    player.play(reverb_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(6000)); // Longer to hear reverb tail
 
     // 3. HEAVY CHORUS (very obvious modulation)
@@ -945,7 +945,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(chorus_sequence)?;
+    player.play(chorus_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4000));
 
     // 4. OBVIOUS DISTORTION
@@ -971,7 +971,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(distortion_sequence)?;
+    player.play(distortion_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4000));
 
     // 5. EXTREME DELAY (very obvious repeats)
@@ -998,7 +998,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(delay_sequence)?;
+    player.play(delay_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(6000)); // Longer to hear delay repeats
 
     // 6. PRESET WITH SIGNATURE EFFECTS
@@ -1015,7 +1015,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(acid_sequence)?;
+    player.play(acid_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4000));
 
     // 7. EFFECTS PRESET TEST - Testing if effects_preset parameter works
@@ -1035,7 +1035,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(effects_preset_sequence)?;
+    player.play(effects_preset_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4000));
 
     // 8. PRESET COMPARISON - Subtle vs No Effects
@@ -1058,7 +1058,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(dry_pad_sequence)?;
+    player.play(dry_pad_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4500));
 
     // Then: Same pad WITH signature effects
@@ -1078,7 +1078,7 @@ pub fn test_effects_system() -> Result<(), Box<dyn std::error::Error>> {
         tempo: 120,
         beats_per_bar: 4,
     };
-    player.play_enhanced_mixed(wet_pad_sequence)?;
+    player.play(wet_pad_sequence, PlayMode::Layer)?;
     std::thread::sleep(std::time::Duration::from_millis(4500));
 
     println!("\n✅ Effects test complete!");

@@ -1,6 +1,5 @@
 //! Turns a `SimpleSequence` into a `PlayCommand`: presets, musical time,
 //! pre-rendered R2D2/synthesis buffers and a time-ordered MIDI event list.
-#![allow(dead_code)]
 
 use crate::expressive::{
     EffectsChain, EffectsPresetLibrary, ExpressiveSynth, PresetLibrary, R2D2Emotion,
@@ -176,7 +175,8 @@ impl Translator {
         let r2d2_voice = R2D2Voice::new();
 
         for note in processed_notes {
-            let start = Duration::from_secs_f64(note.start_time.unwrap_or(0.0));
+            // A negative start time would panic in `Duration`; treat it as 0.
+            let start = Duration::from_secs_f64(note.start_time.unwrap_or(0.0).max(0.0));
             if note.note_type == "r2d2" {
                 note.validate_r2d2()
                     .map_err(|e| format!("Invalid R2D2 note: {}", e))?;
@@ -1007,6 +1007,126 @@ mod tests {
                     key: 60
                 }
             )
+        );
+    }
+
+    fn reverb() -> EffectConfig {
+        serde_json::from_value(serde_json::json!({
+            "type": "reverb", "room_size": 0.6, "intensity": 0.4
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_negative_start_time_is_clamped_instead_of_panicking() {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    note: Some(60),
+                    velocity: Some(100),
+                    duration: Some(0.5),
+                    start_time: Some(-1.0),
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+            )
+            .unwrap();
+        assert_eq!(
+            t.command.events.first().map(|(at, _)| *at),
+            Some(0),
+            "a negative start time must land at offset 0"
+        );
+    }
+
+    #[test]
+    fn the_bus_chain_comes_from_the_first_midi_note_that_has_effects() {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![
+                    SimpleNote {
+                        note: Some(60),
+                        duration: Some(0.2),
+                        ..Default::default()
+                    },
+                    SimpleNote {
+                        note: Some(64),
+                        duration: Some(0.2),
+                        effects: Some(vec![reverb()]),
+                        ..Default::default()
+                    },
+                ]),
+                PlayMode::Replace,
+            )
+            .unwrap();
+        let chain = t
+            .command
+            .midi_effects
+            .expect("a MIDI note supplied effects");
+        assert_eq!(chain.len(), 1);
+        assert!(matches!(
+            chain[0].effect,
+            crate::midi::EffectType::Reverb { .. }
+        ));
+    }
+
+    #[test]
+    fn effects_on_synthesis_notes_never_reach_the_midi_bus() {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![
+                    SimpleNote {
+                        synth_type: Some("sine".into()),
+                        synth_frequency: Some(440.0),
+                        duration: Some(0.2),
+                        effects: Some(vec![reverb()]),
+                        ..Default::default()
+                    },
+                    SimpleNote {
+                        note: Some(60),
+                        duration: Some(0.2),
+                        ..Default::default()
+                    },
+                ]),
+                PlayMode::Replace,
+            )
+            .unwrap();
+        assert!(
+            t.command.midi_effects.is_none(),
+            "synthesis effects are rendered into the buffer, not onto the MIDI bus"
+        );
+    }
+
+    fn r2d2_buffer_len(effects: Option<Vec<EffectConfig>>) -> usize {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    note_type: "r2d2".to_string(),
+                    r2d2_emotion: Some("Happy".to_string()),
+                    r2d2_intensity: Some(0.7),
+                    r2d2_complexity: Some(2),
+                    duration: Some(0.5),
+                    effects,
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+            )
+            .unwrap();
+        assert_eq!(t.command.buffers.len(), 1);
+        t.command.buffers[0].1.len()
+    }
+
+    #[test]
+    fn an_r2d2_buffer_carries_its_own_effect_tail() {
+        let tail = 0.5 * SAMPLE_RATE as f64 + SAMPLE_RATE as f64;
+        let with_effects = r2d2_buffer_len(Some(vec![reverb()]));
+        assert!(
+            with_effects as f64 >= tail,
+            "expected room for a one-second tail, got {with_effects} samples"
+        );
+        let without = r2d2_buffer_len(None);
+        assert!(
+            (without as f64) < tail,
+            "a dry R2D2 note must not be padded, got {without} samples"
         );
     }
 }

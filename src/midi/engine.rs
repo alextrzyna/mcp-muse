@@ -5,7 +5,6 @@
 //! on a shared mono bus. Tool calls send `EngineCommand`s over a channel; the
 //! engine drains them at chunk boundaries and applies events at their exact
 //! sample.
-#![allow(dead_code)]
 
 use crate::expressive::EffectsChain;
 use crate::midi::EffectConfig;
