@@ -1,6 +1,6 @@
+pub mod gm_names;
 pub mod parser;
 pub mod player;
-pub mod polyphonic_source;
 
 pub use player::*;
 
@@ -89,16 +89,13 @@ impl fmt::Display for MusicalTime {
     }
 }
 
-/// Duration in musical terms
+/// Duration in musical terms: a number is a length in bars, a string is a
+/// note value ("quarter", "eighth", ...).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MusicalDuration {
-    /// Duration in bars (e.g., "4 bars")
+    /// Duration in bars (e.g., 1.5 = one and a half bars)
     Bars(f64),
-    /// Duration in beats (e.g., "2 beats")  
-    Beats(f64),
-    /// Duration in seconds (backwards compatibility)
-    Seconds(f64),
     /// Musical note values
     NoteValue(NoteValue),
 }
@@ -126,8 +123,6 @@ impl MusicalDuration {
 
         match self {
             MusicalDuration::Bars(bars) => bars * beats_per_bar as f64 * seconds_per_beat,
-            MusicalDuration::Beats(beats) => beats * seconds_per_beat,
-            MusicalDuration::Seconds(secs) => *secs,
             MusicalDuration::NoteValue(note) => match note {
                 NoteValue::Whole => 4.0 * seconds_per_beat,
                 NoteValue::Half => 2.0 * seconds_per_beat,
@@ -141,7 +136,7 @@ impl MusicalDuration {
 }
 
 /// Quantization grid options
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub enum QuantizeGrid {
     #[serde(rename = "off")]
     #[default]
@@ -160,6 +155,50 @@ pub enum QuantizeGrid {
     Triplet,
 }
 
+impl QuantizeGrid {
+    /// Grid divisions per beat, or `None` for `Off` and `Bar` (handled separately).
+    fn divisions_per_beat(&self) -> Option<u32> {
+        match self {
+            QuantizeGrid::Off | QuantizeGrid::Bar => None,
+            QuantizeGrid::Beat => Some(1),
+            QuantizeGrid::Eighth => Some(2),
+            QuantizeGrid::Sixteenth => Some(4),
+            QuantizeGrid::ThirtySecond => Some(8),
+            QuantizeGrid::Triplet => Some(3),
+        }
+    }
+
+    /// Snap a musical position to this grid.
+    pub fn apply(
+        &self,
+        time: &MusicalTime,
+        ticks_per_beat: u32,
+        beats_per_bar: u32,
+    ) -> MusicalTime {
+        match self {
+            QuantizeGrid::Off => time.clone(),
+            QuantizeGrid::Bar => {
+                // Round to the nearest bar line.
+                let beats_in = (time.beat - 1) as f64 + time.tick as f64 / ticks_per_beat as f64;
+                let bar = if beats_in * 2.0 >= beats_per_bar as f64 {
+                    time.bar + 1
+                } else {
+                    time.bar
+                };
+                MusicalTime {
+                    bar,
+                    beat: 1,
+                    tick: 0,
+                }
+            }
+            _ => {
+                let divisions = self.divisions_per_beat().unwrap_or(1);
+                time.quantize(divisions, ticks_per_beat, beats_per_bar)
+            }
+        }
+    }
+}
+
 /// Custom deserializer that converts null to None for optional fields
 fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
@@ -170,18 +209,99 @@ where
     Ok(opt)
 }
 
-/// Universal effect configuration for all audio sources
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Universal effect configuration for all audio sources.
+///
+/// Serialized flat: `{"type": "reverb", "room_size": 0.7, "intensity": 0.6}`.
+/// Deserialization also accepts the older nested form
+/// `{"effect": {"type": "Reverb", ...}, "intensity": 0.6}` and PascalCase
+/// or camelCase names for `type` and `filter_type`.
+#[derive(Debug, Clone, Serialize)]
 pub struct EffectConfig {
     /// Effect type and parameters
     #[serde(flatten)]
     pub effect: EffectType,
     /// Effect intensity/mix level (0.0-1.0)
-    #[serde(default = "default_effect_intensity")]
     pub intensity: f32,
     /// Whether this effect is enabled
-    #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+/// The strict flat representation; `EffectConfig` normalizes into this.
+#[derive(Deserialize)]
+struct EffectConfigRepr {
+    #[serde(flatten)]
+    effect: EffectType,
+    #[serde(default = "default_effect_intensity")]
+    intensity: f32,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+/// "LowPass" / "lowPass" / "lowpass" / "low_pass" → "low_pass".
+fn normalize_variant_name(raw: &str, snake_variants: &[&str]) -> String {
+    let squashed: String = raw
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    snake_variants
+        .iter()
+        .find(|v| v.replace('_', "") == squashed)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+const EFFECT_TYPE_NAMES: [&str; 6] = [
+    "reverb",
+    "delay",
+    "chorus",
+    "filter",
+    "compressor",
+    "distortion",
+];
+const FILTER_TYPE_NAMES: [&str; 7] = [
+    "low_pass",
+    "high_pass",
+    "band_pass",
+    "notch",
+    "peak",
+    "low_shelf",
+    "high_shelf",
+];
+
+impl<'de> Deserialize<'de> for EffectConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut value = serde_json::Value::deserialize(deserializer)?;
+        let Some(object) = value.as_object_mut() else {
+            return Err(serde::de::Error::custom("effect must be an object"));
+        };
+
+        // Nested form: hoist the inner "effect" object's fields to the top level.
+        if let Some(serde_json::Value::Object(inner)) = object.remove("effect") {
+            for (k, v) in inner {
+                object.entry(k).or_insert(v);
+            }
+        }
+        if let Some(serde_json::Value::String(t)) = object.get("type") {
+            let normalized = normalize_variant_name(t, &EFFECT_TYPE_NAMES);
+            object.insert("type".into(), serde_json::Value::String(normalized));
+        }
+        if let Some(serde_json::Value::String(t)) = object.get("filter_type") {
+            let normalized = normalize_variant_name(t, &FILTER_TYPE_NAMES);
+            object.insert("filter_type".into(), serde_json::Value::String(normalized));
+        }
+
+        let repr: EffectConfigRepr =
+            serde_json::from_value(value).map_err(serde::de::Error::custom)?;
+        Ok(EffectConfig {
+            effect: repr.effect,
+            intensity: repr.intensity,
+            enabled: repr.enabled,
+        })
+    }
 }
 
 fn default_effect_intensity() -> f32 {
@@ -523,42 +643,14 @@ fn default_note_type() -> String {
     "midi".to_string()
 }
 
-/// Simple sequence of notes
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimpleSequence {
-    pub notes: Vec<SimpleNote>,
-    /// Tempo in BPM (optional, defaults to 120)
-    #[serde(default = "default_tempo")]
-    pub tempo: u32,
-}
-
-fn default_tempo() -> u32 {
-    120
-}
-
-impl SimpleSequence {
-    #[allow(dead_code)]
-    pub fn new() -> Self {
+impl Default for SimpleNote {
+    /// A one-second MIDI note at time zero with nothing else set.
+    fn default() -> Self {
         Self {
-            notes: Vec::new(),
-            tempo: 120,
-        }
-    }
-
-    /// Add a note to the sequence
-    #[allow(dead_code)]
-    pub fn add_note(
-        &mut self,
-        note: u8,
-        velocity: u8,
-        start_time: f64,
-        duration: f64,
-    ) -> &mut Self {
-        self.notes.push(SimpleNote {
-            note: Some(note),
-            velocity: Some(velocity),
-            start_time: Some(start_time),
-            duration: Some(duration),
+            note: None,
+            velocity: None,
+            start_time: Some(0.0),
+            duration: Some(1.0),
             musical_time: None,
             musical_duration: None,
             channel: 0,
@@ -601,6 +693,51 @@ impl SimpleSequence {
             preset_random: None,
             effects: None,
             effects_preset: None,
+        }
+    }
+}
+
+/// Simple sequence of notes
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimpleSequence {
+    pub notes: Vec<SimpleNote>,
+    /// Tempo in BPM (optional, defaults to 120)
+    #[serde(default = "default_tempo")]
+    pub tempo: u32,
+    /// Time signature numerator (beats per bar), defaults to 4
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u32,
+}
+
+fn default_tempo() -> u32 {
+    120
+}
+
+impl SimpleSequence {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self {
+            notes: Vec::new(),
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    /// Add a note to the sequence
+    #[allow(dead_code)]
+    pub fn add_note(
+        &mut self,
+        note: u8,
+        velocity: u8,
+        start_time: f64,
+        duration: f64,
+    ) -> &mut Self {
+        self.notes.push(SimpleNote {
+            note: Some(note),
+            velocity: Some(velocity),
+            start_time: Some(start_time),
+            duration: Some(duration),
+            ..Default::default()
         });
         self
     }
@@ -620,48 +757,8 @@ impl SimpleSequence {
             velocity: Some(velocity),
             start_time: Some(start_time),
             duration: Some(duration),
-            musical_time: None,
-            musical_duration: None,
             channel,
-            note_type: "midi".to_string(),
-            instrument: None,
-            reverb: None,
-            chorus: None,
-            volume: None,
-            pan: None,
-            balance: None,
-            expression: None,
-            sustain: None,
-            r2d2_emotion: None,
-            r2d2_intensity: None,
-            r2d2_complexity: None,
-            r2d2_pitch_range: None,
-            r2d2_context: None,
-            synth_type: None,
-            synth_frequency: None,
-            synth_amplitude: None,
-            synth_attack: None,
-            synth_decay: None,
-            synth_sustain: None,
-            synth_release: None,
-            synth_filter_type: None,
-            synth_filter_cutoff: None,
-            synth_filter_resonance: None,
-            synth_reverb: None,
-            synth_chorus: None,
-            synth_delay: None,
-            synth_delay_time: None,
-            synth_pulse_width: None,
-            synth_modulator_freq: None,
-            synth_modulation_index: None,
-            synth_grain_size: None,
-            synth_texture_roughness: None,
-            preset_name: None,
-            preset_category: None,
-            preset_variation: None,
-            preset_random: None,
-            effects: None,
-            effects_preset: None,
+            ..Default::default()
         });
         self
     }
@@ -682,48 +779,9 @@ impl SimpleSequence {
             velocity: Some(velocity),
             start_time: Some(start_time),
             duration: Some(duration),
-            musical_time: None,
-            musical_duration: None,
             channel,
-            note_type: "midi".to_string(),
             instrument: Some(instrument),
-            reverb: None,
-            chorus: None,
-            volume: None,
-            pan: None,
-            balance: None,
-            expression: None,
-            sustain: None,
-            r2d2_emotion: None,
-            r2d2_intensity: None,
-            r2d2_complexity: None,
-            r2d2_pitch_range: None,
-            r2d2_context: None,
-            synth_type: None,
-            synth_frequency: None,
-            synth_amplitude: None,
-            synth_attack: None,
-            synth_decay: None,
-            synth_sustain: None,
-            synth_release: None,
-            synth_filter_type: None,
-            synth_filter_cutoff: None,
-            synth_filter_resonance: None,
-            synth_reverb: None,
-            synth_chorus: None,
-            synth_delay: None,
-            synth_delay_time: None,
-            synth_pulse_width: None,
-            synth_modulator_freq: None,
-            synth_modulation_index: None,
-            synth_grain_size: None,
-            synth_texture_roughness: None,
-            preset_name: None,
-            preset_category: None,
-            preset_variation: None,
-            preset_random: None,
-            effects: None,
-            effects_preset: None,
+            ..Default::default()
         });
         self
     }
@@ -762,52 +820,15 @@ impl SimpleSequence {
         context: Option<String>,
     ) -> &mut Self {
         self.notes.push(SimpleNote {
-            note: None,
-            velocity: None,
             start_time: Some(start_time),
             duration: Some(duration),
-            musical_time: None,
-            musical_duration: None,
-            channel: 0,
             note_type: "r2d2".to_string(),
-            instrument: None,
-            reverb: None,
-            chorus: None,
-            volume: None,
-            pan: None,
-            balance: None,
-            expression: None,
-            sustain: None,
             r2d2_emotion: Some(emotion.to_string()),
             r2d2_intensity: Some(intensity),
             r2d2_complexity: Some(complexity),
             r2d2_pitch_range: pitch_range,
             r2d2_context: context,
-            synth_type: None,
-            synth_frequency: None,
-            synth_amplitude: None,
-            synth_attack: None,
-            synth_decay: None,
-            synth_sustain: None,
-            synth_release: None,
-            synth_filter_type: None,
-            synth_filter_cutoff: None,
-            synth_filter_resonance: None,
-            synth_reverb: None,
-            synth_chorus: None,
-            synth_delay: None,
-            synth_delay_time: None,
-            synth_pulse_width: None,
-            synth_modulator_freq: None,
-            synth_modulation_index: None,
-            synth_grain_size: None,
-            synth_texture_roughness: None,
-            preset_name: None,
-            preset_category: None,
-            preset_variation: None,
-            preset_random: None,
-            effects: None,
-            effects_preset: None,
+            ..Default::default()
         });
         self
     }
@@ -910,6 +931,9 @@ pub struct ExtendedSequence {
     /// Tempo in BPM (optional, defaults to 120)
     #[serde(default = "default_tempo")]
     pub tempo: u32,
+    /// Time signature numerator (beats per bar), defaults to 4
+    #[serde(default = "default_beats_per_bar")]
+    pub beats_per_bar: u32,
 }
 
 impl SequencePattern {
@@ -925,6 +949,18 @@ impl SequencePattern {
             quantize_grid: QuantizeGrid::Off,
             category: None,
             tags: Vec::new(),
+        }
+    }
+
+    /// Snap every note with a musical position to this pattern's quantize grid.
+    pub fn quantize_notes(&mut self) {
+        if self.quantize_grid == QuantizeGrid::Off {
+            return;
+        }
+        for note in &mut self.notes {
+            if let Some(time) = &note.musical_time {
+                note.musical_time = Some(self.quantize_grid.apply(time, 480, self.beats_per_bar));
+            }
         }
     }
 
@@ -1016,20 +1052,19 @@ impl SequencePattern {
 
                 // Apply duration scaling
                 if let Some(musical_duration) = &transformed_note.musical_duration {
-                    transformed_note.musical_duration = Some(match musical_duration {
+                    match musical_duration {
                         MusicalDuration::Bars(bars) => {
-                            MusicalDuration::Bars(bars * reference.duration_scale as f64)
+                            transformed_note.musical_duration = Some(MusicalDuration::Bars(
+                                bars * reference.duration_scale as f64,
+                            ));
                         }
-                        MusicalDuration::Beats(beats) => {
-                            MusicalDuration::Beats(beats * reference.duration_scale as f64)
+                        MusicalDuration::NoteValue(_) => {
+                            // Note values cannot be scaled symbolically; fall back to seconds.
+                            transformed_note.musical_duration = None;
+                            transformed_note.duration =
+                                Some(note_duration * reference.duration_scale as f64);
                         }
-                        MusicalDuration::Seconds(secs) => {
-                            MusicalDuration::Seconds(secs * reference.duration_scale as f64)
-                        }
-                        MusicalDuration::NoteValue(_val) => MusicalDuration::Seconds(
-                            note_duration * reference.duration_scale as f64,
-                        ),
-                    });
+                    }
                 } else {
                     transformed_note.duration =
                         Some(note_duration * reference.duration_scale as f64);
@@ -1156,6 +1191,7 @@ impl ExtendedSequence {
             notes: Vec::new(),
             patterns: Vec::new(),
             tempo: 120,
+            beats_per_bar: 4,
         }
     }
 
@@ -1172,14 +1208,15 @@ impl ExtendedSequence {
                 .get(&pattern_ref.pattern_name)
                 .ok_or_else(|| format!("Pattern '{}' not found", pattern_ref.pattern_name))?;
 
-            let resolved_notes = pattern.apply_reference(pattern_ref, self.tempo, 4)?; // Assuming 4/4 time for now
+            let resolved_notes =
+                pattern.apply_reference(pattern_ref, self.tempo, self.beats_per_bar)?;
             all_notes.extend(resolved_notes);
         }
 
         // Sort notes by start time for proper playback order
         all_notes.sort_by(|a, b| {
-            let a_time = a.get_start_time(self.tempo, 4); // Assuming 4/4 time
-            let b_time = b.get_start_time(self.tempo, 4);
+            let a_time = a.get_start_time(self.tempo, self.beats_per_bar);
+            let b_time = b.get_start_time(self.tempo, self.beats_per_bar);
             a_time
                 .partial_cmp(&b_time)
                 .unwrap_or(std::cmp::Ordering::Equal)
@@ -1188,6 +1225,7 @@ impl ExtendedSequence {
         Ok(SimpleSequence {
             notes: all_notes,
             tempo: self.tempo,
+            beats_per_bar: self.beats_per_bar,
         })
     }
 }
@@ -1556,9 +1594,7 @@ impl SimpleNote {
 
         // Validate category if provided
         if let Some(category) = &self.preset_category {
-            let valid_categories = [
-                "bass", "pad", "lead", "keys", "organ", "arp", "drums", "effects",
-            ];
+            let valid_categories = ["bass", "pad", "lead", "keys", "drums", "effects"];
             if !valid_categories.contains(&category.to_lowercase().as_str()) {
                 return Err(format!(
                     "Invalid preset category '{}'. Valid categories: {:?}",
@@ -1781,5 +1817,143 @@ impl SimpleNote {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effect_config_accepts_flat_snake_case() {
+        let e: EffectConfig =
+            serde_json::from_str(r#"{"type": "reverb", "room_size": 0.7, "intensity": 0.6}"#)
+                .unwrap();
+        assert!(matches!(e.effect, EffectType::Reverb { room_size, .. } if room_size == 0.7));
+        assert_eq!(e.intensity, 0.6);
+        assert!(e.enabled);
+    }
+
+    #[test]
+    fn effect_config_accepts_nested_pascal_case_from_the_old_schema() {
+        let e: EffectConfig = serde_json::from_str(
+            r#"{"effect": {"type": "Filter", "filter_type": "LowPass", "cutoff": 800.0}, "intensity": 0.4}"#,
+        )
+        .unwrap();
+        match e.effect {
+            EffectType::Filter {
+                filter_type: FilterType::LowPass,
+                cutoff,
+                ..
+            } => assert_eq!(cutoff, 800.0),
+            other => panic!("unexpected {other:?}"),
+        }
+        let e: EffectConfig =
+            serde_json::from_str(r#"{"type": "Distortion", "drive": 2.0}"#).unwrap();
+        assert!(matches!(e.effect, EffectType::Distortion { .. }));
+        assert_eq!(e.intensity, 0.5, "intensity defaults");
+    }
+
+    #[test]
+    fn effect_config_rejects_unknown_type_with_a_clear_message() {
+        let err = serde_json::from_str::<EffectConfig>(r#"{"type": "flanger"}"#).unwrap_err();
+        assert!(err.to_string().contains("flanger"), "{err}");
+    }
+
+    #[test]
+    fn musical_duration_number_is_bars_and_string_is_note_value() {
+        let bars: MusicalDuration = serde_json::from_str("2").unwrap();
+        assert!(matches!(bars, MusicalDuration::Bars(b) if b == 2.0));
+        assert_eq!(bars.to_seconds(120, 4), 4.0);
+
+        let eighth: MusicalDuration = serde_json::from_str("\"eighth\"").unwrap();
+        assert!(matches!(
+            eighth,
+            MusicalDuration::NoteValue(NoteValue::Eighth)
+        ));
+        assert_eq!(eighth.to_seconds(120, 4), 0.25);
+    }
+
+    #[test]
+    fn quantize_grid_snaps_ticks() {
+        let t = MusicalTime::new(1, 2, 100);
+        assert_eq!(
+            QuantizeGrid::Sixteenth.apply(&t, 480, 4),
+            MusicalTime::new(1, 2, 120)
+        );
+        assert_eq!(
+            QuantizeGrid::Eighth.apply(&t, 480, 4),
+            MusicalTime::new(1, 2, 0)
+        );
+        assert_eq!(QuantizeGrid::Off.apply(&t, 480, 4), t);
+        // 3rd beat of a 4/4 bar rounds up to the next bar line
+        assert_eq!(
+            QuantizeGrid::Bar.apply(&MusicalTime::new(3, 3, 0), 480, 4),
+            MusicalTime::new(4, 1, 0)
+        );
+        assert_eq!(
+            QuantizeGrid::Bar.apply(&MusicalTime::new(3, 2, 0), 480, 4),
+            MusicalTime::new(3, 1, 0)
+        );
+    }
+
+    #[test]
+    fn pattern_quantizes_its_notes_on_request() {
+        let mut pattern = SequencePattern::new(
+            "p".to_string(),
+            vec![SimpleNote {
+                note: Some(60),
+                musical_time: Some(MusicalTime::new(1, 1, 100)),
+                musical_duration: Some(MusicalDuration::NoteValue(NoteValue::Quarter)),
+                start_time: None,
+                duration: None,
+                ..Default::default()
+            }],
+        );
+        pattern.quantize_grid = QuantizeGrid::Sixteenth;
+        pattern.quantize_notes();
+        assert_eq!(pattern.notes[0].musical_time.as_ref().unwrap().tick, 120);
+    }
+
+    #[test]
+    fn pattern_placement_honours_time_signature() {
+        // A one-bar pattern in 3/4 at 120 BPM: bar 2 starts at 1.5 s, not 2.0 s.
+        let mut pattern = SequencePattern::new(
+            "waltz".to_string(),
+            vec![SimpleNote {
+                note: Some(60),
+                start_time: Some(0.0),
+                duration: Some(0.5),
+                ..Default::default()
+            }],
+        );
+        pattern.pattern_bars = 1.0;
+        pattern.beats_per_bar = 3;
+        let mut store = std::collections::HashMap::new();
+        store.insert("waltz".to_string(), pattern);
+
+        let seq = ExtendedSequence {
+            notes: Vec::new(),
+            patterns: vec![SequenceReference {
+                pattern_name: "waltz".to_string(),
+                start_time_offset: None,
+                start_bar: Some(2),
+                start_beat: 1,
+                bars: None,
+                transpose: 0,
+                instrument_override: None,
+                velocity_scale: 1.0,
+                duration_scale: 1.0,
+                channel_override: None,
+                repeat_count: 1,
+                repeat_spacing_bars: 0.0,
+                align_to_bars: true,
+            }],
+            tempo: 120,
+            beats_per_bar: 3,
+        };
+        let resolved = seq.resolve_patterns(&store).unwrap();
+        assert_eq!(resolved.beats_per_bar, 3);
+        assert!((resolved.notes[0].start_time.unwrap() - 1.5).abs() < 1e-9);
     }
 }

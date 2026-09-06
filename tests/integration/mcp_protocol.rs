@@ -106,7 +106,7 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 4);
+    assert_eq!(tools.len(), 6);
 
     // Check that all tools are present
     let tool_names: Vec<&str> = tools
@@ -117,6 +117,8 @@ fn test_mcp_tools_list() {
     assert!(tool_names.contains(&"define_sequence_pattern"));
     assert!(tool_names.contains(&"play_sequence"));
     assert!(tool_names.contains(&"list_patterns"));
+    assert!(tool_names.contains(&"stop_playback"));
+    assert!(tool_names.contains(&"list_sounds"));
 
     // Verify the play_notes tool supports all the functionality
     let play_notes_tool = tools
@@ -789,16 +791,261 @@ fn test_play_sequence_pattern_not_found() {
     let response: Value =
         serde_json::from_str(&response_line).expect("Failed to parse JSON response");
 
+    // A missing pattern is a tool execution failure: reported in the result
+    // with isError so the model can read the message and recover.
     assert_eq!(response["jsonrpc"], "2.0");
     assert_eq!(response["id"], 2);
-    assert!(response["error"].is_object());
-    assert_eq!(response["error"]["code"], -32602);
-    assert!(
-        response["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("not found")
-    );
+    assert_eq!(response["result"]["isError"], true);
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("not found"), "unexpected text: {text}");
 
     child.kill().expect("Failed to kill child process");
+}
+
+/// Spawn the server and complete the initialize handshake.
+struct TestServer {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    reader: BufReader<std::process::ChildStdout>,
+}
+
+impl TestServer {
+    fn start() -> Self {
+        let mut child = Command::new("cargo")
+            .args(["run", "--"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Failed to start MCP server");
+        let stdin = child.stdin.take().unwrap();
+        let reader = BufReader::new(child.stdout.take().unwrap());
+        let mut server = Self {
+            child,
+            stdin,
+            reader,
+        };
+        let init = server.call(json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}
+        }));
+        assert_eq!(init["id"], 0);
+        server
+    }
+
+    fn send(&mut self, message: &Value) {
+        writeln!(self.stdin, "{}", message).unwrap();
+    }
+
+    fn send_raw(&mut self, line: &str) {
+        writeln!(self.stdin, "{}", line).unwrap();
+    }
+
+    fn read(&mut self) -> Value {
+        let mut line = String::new();
+        self.reader.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap_or_else(|e| panic!("bad JSON {line:?}: {e}"))
+    }
+
+    fn call(&mut self, message: Value) -> Value {
+        self.send(&message);
+        self.read()
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+    }
+}
+
+#[test]
+fn ping_returns_empty_result() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({"jsonrpc": "2.0", "id": 7, "method": "ping"}));
+    assert_eq!(response["id"], 7);
+    assert_eq!(response["result"], json!({}));
+}
+
+#[test]
+fn notifications_get_no_response() {
+    let mut server = TestServer::start();
+    server.send(
+        &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}),
+    );
+    server.send(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    // The next line on stdout must be the answer to this request, not an
+    // error for either notification.
+    let response = server.call(json!({"jsonrpc": "2.0", "id": 8, "method": "tools/list"}));
+    assert_eq!(response["id"], 8);
+    assert!(response["result"]["tools"].is_array());
+}
+
+#[test]
+fn parse_error_has_null_id() {
+    let mut server = TestServer::start();
+    server.send_raw("{this is not json");
+    let response = server.read();
+    assert_eq!(response["error"]["code"], -32700);
+    assert!(
+        response["id"].is_null(),
+        "id should be null, got {}",
+        response["id"]
+    );
+}
+
+#[test]
+fn initialize_reports_crate_version() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}
+    }));
+    assert_eq!(
+        response["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+#[test]
+fn unknown_preset_is_a_tool_error_not_a_piano() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"preset_name": "Definitely Not A Preset", "note": 60, "start_time": 0.0, "duration": 0.2}
+        ]}}
+    }));
+    let result = &response["result"];
+    // Either the audio device is unavailable (CI) or the preset is rejected;
+    // both must surface as isError rather than a protocol error.
+    assert_eq!(result["isError"], true, "response: {response}");
+    let text = result["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Definitely Not A Preset") || text.contains("Audio output unavailable"),
+        "unexpected text: {text}"
+    );
+}
+
+#[test]
+fn stop_playback_with_nothing_playing() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {"name": "stop_playback", "arguments": {}}
+    }));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Stopped 0"), "unexpected text: {text}");
+}
+
+#[test]
+fn list_sounds_catalog_names_everything() {
+    let mut server = TestServer::start();
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": {"name": "list_sounds", "arguments": {}}
+    }));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    for needle in [
+        "Minimoog Bass",
+        "TR-808 Kick",
+        "Acoustic Grand Piano",
+        "Closed Hi-Hat",
+        "Happy",
+        "studio",
+        "dx7fm",
+    ] {
+        assert!(text.contains(needle), "catalog missing {needle}");
+    }
+
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+        "params": {"name": "list_sounds", "arguments": {"section": "r2d2"}}
+    }));
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("Thoughtful") && !text.contains("Minimoog"));
+}
+
+#[test]
+fn musical_duration_number_means_bars_and_time_signature_is_honoured() {
+    let mut server = TestServer::start();
+    // 3/4 at 120 BPM: a note at bar 2 beat 1 starts at 1.5 s. Server-side we
+    // only see the summary, so assert the request is accepted with the new
+    // fields rather than rejected by the parser.
+    let response = server.call(json!({
+        "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+        "params": {"name": "define_sequence_pattern", "arguments": {
+            "name": "waltz", "beats_per_bar": 3, "pattern_bars": 1, "quantize_grid": "16th",
+            "notes": [{"note": 60, "musical_time": {"bar": 1, "beat": 3, "tick": 100}, "musical_duration": 0.5}]
+        }}
+    }));
+    assert!(response["result"]["isError"].is_null(), "{response}");
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("1 bars of 3/4"), "unexpected text: {text}");
+}
+
+#[test]
+fn custom_effects_chains_are_accepted_in_both_forms() {
+    let mut server = TestServer::start();
+    // Flat form, as documented in the schema.
+    let flat = server.call(json!({
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [{
+            "synth_type": "sawtooth", "note": 48, "start_time": 0.0, "duration": 0.3,
+            "effects": [
+                {"type": "filter", "filter_type": "low_pass", "cutoff": 900, "resonance": 2.0, "intensity": 0.8},
+                {"type": "delay", "delay_time": 0.25, "feedback": 0.3, "intensity": 0.5},
+                {"type": "reverb", "room_size": 0.7, "intensity": 0.4}
+            ]}]}}
+    }));
+    assert!(flat["error"].is_null(), "flat chain rejected: {flat}");
+
+    // Nested PascalCase form from the previous schema.
+    let nested = server.call(json!({
+        "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [{
+            "instrument": 30, "note": 52, "start_time": 0.0, "duration": 0.3,
+            "effects": [
+                {"effect": {"type": "Distortion", "drive": 3.0, "tone": 0.6}, "intensity": 0.7},
+                {"effect": {"type": "Filter", "filter_type": "HighPass", "cutoff": 200.0}, "intensity": 0.5}
+            ]}]}}
+    }));
+    assert!(nested["error"].is_null(), "nested chain rejected: {nested}");
+
+    // A typo in the type is still a validation error the model can read.
+    let bad = server.call(json!({
+        "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [{
+            "note": 60, "start_time": 0.0, "duration": 0.3,
+            "effects": [{"type": "flanger", "intensity": 0.5}]}]}}
+    }));
+    assert_eq!(bad["error"]["code"], -32602, "{bad}");
+    assert!(
+        bad["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("flanger")
+    );
+
+    // All three tools expose the same note schema.
+    let tools = server.call(json!({"jsonrpc": "2.0", "id": 13, "method": "tools/list"}));
+    let schema_for = |name: &str| -> Value {
+        tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap()["inputSchema"]["properties"]["notes"]["items"]
+            .clone()
+    };
+    assert_eq!(
+        schema_for("play_notes"),
+        schema_for("define_sequence_pattern")
+    );
+    assert_eq!(schema_for("play_notes"), schema_for("play_sequence"));
+    assert_eq!(
+        schema_for("play_notes")["properties"]["effects"]["items"]["required"],
+        json!(["type"])
+    );
+    let _ = server.call(json!({"jsonrpc": "2.0", "id": 14, "method": "tools/call", "params": {"name": "stop_playback", "arguments": {}}}));
 }
