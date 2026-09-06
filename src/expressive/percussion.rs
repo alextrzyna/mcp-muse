@@ -6,7 +6,7 @@
 //! perceived pitch by `t·f'(t)` and make descending sweeps bounce back up.
 
 use crate::expressive::synth::{PhaseAccumulator, SynthType};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use std::f32::consts::TAU;
 
 /// Render `sample_count` samples of a percussive type at unit amplitude.
