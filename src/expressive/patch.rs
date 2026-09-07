@@ -287,6 +287,31 @@ mod tests {
     }
 
     #[test]
+    fn wavetable_patch_parses_validates_and_names_fields() {
+        let p = parse(json!({"name": "w", "wavetable": {}})).unwrap();
+        let wt = p.wavetable.as_ref().unwrap();
+        assert_eq!(wt.table, TableName::Basic);
+        assert_eq!(wt.morph, 0.0);
+        assert!(p.validate().is_ok() && p.has_pitched_engine());
+        let p = parse(json!({"name": "w", "wavetable": {"table": "organ", "morph": 0.4, "env": {"release": 1.0}}})).unwrap();
+        assert_eq!(p.release_seconds(), 1.0);
+        assert_eq!(
+            serde_json::to_value(&p).unwrap()["wavetable"]["table"],
+            "organ"
+        );
+        let p = parse(json!({"name": "w", "wavetable": {"morph": 1.5}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("wavetable.morph"));
+        assert!(parse(json!({"name": "w", "wavetable": {"table": "sawtooth"}})).is_err());
+        assert!(
+            parse(json!({"name": "w", "wavetable": {"position": 0.2}}))
+                .unwrap_err()
+                .contains("position")
+        );
+        assert_eq!(TableName::Noise.next(), TableName::Basic, "morph wraps");
+        assert_eq!(TableName::Pwm.index(), 5);
+    }
+
+    #[test]
     fn release_seconds_is_the_longest_across_engines() {
         let p = parse(json!({"name": "both",
             "subtractive": {"env": {"release": 0.5}},
@@ -358,6 +383,8 @@ pub struct Patch {
     pub subtractive: Option<Subtractive>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fm: Option<Fm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wavetable: Option<Wavetable>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percussion: Option<Percussion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -809,6 +836,89 @@ impl Percussion {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableName {
+    #[default]
+    Basic,
+    Warm,
+    Bright,
+    Digital,
+    Vocal,
+    Pwm,
+    Organ,
+    Noise,
+}
+
+impl TableName {
+    pub const ALL: [TableName; 8] = [
+        TableName::Basic,
+        TableName::Warm,
+        TableName::Bright,
+        TableName::Digital,
+        TableName::Vocal,
+        TableName::Pwm,
+        TableName::Organ,
+        TableName::Noise,
+    ];
+
+    #[allow(dead_code)] // consumed in Task 5
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TableName::Basic => "basic",
+            TableName::Warm => "warm",
+            TableName::Bright => "bright",
+            TableName::Digital => "digital",
+            TableName::Vocal => "vocal",
+            TableName::Pwm => "pwm",
+            TableName::Organ => "organ",
+            TableName::Noise => "noise",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|t| t == self)
+            .expect("every table is in ALL")
+    }
+
+    /// The table `morph` blends toward; wraps from `noise` back to `basic`.
+    #[allow(dead_code)] // consumed in Task 5
+    pub fn next(&self) -> TableName {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Wavetable {
+    pub level: f32,
+    pub table: TableName,
+    /// 0 = this table, 1 = the next table in the list.
+    pub morph: f32,
+    pub env: Adsr,
+}
+
+impl Default for Wavetable {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            table: TableName::Basic,
+            morph: 0.0,
+            env: Adsr::default(),
+        }
+    }
+}
+
+impl Wavetable {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.morph"), self.morph, 0.0, 1.0)?;
+        self.env.validate(&format!("{path}.env"))
+    }
+}
+
 /// A patch reference on a note: a stored name or a one-off inline patch.
 ///
 /// Serialized untagged (a bare string or a patch object). Deserialization is
@@ -869,13 +979,20 @@ impl Patch {
             .filter(|f| f.level > 0.0)
             .map(|f| f.carrier_release())
             .unwrap_or(0.0);
-        sub.max(fm)
+        let wavetable = self
+            .wavetable
+            .as_ref()
+            .filter(|w| w.level > 0.0)
+            .map(|w| w.env.release)
+            .unwrap_or(0.0);
+        sub.max(fm).max(wavetable)
     }
 
     /// True when at least one enabled engine takes its pitch from the note.
     pub fn has_pitched_engine(&self) -> bool {
         self.subtractive.as_ref().is_some_and(|s| s.level > 0.0)
             || self.fm.as_ref().is_some_and(|f| f.level > 0.0)
+            || self.wavetable.as_ref().is_some_and(|w| w.level > 0.0)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -883,9 +1000,13 @@ impl Patch {
             return Err("name must not be empty".into());
         }
         check_range("level", self.level, 0.0, 1.0)?;
-        if self.subtractive.is_none() && self.percussion.is_none() && self.fm.is_none() {
+        if self.subtractive.is_none()
+            && self.percussion.is_none()
+            && self.fm.is_none()
+            && self.wavetable.is_none()
+        {
             return Err(format!(
-                "patch '{}' has no engines: add \"subtractive\", \"fm\" or \"percussion\"",
+                "patch '{}' has no engines: add \"subtractive\", \"fm\", \"wavetable\" or \"percussion\"",
                 self.name
             ));
         }
@@ -929,6 +1050,9 @@ impl Patch {
         }
         if let Some(fm) = &self.fm {
             fm.validate("fm")?;
+        }
+        if let Some(wt) = &self.wavetable {
+            wt.validate("wavetable")?;
         }
         if let Some(perc) = &self.percussion {
             perc.validate("percussion")?;
