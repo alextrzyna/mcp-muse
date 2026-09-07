@@ -480,7 +480,6 @@ impl FmAlgorithm {
     }
 
     /// Operators (0-based) that modulate operator `op`.
-    #[allow(dead_code)] // consumed in Task 2
     pub fn modulators(&self, op: usize) -> &'static [usize] {
         match (self, op) {
             (FmAlgorithm::Stack, 0) => &[1],

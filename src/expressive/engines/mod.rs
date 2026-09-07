@@ -1,9 +1,12 @@
 //! One `Voice` per note per enabled engine. The renderer sums voices, so a
 //! voice only has to produce its own signal and report when it has finished.
 
+pub mod fm;
 pub mod percussion;
 pub mod subtractive;
 
+#[allow(unused_imports)]
+pub use fm::{FM_MOD_DEPTH, FmVoice};
 #[allow(unused_imports)]
 pub use percussion::{MIN_HIT_SECONDS, PercussionVoice};
 #[allow(unused_imports)]
