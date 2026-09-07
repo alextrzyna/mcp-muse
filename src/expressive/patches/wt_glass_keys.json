@@ -1,0 +1,8 @@
+{
+  "name": "wt_glass_keys",
+  "description": "Glassy digital keys from the digital wavetable, morphed toward vocal",
+  "category": "keys",
+  "level": 0.7,
+  "wavetable": {"table": "digital", "morph": 0.5, "env": {"attack": 0.003, "decay": 0.8, "sustain": 0.3, "release": 1.5}},
+  "effects": [{"type": "reverb", "room_size": 0.6, "dampening": 0.3, "wet_level": 0.4, "intensity": 0.3}]
+}

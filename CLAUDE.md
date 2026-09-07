@@ -69,11 +69,12 @@ engine API is the next step if the callback still glitches.
 
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: the R2D2 ring-modulation voice only. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`).
-- `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive and percussion engines plus an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
+- `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `wavetables.rs` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive, fm, wavetable and percussion engines plus an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
 - `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh, chime, burst; these carry their own envelopes so the ADSR is skipped.
+- `wavetables.rs` - builds eight procedural tables once (`OnceLock`) as ten per-octave band-limited levels; `WavetableVoice` picks the level from the note's pitch.
 - `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::new(sample_rate, &[EffectConfig])` then `process` per sample or `process_buffer`.
 - `effects_presets.rs` - named chains ("studio", "concert_hall", ...).
-- `patches/` - 31 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
+- `patches/` - 39 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
 - `r2d2.rs` - emotion parameter tables (pitch contours, ranges).
 
 ### Data model (`src/midi/mod.rs`)

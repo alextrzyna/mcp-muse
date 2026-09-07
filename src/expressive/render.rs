@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::expressive::engines::{
-    MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice,
+    FmVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice, WavetableVoice,
 };
 use crate::expressive::{EffectsChain, Patch};
 
@@ -76,6 +76,26 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
                 gate_end,
                 gain,
                 voice: Box::new(SubtractiveVoice::new(sub, note.frequency, sample_rate)),
+            });
+        }
+        if let Some(fm) = &patch.fm
+            && fm.level > 0.0
+        {
+            voices.push(ActiveVoice {
+                start,
+                gate_end,
+                gain,
+                voice: Box::new(FmVoice::new(fm, note.frequency, sample_rate)),
+            });
+        }
+        if let Some(wt) = &patch.wavetable
+            && wt.level > 0.0
+        {
+            voices.push(ActiveVoice {
+                start,
+                gate_end,
+                gain,
+                voice: Box::new(WavetableVoice::new(wt, note.frequency, sample_rate)),
             });
         }
         if let Some(perc) = &patch.percussion
@@ -298,5 +318,48 @@ mod tests {
         let buf = render_patch(&p, &n, SR);
         assert_eq!(buf.len(), (MIN_HIT_SECONDS * SR) as usize);
         assert!(rms(&left(&buf)) > 0.01);
+    }
+
+    #[test]
+    fn fm_engine_renders_and_layers_with_subtractive() {
+        let fm_only = patch(json!({"name": "f", "fm": {"operators": [
+            {"ratio": 1.0, "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            {"ratio": 2.0, "level": 0.5, "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}]}}));
+        let a = left(&render_patch(&fm_only, &[note(0.0, 0.5, 220.0)], SR));
+        assert!(rms(&a[441..22050]) > 0.3, "fm voice sounds");
+        assert!(a.iter().all(|x| x.is_finite()));
+
+        // The fm operator is detuned 7 cents from the subtractive voice: at an
+        // exact 1:1 ratio with zero detune the sine carrier locks into the
+        // opposite phase of the saw's fundamental (measured: their raw
+        // per-sample product integrates strongly negative), so layering it
+        // *removes* energy instead of adding it. A few cents of detune (the
+        // same trick `dx7_e_piano`'s second carrier uses) breaks that lock.
+        let both = patch(json!({"name": "b", "level": 0.5,
+            "subtractive": {"level": 0.5, "env": {"release": 0.01}},
+            "fm": {"level": 0.5, "operators": [{"ratio": 1.0, "detune_cents": 7.0, "env": {"release": 0.01}}]}}));
+        let sub_only = patch(json!({"name": "s", "level": 0.5,
+            "subtractive": {"level": 0.5, "env": {"release": 0.01}}}));
+        let b = left(&render_patch(&both, &[note(0.0, 0.5, 220.0)], SR));
+        let s = left(&render_patch(&sub_only, &[note(0.0, 0.5, 220.0)], SR));
+        assert!(
+            rms(&b[4410..22050]) > rms(&s[4410..22050]) * 1.2,
+            "fm adds energy"
+        );
+    }
+
+    #[test]
+    fn fm_release_extends_the_buffer() {
+        let p = patch(json!({"name": "f", "fm": {"operators": [{"env": {"release": 0.7}}]}}));
+        assert!((render_length_seconds(&p, &[note(0.0, 0.5, 220.0)]) - 1.2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn wavetable_engine_renders() {
+        let p =
+            patch(json!({"name": "w", "wavetable": {"table": "organ", "env": {"release": 0.2}}}));
+        let buf = left(&render_patch(&p, &[note(0.0, 0.5, 220.0)], SR));
+        assert!(rms(&buf[441..22050]) > 0.3);
+        assert_eq!(buf.len(), (0.7 * SR) as usize, "gate + release");
     }
 }

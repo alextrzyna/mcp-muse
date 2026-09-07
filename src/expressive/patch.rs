@@ -192,6 +192,134 @@ mod tests {
                 "sorted by name"
             );
         }
+        assert!(lib.get("dx7_e_piano").is_some());
+        assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
+        assert!(lib.get("wt_organ").is_some());
+        assert!(lib.count() >= 39);
+    }
+
+    #[test]
+    fn fm_patch_parses_with_defaults_and_round_trips() {
+        let p = parse(json!({"name": "op", "fm": {}})).unwrap();
+        let fm = p.fm.as_ref().unwrap();
+        assert_eq!(fm.level, 1.0);
+        assert_eq!(fm.algorithm, FmAlgorithm::Stack);
+        assert_eq!(fm.feedback, 0.0);
+        assert_eq!(fm.operators.len(), 1);
+        assert_eq!(fm.operators[0].ratio, 1.0);
+        assert_eq!(fm.operators[0].level, 1.0);
+        assert!(p.validate().is_ok());
+        assert!(p.has_pitched_engine());
+
+        let v = json!({"name": "bell", "fm": {"level": 0.8, "algorithm": "fan_in", "feedback": 0.2,
+        "operators": [
+            {"ratio": 1.0, "level": 1.0, "env": {"release": 2.0}},
+            {"ratio": 3.5, "level": 0.6, "detune_cents": 3, "env": {"decay": 0.5, "sustain": 0.0}}
+        ]}});
+        let p = parse(v).unwrap();
+        assert!(p.validate().is_ok());
+        let back = serde_json::to_value(&p).unwrap();
+        assert_eq!(back["fm"]["algorithm"], "fan_in");
+        assert_eq!(back["fm"]["operators"][1]["ratio"], 3.5);
+        assert_eq!(p.release_seconds(), 2.0, "release comes from the carrier");
+    }
+
+    #[test]
+    fn fm_validation_names_the_field() {
+        let p = parse(json!({"name": "x", "fm": {"operators": []}})).unwrap();
+        assert!(
+            p.validate().unwrap_err().contains("fm.operators"),
+            "empty operators"
+        );
+        let five: Vec<serde_json::Value> = (0..5).map(|_| json!({})).collect();
+        let p = parse(json!({"name": "x", "fm": {"operators": five}})).unwrap();
+        assert!(
+            p.validate().unwrap_err().contains("fm.operators"),
+            "too many operators"
+        );
+        let p = parse(json!({"name": "x", "fm": {"operators": [{"ratio": 20}]}})).unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(
+            err.contains("fm.operators[0].ratio") && err.contains("16"),
+            "{err}"
+        );
+        let p =
+            parse(json!({"name": "x", "fm": {"operators": [{}, {"detune_cents": 150}]}})).unwrap();
+        assert!(
+            p.validate()
+                .unwrap_err()
+                .contains("fm.operators[1].detune_cents")
+        );
+        let p = parse(json!({"name": "x", "fm": {"feedback": 2}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("fm.feedback"));
+        let p =
+            parse(json!({"name": "x", "fm": {"operators": [{"env": {"sustain": 3}}]}})).unwrap();
+        assert!(
+            p.validate()
+                .unwrap_err()
+                .contains("fm.operators[0].env.sustain")
+        );
+        assert!(
+            parse(json!({"name": "x", "fm": {"algorithm": "serial"}})).is_err(),
+            "unknown algorithm"
+        );
+        assert!(
+            parse(json!({"name": "x", "fm": {"mod_index": 2}}))
+                .unwrap_err()
+                .contains("mod_index")
+        );
+    }
+
+    #[test]
+    fn fm_algorithm_tables_match_the_spec() {
+        assert_eq!(FmAlgorithm::Stack.modulators(0), &[1]);
+        assert_eq!(FmAlgorithm::Stack.modulators(2), &[3]);
+        assert_eq!(FmAlgorithm::Stack.modulators(3), &[] as &[usize]);
+        assert_eq!(FmAlgorithm::Stack.carriers(), &[0]);
+        assert_eq!(FmAlgorithm::Pairs.modulators(0), &[2]);
+        assert_eq!(FmAlgorithm::Pairs.modulators(1), &[3]);
+        assert_eq!(FmAlgorithm::Pairs.carriers(), &[0, 1]);
+        assert_eq!(FmAlgorithm::FanIn.modulators(0), &[1, 2, 3]);
+        assert_eq!(FmAlgorithm::FanIn.carriers(), &[0]);
+        assert_eq!(FmAlgorithm::Parallel.carriers(), &[0, 1, 2, 3]);
+        for op in 0..4 {
+            assert!(FmAlgorithm::Parallel.modulators(op).is_empty());
+        }
+    }
+
+    #[test]
+    fn wavetable_patch_parses_validates_and_names_fields() {
+        let p = parse(json!({"name": "w", "wavetable": {}})).unwrap();
+        let wt = p.wavetable.as_ref().unwrap();
+        assert_eq!(wt.table, TableName::Basic);
+        assert_eq!(wt.morph, 0.0);
+        assert!(p.validate().is_ok() && p.has_pitched_engine());
+        let p = parse(json!({"name": "w", "wavetable": {"table": "organ", "morph": 0.4, "env": {"release": 1.0}}})).unwrap();
+        assert_eq!(p.release_seconds(), 1.0);
+        assert_eq!(
+            serde_json::to_value(&p).unwrap()["wavetable"]["table"],
+            "organ"
+        );
+        let p = parse(json!({"name": "w", "wavetable": {"morph": 1.5}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("wavetable.morph"));
+        assert!(parse(json!({"name": "w", "wavetable": {"table": "sawtooth"}})).is_err());
+        assert!(
+            parse(json!({"name": "w", "wavetable": {"position": 0.2}}))
+                .unwrap_err()
+                .contains("position")
+        );
+        assert_eq!(TableName::Noise.next(), TableName::Basic, "morph wraps");
+        assert_eq!(TableName::Pwm.index(), 5);
+    }
+
+    #[test]
+    fn release_seconds_is_the_longest_across_engines() {
+        let p = parse(json!({"name": "both",
+            "subtractive": {"env": {"release": 0.5}},
+            "fm": {"operators": [{"env": {"release": 1.5}}, {"env": {"release": 9.0}}]}}))
+        .unwrap();
+        // operator 2 is a modulator in `stack`, so its 9 s release does not count.
+        assert_eq!(p.release_seconds(), 1.5);
     }
 }
 
@@ -254,6 +382,10 @@ pub struct Patch {
     pub level: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive: Option<Subtractive>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fm: Option<Fm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wavetable: Option<Wavetable>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percussion: Option<Percussion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -347,6 +479,139 @@ pub struct Filter {
     pub env_amount: f32,
     #[serde(default)]
     pub env: Adsr,
+}
+
+/// Operator routing. Indices are 0-based (operator 1 = index 0); operator 1
+/// is always a carrier. Modulators always have higher indices than the
+/// operators they modulate, so evaluating operators from the last to the
+/// first resolves every modulator before it is needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FmAlgorithm {
+    /// 4 -> 3 -> 2 -> 1; one carrier.
+    #[default]
+    Stack,
+    /// 3 -> 1 and 4 -> 2; carriers 1 and 2.
+    Pairs,
+    /// 2, 3 and 4 all modulate 1; one carrier.
+    FanIn,
+    /// Every operator is a carrier (additive).
+    Parallel,
+}
+
+impl FmAlgorithm {
+    pub const ALL: [FmAlgorithm; 4] = [
+        FmAlgorithm::Stack,
+        FmAlgorithm::Pairs,
+        FmAlgorithm::FanIn,
+        FmAlgorithm::Parallel,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FmAlgorithm::Stack => "stack",
+            FmAlgorithm::Pairs => "pairs",
+            FmAlgorithm::FanIn => "fan_in",
+            FmAlgorithm::Parallel => "parallel",
+        }
+    }
+
+    /// Operators (0-based) that modulate operator `op`.
+    pub fn modulators(&self, op: usize) -> &'static [usize] {
+        match (self, op) {
+            (FmAlgorithm::Stack, 0) => &[1],
+            (FmAlgorithm::Stack, 1) => &[2],
+            (FmAlgorithm::Stack, 2) => &[3],
+            (FmAlgorithm::Pairs, 0) => &[2],
+            (FmAlgorithm::Pairs, 1) => &[3],
+            (FmAlgorithm::FanIn, 0) => &[1, 2, 3],
+            _ => &[],
+        }
+    }
+
+    /// Operators (0-based) whose output is heard.
+    pub fn carriers(&self) -> &'static [usize] {
+        match self {
+            FmAlgorithm::Stack | FmAlgorithm::FanIn => &[0],
+            FmAlgorithm::Pairs => &[0, 1],
+            FmAlgorithm::Parallel => &[0, 1, 2, 3],
+        }
+    }
+}
+
+/// One FM operator: a sine at `ratio` times the note frequency with its own envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Operator {
+    pub ratio: f32,
+    /// Output gain for a carrier; modulation depth for a modulator.
+    pub level: f32,
+    pub detune_cents: f32,
+    pub env: Adsr,
+}
+
+impl Default for Operator {
+    fn default() -> Self {
+        Self {
+            ratio: 1.0,
+            level: 1.0,
+            detune_cents: 0.0,
+            env: Adsr::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Fm {
+    pub level: f32,
+    pub algorithm: FmAlgorithm,
+    /// Self-modulation of the last operator, 0 to 1.
+    pub feedback: f32,
+    /// 1 to 4 operators; the first is always a carrier.
+    pub operators: Vec<Operator>,
+}
+
+impl Default for Fm {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            algorithm: FmAlgorithm::Stack,
+            feedback: 0.0,
+            operators: vec![Operator::default()],
+        }
+    }
+}
+
+impl Fm {
+    /// Longest release among the carriers that exist; the sound ends when they do.
+    pub fn carrier_release(&self) -> f32 {
+        self.algorithm
+            .carriers()
+            .iter()
+            .filter_map(|&c| self.operators.get(c))
+            .map(|op| op.env.release)
+            .fold(0.0, f32::max)
+    }
+
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.feedback"), self.feedback, 0.0, 1.0)?;
+        if self.operators.is_empty() || self.operators.len() > 4 {
+            return Err(format!(
+                "{path}.operators must have 1 to 4 entries, got {}",
+                self.operators.len()
+            ));
+        }
+        for (i, op) in self.operators.iter().enumerate() {
+            let p = format!("{path}.operators[{i}]");
+            check_range(&format!("{p}.ratio"), op.ratio, 0.25, 16.0)?;
+            check_range(&format!("{p}.level"), op.level, 0.0, 1.0)?;
+            check_range(&format!("{p}.detune_cents"), op.detune_cents, -100.0, 100.0)?;
+            op.env.validate(&format!("{p}.env"))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -578,6 +843,87 @@ impl Percussion {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableName {
+    #[default]
+    Basic,
+    Warm,
+    Bright,
+    Digital,
+    Vocal,
+    Pwm,
+    Organ,
+    Noise,
+}
+
+impl TableName {
+    pub const ALL: [TableName; 8] = [
+        TableName::Basic,
+        TableName::Warm,
+        TableName::Bright,
+        TableName::Digital,
+        TableName::Vocal,
+        TableName::Pwm,
+        TableName::Organ,
+        TableName::Noise,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TableName::Basic => "basic",
+            TableName::Warm => "warm",
+            TableName::Bright => "bright",
+            TableName::Digital => "digital",
+            TableName::Vocal => "vocal",
+            TableName::Pwm => "pwm",
+            TableName::Organ => "organ",
+            TableName::Noise => "noise",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|t| t == self)
+            .expect("every table is in ALL")
+    }
+
+    /// The table `morph` blends toward; wraps from `noise` back to `basic`.
+    pub fn next(&self) -> TableName {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Wavetable {
+    pub level: f32,
+    pub table: TableName,
+    /// 0 = this table, 1 = the next table in the list.
+    pub morph: f32,
+    pub env: Adsr,
+}
+
+impl Default for Wavetable {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            table: TableName::Basic,
+            morph: 0.0,
+            env: Adsr::default(),
+        }
+    }
+}
+
+impl Wavetable {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.morph"), self.morph, 0.0, 1.0)?;
+        self.env.validate(&format!("{path}.env"))
+    }
+}
+
 /// A patch reference on a note: a stored name or a one-off inline patch.
 ///
 /// Serialized untagged (a bare string or a patch object). Deserialization is
@@ -626,16 +972,32 @@ impl Patch {
 
     /// Longest amplitude release of any enabled engine; percussion has none.
     pub fn release_seconds(&self) -> f32 {
-        self.subtractive
+        let sub = self
+            .subtractive
             .as_ref()
             .filter(|s| s.level > 0.0)
             .map(|s| s.env.release)
-            .unwrap_or(0.0)
+            .unwrap_or(0.0);
+        let fm = self
+            .fm
+            .as_ref()
+            .filter(|f| f.level > 0.0)
+            .map(|f| f.carrier_release())
+            .unwrap_or(0.0);
+        let wavetable = self
+            .wavetable
+            .as_ref()
+            .filter(|w| w.level > 0.0)
+            .map(|w| w.env.release)
+            .unwrap_or(0.0);
+        sub.max(fm).max(wavetable)
     }
 
     /// True when at least one enabled engine takes its pitch from the note.
     pub fn has_pitched_engine(&self) -> bool {
         self.subtractive.as_ref().is_some_and(|s| s.level > 0.0)
+            || self.fm.as_ref().is_some_and(|f| f.level > 0.0)
+            || self.wavetable.as_ref().is_some_and(|w| w.level > 0.0)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -643,9 +1005,13 @@ impl Patch {
             return Err("name must not be empty".into());
         }
         check_range("level", self.level, 0.0, 1.0)?;
-        if self.subtractive.is_none() && self.percussion.is_none() {
+        if self.subtractive.is_none()
+            && self.percussion.is_none()
+            && self.fm.is_none()
+            && self.wavetable.is_none()
+        {
             return Err(format!(
-                "patch '{}' has no engines: add \"subtractive\" or \"percussion\"",
+                "patch '{}' has no engines: add \"subtractive\", \"fm\", \"wavetable\" or \"percussion\"",
                 self.name
             ));
         }
@@ -686,6 +1052,12 @@ impl Patch {
                 f.env.validate("subtractive.filter.env")?;
             }
             sub.env.validate("subtractive.env")?;
+        }
+        if let Some(fm) = &self.fm {
+            fm.validate("fm")?;
+        }
+        if let Some(wt) = &self.wavetable {
+            wt.validate("wavetable")?;
         }
         if let Some(perc) = &self.percussion {
             perc.validate("percussion")?;
@@ -732,6 +1104,16 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/sweep_up.json"),
     include_str!("patches/chime.json"),
     include_str!("patches/burst.json"),
+    // fm
+    include_str!("patches/dx7_e_piano.json"),
+    include_str!("patches/dx7_slap_bass.json"),
+    include_str!("patches/tx81z_lately.json"),
+    include_str!("patches/fm_bell.json"),
+    // wavetable
+    include_str!("patches/wt_organ.json"),
+    include_str!("patches/wt_vocal_pad.json"),
+    include_str!("patches/wt_pwm_lead.json"),
+    include_str!("patches/wt_glass_keys.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.

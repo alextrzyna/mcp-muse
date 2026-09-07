@@ -8,6 +8,7 @@ pub mod percussion;
 pub mod r2d2;
 pub mod render;
 pub mod synth;
+pub mod wavetables;
 
 #[cfg(test)]
 pub mod test_util;

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::expressive::{Patch, PatchLibrary};
+use crate::expressive::{FmAlgorithm, Patch, PatchLibrary, PercussionKind, TableName};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
 };
@@ -215,7 +215,7 @@ fn patch_schema() -> Value {
     let env = |what: &str| {
         json!({
             "type": "object",
-            "description": format!("{what} envelope in seconds (0.001-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
+            "description": format!("{what} envelope in seconds (0-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
             "properties": {
                 "attack": {"type": "number", "minimum": 0, "maximum": 10},
                 "decay": {"type": "number", "minimum": 0, "maximum": 10},
@@ -228,7 +228,7 @@ fn patch_schema() -> Value {
     let wave = json!({"type": "string", "enum": ["sine", "saw", "square", "triangle", "noise"], "default": "saw"});
     json!({
         "type": "object",
-        "description": "A synth patch. Include at least one engine (subtractive or percussion); several may layer.",
+        "description": "A synth patch. Include at least one engine (subtractive, fm, wavetable or percussion); several may layer.",
         "properties": {
             "name": {"type": "string", "description": "Patch name; notes reference it with \"synth\": \"<name>\""},
             "description": {"type": "string"},
@@ -254,6 +254,39 @@ fn patch_schema() -> Value {
                             "env_amount": {"type": "number", "minimum": -1, "maximum": 1, "default": 0, "description": "Filter envelope depth; 1 sweeps up four octaves, -1 down"},
                             "env": env("Filter")},
                         "additionalProperties": false},
+                    "env": env("Amplitude")
+                },
+                "additionalProperties": false
+            },
+            "fm": {
+                "type": "object",
+                "description": "Four-operator FM. Operator 1 (first entry) is always a carrier; a carrier's level is its volume, a modulator's level is its modulation depth (1 = about 4 radians). Bells: high non-integer ratios with fast-decaying modulators; basses: ratio 1-2 modulators with a short decay.",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "algorithm": {"type": "string", "enum": ["stack", "pairs", "fan_in", "parallel"], "default": "stack",
+                        "description": "stack: 4->3->2->1, one carrier. pairs: 3->1 and 4->2, carriers 1 and 2. fan_in: 2, 3, 4 all modulate 1. parallel: all carriers (additive)"},
+                    "feedback": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Self-modulation of the last operator in radians (0 to 1); adds grit. A modulator's level 1 is 4 radians, so feedback is a gentler effect"},
+                    "operators": {
+                        "type": "array", "minItems": 1, "maxItems": 4,
+                        "description": "1 to 4 operators in order; missing operators are silent",
+                        "items": {"type": "object", "properties": {
+                            "ratio": {"type": "number", "minimum": 0.25, "maximum": 16, "default": 1, "description": "Frequency relative to the note (2 = one octave up, 3.5 = bell-like)"},
+                            "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                            "detune_cents": {"type": "number", "minimum": -100, "maximum": 100, "default": 0},
+                            "env": env("Operator")
+                        }, "additionalProperties": false}
+                    }
+                },
+                "additionalProperties": false
+            },
+            "wavetable": {
+                "type": "object",
+                "description": "One of eight band-limited tables, optionally morphed toward the next table in the list, through an amplitude envelope",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "table": {"type": "string", "enum": ["basic", "warm", "bright", "digital", "vocal", "pwm", "organ", "noise"], "default": "basic",
+                        "description": "basic: soft sine+; warm: odd harmonics; bright: saw-like; digital: inharmonic/metallic; vocal: formant peaks; pwm: stacked pulse widths; organ: drawbars; noise: dense harmonics with scattered phases"},
+                    "morph": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "0 = the chosen table, 1 = the next table in the list (noise wraps to basic)"},
                     "env": env("Amplitude")
                 },
                 "additionalProperties": false
@@ -473,12 +506,14 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     let tools = json!([
         {
             "name": "define_synth",
-            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
+            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope), fm (four operators, four algorithms), wavetable (eight band-limited tables with morph) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
 
 Examples:
 - Bass: {\"name\": \"rubber_bass\", \"category\": \"bass\", \"subtractive\": {\"osc1\": {\"wave\": \"saw\"}, \"osc2\": {\"wave\": \"square\", \"mix\": 0.3, \"detune_cents\": 6}, \"filter\": {\"type\": \"low_pass\", \"cutoff\": 500, \"resonance\": 0.4, \"slope\": 24, \"env_amount\": 0.7, \"env\": {\"attack\": 0.005, \"decay\": 0.25, \"sustain\": 0.1, \"release\": 0.2}}, \"env\": {\"attack\": 0.005, \"decay\": 0.3, \"sustain\": 0.6, \"release\": 0.15}}, \"effects\": [{\"type\": \"distortion\", \"drive\": 3, \"intensity\": 0.4}, {\"type\": \"compressor\", \"threshold\": -18, \"ratio\": 4, \"intensity\": 1}]}
 - Pad: {\"name\": \"glass_pad\", \"category\": \"pad\", \"level\": 0.7, \"subtractive\": {\"osc1\": {\"wave\": \"triangle\"}, \"osc2\": {\"wave\": \"saw\", \"mix\": 0.35, \"detune_cents\": 9}, \"filter\": {\"cutoff\": 900, \"env_amount\": 0.5, \"env\": {\"attack\": 1.2, \"decay\": 2, \"sustain\": 0.4, \"release\": 3}}, \"env\": {\"attack\": 0.9, \"decay\": 1, \"sustain\": 0.8, \"release\": 2.5}}, \"effects\": [{\"type\": \"chorus\", \"rate\": 0.5, \"depth\": 0.4, \"intensity\": 0.3}, {\"type\": \"reverb\", \"room_size\": 0.8, \"intensity\": 0.4}]}
 - Drum: {\"name\": \"tight_kick\", \"category\": \"drums\", \"percussion\": {\"kind\": \"kick\", \"frequency\": 50, \"punch\": 0.9, \"sustain\": 0.2}}
+- Bell: {\"name\": \"glass_bell\", \"category\": \"keys\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"attack\": 0.002, \"decay\": 1.5, \"sustain\": 0.2, \"release\": 2.5}}, {\"ratio\": 3.5, \"level\": 0.55, \"env\": {\"decay\": 0.6, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.7, \"intensity\": 0.35}]}
+- Organ: {\"name\": \"organ\", \"category\": \"keys\", \"wavetable\": {\"table\": \"organ\", \"env\": {\"attack\": 0.005, \"sustain\": 1, \"release\": 0.15}}}
 
 Call list_sounds with section \"synths\" to see the built-in patches, which double as worked examples.",
             "inputSchema": patch_schema()
@@ -718,6 +753,7 @@ Examples:
 - R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
 - Drum kick: [{\"synth\": \"tr_808_kick\", \"duration\": 0.5}]
 - Inline synth: [{\"synth\": {\"name\": \"blip\", \"subtractive\": {\"osc1\": {\"wave\": \"square\"}, \"env\": {\"release\": 0.05}}}, \"note\": 84, \"duration\": 0.1}]
+- Inline FM bell: [{\"synth\": {\"name\": \"glass_bell\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"attack\": 0.002, \"decay\": 1.5, \"sustain\": 0.2, \"release\": 2.5}}, {\"ratio\": 3.5, \"level\": 0.55, \"env\": {\"decay\": 0.6, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.7, \"intensity\": 0.35}]}, \"note\": 76, \"duration\": 0.3}]
 
 Pass \"mode\": \"layer\" to play over what is already sounding; the default replaces it.",
             "inputSchema": {
@@ -846,6 +882,12 @@ fn handle_define_synth(
     let mut engines = Vec::new();
     if patch.subtractive.as_ref().is_some_and(|s| s.level > 0.0) {
         engines.push("subtractive");
+    }
+    if patch.fm.as_ref().is_some_and(|f| f.level > 0.0) {
+        engines.push("fm");
+    }
+    if patch.wavetable.as_ref().is_some_and(|w| w.level > 0.0) {
+        engines.push("wavetable");
     }
     if let Some(p) = patch.percussion.as_ref().filter(|p| p.level > 0.0) {
         engines.push(p.kind.as_str());
@@ -1190,7 +1232,33 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
                 out.push_str(&format!("- {} — {}\n", patch.name, patch.description));
             }
         }
-        out.push_str("\nPercussion kinds for inline patches: kick, snare, hihat, cymbal, zap, swoosh, chime, burst.\n\n");
+        let algorithms = FmAlgorithm::ALL
+            .iter()
+            .map(FmAlgorithm::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let tables = TableName::ALL
+            .iter()
+            .map(TableName::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let percussion_kinds = [
+            PercussionKind::Kick,
+            PercussionKind::Snare,
+            PercussionKind::Hihat,
+            PercussionKind::Cymbal,
+            PercussionKind::Zap,
+            PercussionKind::Swoosh,
+            PercussionKind::Chime,
+            PercussionKind::Burst,
+        ]
+        .iter()
+        .map(PercussionKind::as_str)
+        .collect::<Vec<_>>()
+        .join("/");
+        out.push_str(&format!(
+            "\nEngines for inline patches: subtractive, fm (algorithms {algorithms}), wavetable (tables {tables}), percussion (kinds {percussion_kinds}).\n\n"
+        ));
     }
 
     if want("instruments") {
@@ -1437,5 +1505,55 @@ mod tests {
         assert!(schema["properties"]["synth"].is_object());
         assert!(schema["properties"].get("synth_type").is_none());
         assert!(schema["properties"].get("preset_name").is_none());
+    }
+
+    #[test]
+    fn patch_schema_describes_fm_and_wavetable_and_they_validate_through_define_synth() {
+        let schema = patch_schema();
+        let fm = &schema["properties"]["fm"]["properties"];
+        assert_eq!(
+            fm["algorithm"]["enum"],
+            json!(["stack", "pairs", "fan_in", "parallel"])
+        );
+        assert_eq!(fm["operators"]["maxItems"], 4);
+        assert!(fm["operators"]["items"]["properties"]["ratio"].is_object());
+        let wt = &schema["properties"]["wavetable"]["properties"];
+        assert_eq!(
+            wt["table"]["enum"],
+            json!([
+                "basic", "warm", "bright", "digital", "vocal", "pwm", "organ", "noise"
+            ])
+        );
+        assert!(wt["morph"].is_object());
+
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bell", "fm": {"algorithm": "stack",
+                "operators": [{"ratio": 1}, {"ratio": 3.5, "level": 0.5}]}}),
+        );
+        assert!(r.error.is_none(), "{:?}", r.error);
+        assert!(text(&r).contains("fm"), "{}", text(&r));
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "org", "wavetable": {"table": "organ"}}),
+        );
+        assert!(r.error.is_none());
+        assert!(text(&r).contains("wavetable"));
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad", "fm": {"operators": [{"ratio": 99}]}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(
+            r.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("fm.operators[0].ratio")
+        );
     }
 }
