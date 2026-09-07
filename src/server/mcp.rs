@@ -753,6 +753,7 @@ Examples:
 - R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
 - Drum kick: [{\"synth\": \"tr_808_kick\", \"duration\": 0.5}]
 - Inline synth: [{\"synth\": {\"name\": \"blip\", \"subtractive\": {\"osc1\": {\"wave\": \"square\"}, \"env\": {\"release\": 0.05}}}, \"note\": 84, \"duration\": 0.1}]
+- Inline FM bell: [{\"synth\": {\"name\": \"glass_bell\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"attack\": 0.002, \"decay\": 1.5, \"sustain\": 0.2, \"release\": 2.5}}, {\"ratio\": 3.5, \"level\": 0.55, \"env\": {\"decay\": 0.6, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.7, \"intensity\": 0.35}]}, \"note\": 76, \"duration\": 0.3}]
 
 Pass \"mode\": \"layer\" to play over what is already sounding; the default replaces it.",
             "inputSchema": {
