@@ -1,0 +1,8 @@
+{
+  "name": "chime",
+  "description": "Bell with inharmonic partials; pitch from frequency, default 880 Hz",
+  "category": "fx",
+  "level": 0.8,
+  "percussion": {"kind": "chime", "frequency": 880, "harmonic_count": 5, "decay": 0.5, "inharmonicity": 0.1},
+  "effects": [{"type": "reverb", "room_size": 0.6, "intensity": 0.3}]
+}

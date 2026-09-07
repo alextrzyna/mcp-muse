@@ -1,0 +1,7 @@
+{
+  "name": "tr_808_kick",
+  "description": "Deep, punchy TR-808 kick drum with characteristic punch (Roland TR-808)",
+  "category": "drums",
+  "level": 0.9,
+  "percussion": {"kind": "kick", "frequency": 60, "punch": 0.8, "sustain": 0.6, "click_freq": 800}
+}

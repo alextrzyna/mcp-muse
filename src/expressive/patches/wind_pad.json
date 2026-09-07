@@ -1,0 +1,16 @@
+{
+  "name": "wind_pad",
+  "description": "Breathy, wind-like pad texture with organic movement (Natural Sound Design)",
+  "category": "pad",
+  "level": 0.65,
+  "subtractive": {
+    "osc1": {"wave": "noise"},
+    "filter": {"type": "band_pass", "cutoff": 600, "resonance": 0.1},
+    "env": {"attack": 3.0, "decay": 2.0, "sustain": 0.6, "release": 4.0}
+  },
+  "effects": [
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.8},
+    {"type": "reverb", "room_size": 0.7, "dampening": 0.3, "wet_level": 0.4, "pre_delay": 0.04, "intensity": 0.6},
+    {"type": "chorus", "rate": 0.8, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.8, "intensity": 0.5}
+  ]
+}

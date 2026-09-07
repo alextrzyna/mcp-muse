@@ -5,6 +5,7 @@
 use crate::expressive::{Adsr, Wave};
 use crate::midi::EffectConfig;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[cfg(test)]
 mod tests {
@@ -122,6 +123,59 @@ mod tests {
         let p = parse(json!({"name": "k", "percussion": {"kind": "kick"}})).unwrap();
         assert_eq!(p.release_seconds(), 0.0);
         assert!(!p.has_pitched_engine());
+    }
+
+    #[test]
+    fn every_builtin_patch_parses_validates_and_renders_cleanly() {
+        use crate::expressive::render::{NoteEvent, render_patch};
+        let lib = PatchLibrary::new();
+        assert!(
+            lib.count() >= 28,
+            "expected the migrated presets, got {}",
+            lib.count()
+        );
+        for name in lib.names() {
+            let p = lib.get(name).unwrap();
+            p.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(p.category.is_some(), "{name} needs a category");
+            assert!(!p.description.is_empty(), "{name} needs a description");
+            let note = NoteEvent {
+                start: 0.0,
+                duration: 0.5,
+                frequency: if p.has_pitched_engine() { 261.63 } else { 60.0 },
+                velocity: 100.0 / 127.0,
+            };
+            let buf = render_patch(p, &[note], 44100.0);
+            let peak = buf
+                .iter()
+                .flat_map(|s| s.iter())
+                .fold(0.0f32, |m, x| m.max(x.abs()));
+            assert!(peak.is_finite(), "{name} produced NaN/inf");
+            // SYNTH_BUS_GAIN (0.5) is applied later; stay under the 0.8 clipper knee after it.
+            assert!(
+                peak * 0.5 <= 0.8,
+                "{name} peaks at {peak}, too hot for the bus"
+            );
+            assert!(peak > 0.02, "{name} is nearly silent (peak {peak})");
+        }
+    }
+
+    #[test]
+    fn library_lookup_is_case_insensitive_and_catalog_is_grouped() {
+        let lib = PatchLibrary::new();
+        assert!(lib.get("Minimoog_Bass").is_some());
+        assert!(lib.get(" tr_808_kick ").is_some());
+        assert!(lib.get("nope").is_none());
+        let catalog = lib.catalog();
+        let cats: Vec<PatchCategory> = catalog.iter().map(|(c, _)| *c).collect();
+        assert!(cats.contains(&PatchCategory::Bass) && cats.contains(&PatchCategory::Drums));
+        for (_, patches) in &catalog {
+            assert!(!patches.is_empty());
+            assert!(
+                patches.windows(2).all(|w| w[0].name <= w[1].name),
+                "sorted by name"
+            );
+        }
     }
 }
 
@@ -600,5 +654,109 @@ impl Patch {
             perc.validate("percussion")?;
         }
         Ok(())
+    }
+}
+
+/// Built-in patches, embedded at compile time from `patches/*.json`.
+const BUILTIN_PATCHES: &[&str] = &[
+    // bass
+    include_str!("patches/minimoog_bass.json"),
+    include_str!("patches/minimoog_bass_bright.json"),
+    include_str!("patches/tb_303_acid.json"),
+    include_str!("patches/tb_303_acid_squelchy.json"),
+    include_str!("patches/odyssey_bite.json"),
+    include_str!("patches/jupiter_bass.json"),
+    include_str!("patches/saw_bass.json"),
+    include_str!("patches/square_bass.json"),
+    include_str!("patches/sub_bass.json"),
+    include_str!("patches/rubber_bass.json"),
+    // lead
+    include_str!("patches/prophet_lead.json"),
+    // pads (subtractive approximations until the granular/LFO PR)
+    include_str!("patches/jp_8_strings.json"),
+    include_str!("patches/ob_brass.json"),
+    include_str!("patches/analog_wash.json"),
+    include_str!("patches/d_50_fantasia.json"),
+    include_str!("patches/crystal_pad.json"),
+    include_str!("patches/space_pad.json"),
+    include_str!("patches/dark_pad.json"),
+    include_str!("patches/choir_pad.json"),
+    include_str!("patches/wind_pad.json"),
+    include_str!("patches/dream_pad.json"),
+    include_str!("patches/warm_pad.json"),
+    // drums
+    include_str!("patches/tr_808_kick.json"),
+    include_str!("patches/tr_909_snare.json"),
+    include_str!("patches/tr_909_hihat.json"),
+    include_str!("patches/tr_808_hihat.json"),
+    include_str!("patches/crash_cymbal.json"),
+    // fx
+    include_str!("patches/sci_fi_zap.json"),
+    include_str!("patches/sweep_up.json"),
+    include_str!("patches/chime.json"),
+    include_str!("patches/burst.json"),
+];
+
+/// Every built-in patch, parsed and validated once at construction.
+pub struct PatchLibrary {
+    patches: HashMap<String, Patch>,
+}
+
+impl Default for PatchLibrary {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PatchLibrary {
+    /// Parses every embedded patch file; panics on a bad file (covered by test).
+    pub fn new() -> Self {
+        let mut patches = HashMap::new();
+        for source in BUILTIN_PATCHES {
+            let patch: Patch = serde_json::from_str(source)
+                .unwrap_or_else(|e| panic!("built-in patch does not parse: {e}\n{source}"));
+            patch
+                .validate()
+                .unwrap_or_else(|e| panic!("built-in patch '{}' is invalid: {e}", patch.name));
+            patches.insert(patch.key(), patch);
+        }
+        Self { patches }
+    }
+
+    /// Case-insensitive, trimmed lookup by name.
+    pub fn get(&self, name: &str) -> Option<&Patch> {
+        self.patches.get(&name.trim().to_lowercase())
+    }
+
+    /// Every patch name, sorted.
+    pub fn names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.patches.values().map(|p| p.name.as_str()).collect();
+        names.sort_unstable();
+        names
+    }
+
+    /// Total number of built-in patches.
+    pub fn count(&self) -> usize {
+        self.patches.len()
+    }
+
+    /// Every non-empty category, in `PatchCategory::ALL` order, with its
+    /// patches sorted by name.
+    pub fn catalog(&self) -> Vec<(PatchCategory, Vec<&Patch>)> {
+        PatchCategory::ALL
+            .iter()
+            .filter_map(|category| {
+                let mut patches: Vec<&Patch> = self
+                    .patches
+                    .values()
+                    .filter(|p| p.category == Some(*category))
+                    .collect();
+                if patches.is_empty() {
+                    return None;
+                }
+                patches.sort_by(|a, b| a.name.cmp(&b.name));
+                Some((*category, patches))
+            })
+            .collect()
     }
 }
