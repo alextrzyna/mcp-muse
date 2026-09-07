@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Envelope times in seconds (0.001 to 10) and sustain level 0 to 1.
+/// Envelope times in seconds (0 to 10) and sustain 0 to 1.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 #[allow(dead_code)]

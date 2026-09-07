@@ -241,7 +241,7 @@ fn patch_schema() -> Value {
                     "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
                     "osc1": {"type": "object", "properties": {"wave": wave, "pulse_width": {"type": "number", "minimum": 0.1, "maximum": 0.9, "default": 0.5}}, "additionalProperties": false},
                     "osc2": {"type": "object", "description": "Second oscillator blended with osc1",
-                        "properties": {"wave": wave, "pulse_width": {"type": "number", "minimum": 0.1, "maximum": 0.9},
+                        "properties": {"wave": wave, "pulse_width": {"type": "number", "minimum": 0.1, "maximum": 0.9, "default": 0.5},
                             "mix": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "0 = only osc1, 1 = only osc2"},
                             "detune_cents": {"type": "number", "minimum": -100, "maximum": 100, "default": 0, "description": "5-15 thickens, 50+ beats audibly"},
                             "octave": {"type": "integer", "minimum": -2, "maximum": 2, "default": 0}},

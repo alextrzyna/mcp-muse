@@ -1,6 +1,5 @@
 //! Agent-defined synth patches: the JSON data model, validation and the
 //! library of built-in patches. See docs/superpowers/specs/2026-09-06-agent-defined-synths-design.md.
-#![allow(dead_code)]
 
 use crate::expressive::{Adsr, Wave};
 use crate::midi::EffectConfig;
@@ -198,9 +197,6 @@ mod tests {
 
 fn one() -> f32 {
     1.0
-}
-fn half() -> f32 {
-    0.5
 }
 fn default_cutoff() -> f32 {
     1000.0
@@ -769,7 +765,9 @@ impl PatchLibrary {
         self.patches.get(&name.trim().to_lowercase())
     }
 
-    /// Every patch name, sorted.
+    /// Every patch name, sorted. (Only the tests enumerate the library today;
+    /// `catalog` is what `list_sounds` uses.)
+    #[allow(dead_code)]
     pub fn names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self.patches.values().map(|p| p.name.as_str()).collect();
         names.sort_unstable();

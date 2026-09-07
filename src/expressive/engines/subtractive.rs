@@ -16,6 +16,9 @@ pub struct SubtractiveVoice {
     filter_env: Option<GateEnvelope>,
     svf1: Option<Svf>,
     svf2: Option<Svf>,
+    /// Cutoff the filters are already tuned to; recomputing the coefficients
+    /// every sample is wasted work while the filter envelope sits still.
+    last_cutoff: f32,
     rng: rand::rngs::ThreadRng,
 }
 
@@ -51,6 +54,7 @@ impl SubtractiveVoice {
             filter_env,
             svf1,
             svf2,
+            last_cutoff: cfg.filter.as_ref().map(|f| f.cutoff).unwrap_or(0.0),
             rng: rand::rng(),
         }
     }
@@ -100,10 +104,15 @@ impl Voice for SubtractiveVoice {
             let env = self.filter_env.as_mut().map(|e| e.next()).unwrap_or(0.0);
             let cutoff = (f.cutoff * 2f32.powf(f.env_amount * env * 4.0) * mods.cutoff_ratio)
                 .clamp(20.0, 20000.0);
-            svf1.set_cutoff(cutoff);
+            if cutoff != self.last_cutoff {
+                svf1.set_cutoff(cutoff);
+                if let Some(svf2) = &mut self.svf2 {
+                    svf2.set_cutoff(cutoff);
+                }
+                self.last_cutoff = cutoff;
+            }
             s = svf1.process(s);
             if let Some(svf2) = &mut self.svf2 {
-                svf2.set_cutoff(cutoff);
                 s = svf2.process(s);
             }
         }
