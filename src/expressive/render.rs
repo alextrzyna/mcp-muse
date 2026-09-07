@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::expressive::engines::{
-    FmVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice,
+    FmVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice, WavetableVoice,
 };
 use crate::expressive::{EffectsChain, Patch};
 
@@ -96,6 +96,16 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
                 gate_end,
                 gain,
                 voice: Box::new(PercussionVoice::new(perc, gate, sample_rate)),
+            });
+        }
+        if let Some(wt) = &patch.wavetable
+            && wt.level > 0.0
+        {
+            voices.push(ActiveVoice {
+                start,
+                gate_end,
+                gain,
+                voice: Box::new(WavetableVoice::new(wt, note.frequency, sample_rate)),
             });
         }
     }
@@ -342,5 +352,14 @@ mod tests {
     fn fm_release_extends_the_buffer() {
         let p = patch(json!({"name": "f", "fm": {"operators": [{"env": {"release": 0.7}}]}}));
         assert!((render_length_seconds(&p, &[note(0.0, 0.5, 220.0)]) - 1.2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn wavetable_engine_renders() {
+        let p =
+            patch(json!({"name": "w", "wavetable": {"table": "organ", "env": {"release": 0.2}}}));
+        let buf = left(&render_patch(&p, &[note(0.0, 0.5, 220.0)], SR));
+        assert!(rms(&buf[441..22050]) > 0.3);
+        assert_eq!(buf.len(), (0.7 * SR) as usize, "gate + release");
     }
 }

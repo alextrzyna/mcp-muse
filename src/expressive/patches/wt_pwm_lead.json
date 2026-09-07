@@ -1,0 +1,8 @@
+{
+  "name": "wt_pwm_lead",
+  "description": "Pulse-width lead from the pwm wavetable, morphed toward organ for bite",
+  "category": "lead",
+  "level": 0.75,
+  "wavetable": {"table": "pwm", "morph": 0.2, "env": {"attack": 0.01, "decay": 0.2, "sustain": 0.7, "release": 0.3}},
+  "effects": [{"type": "delay", "delay_time": 0.375, "feedback": 0.3, "wet_level": 0.35, "intensity": 0.3}]
+}

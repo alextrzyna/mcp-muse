@@ -194,7 +194,8 @@ mod tests {
         }
         assert!(lib.get("dx7_e_piano").is_some());
         assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
-        assert!(lib.count() >= 35);
+        assert!(lib.get("wt_organ").is_some());
+        assert!(lib.count() >= 39);
     }
 
     #[test]
@@ -862,7 +863,7 @@ impl TableName {
         TableName::Noise,
     ];
 
-    #[allow(dead_code)] // consumed in Task 5
+    #[allow(dead_code)] // consumed by list_sounds in a later task
     pub fn as_str(&self) -> &'static str {
         match self {
             TableName::Basic => "basic",
@@ -884,7 +885,6 @@ impl TableName {
     }
 
     /// The table `morph` blends toward; wraps from `noise` back to `basic`.
-    #[allow(dead_code)] // consumed in Task 5
     pub fn next(&self) -> TableName {
         Self::ALL[(self.index() + 1) % Self::ALL.len()]
     }
@@ -1104,6 +1104,11 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/dx7_slap_bass.json"),
     include_str!("patches/tx81z_lately.json"),
     include_str!("patches/fm_bell.json"),
+    // wavetable
+    include_str!("patches/wt_organ.json"),
+    include_str!("patches/wt_vocal_pad.json"),
+    include_str!("patches/wt_pwm_lead.json"),
+    include_str!("patches/wt_glass_keys.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.

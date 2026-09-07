@@ -4,6 +4,7 @@
 pub mod fm;
 pub mod percussion;
 pub mod subtractive;
+pub mod wavetable;
 
 #[allow(unused_imports)]
 pub use fm::{FM_MOD_DEPTH, FmVoice};
@@ -11,6 +12,8 @@ pub use fm::{FM_MOD_DEPTH, FmVoice};
 pub use percussion::{MIN_HIT_SECONDS, PercussionVoice};
 #[allow(unused_imports)]
 pub use subtractive::SubtractiveVoice;
+#[allow(unused_imports)]
+pub use wavetable::WavetableVoice;
 
 /// Per-sample modulation inputs shared by all voices (the LFO writes these in a later PR).
 #[derive(Debug, Clone, Copy, PartialEq)]

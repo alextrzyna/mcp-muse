@@ -1,6 +1,5 @@
 //! Procedural wavetables, generated once and band-limited per octave so a
 //! high note never includes partials above Nyquist.
-#![allow(dead_code)] // consumed in Task 5
 
 use crate::expressive::TableName;
 use std::f32::consts::TAU;
@@ -177,6 +176,7 @@ pub fn sample(table: TableName, level: usize, phase: f32) -> f32 {
 }
 
 /// Every partial regardless of Nyquist; used by tests as the aliasing baseline.
+#[allow(dead_code)] // only exercised by this module's own tests
 pub fn naive_sample(table: TableName, phase: f32) -> f32 {
     partials(table)
         .iter()
