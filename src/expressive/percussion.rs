@@ -232,7 +232,9 @@ fn zap(
     let mut rng = rand::rng();
     let mut base = PhaseAccumulator::new(sample_rate);
     let duration = n as f32 / sample_rate;
-    let env_rate = 8.0 + decay * 12.0;
+    // `decay` is a time, as it is for hihat and chime: larger rings longer.
+    // 11.6 * 0.3 keeps the default 0.3 s zap at its original rate of 11.6.
+    let env_rate = 11.6 * 0.3 / decay.max(0.01);
 
     (0..n)
         .map(|i| {
@@ -438,6 +440,26 @@ mod tests {
             "fundamental present"
         );
         assert!(early > late * 4.0, "decays: {early} vs {late}");
+    }
+
+    #[test]
+    fn longer_zap_decay_rings_longer() {
+        // `decay` is a time for hihat and chime; zap reads it the same way.
+        let n = (0.5 * SR) as usize;
+        let tail = (0.6 * n as f32) as usize;
+        let render_with = |decay: f32| {
+            let mut c = cfg(PercussionKind::Zap);
+            c.decay = Some(decay);
+            render(SR, &c, n)
+        };
+        let short = render_with(0.1);
+        let long = render_with(1.0);
+        assert!(
+            rms(&long[tail..]) > rms(&short[tail..]),
+            "decay 1.0 tail {} should exceed decay 0.1 tail {}",
+            rms(&long[tail..]),
+            rms(&short[tail..])
+        );
     }
 
     #[test]

@@ -272,7 +272,7 @@ fn patch_schema() -> Value {
                     "buzz": {"type": "number", "minimum": 0, "maximum": 1, "description": "snare"},
                     "noise_amount": {"type": "number", "minimum": 0, "maximum": 1, "description": "snare"},
                     "metallic": {"type": "number", "minimum": 0, "maximum": 1, "description": "hihat, cymbal"},
-                    "decay": {"type": "number", "minimum": 0.01, "maximum": 10, "description": "hihat, zap, chime (seconds)"},
+                    "decay": {"type": "number", "minimum": 0.01, "maximum": 10, "description": "hihat, zap, chime: decay time in seconds (larger = longer ring)"},
                     "brightness": {"type": "number", "minimum": 0, "maximum": 1, "description": "hihat"},
                     "size": {"type": "number", "minimum": 0, "maximum": 1, "description": "cymbal"},
                     "strike_intensity": {"type": "number", "minimum": 0, "maximum": 1, "description": "cymbal"},
