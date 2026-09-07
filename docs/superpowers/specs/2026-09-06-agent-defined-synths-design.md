@@ -257,11 +257,15 @@ for percussion) without NaN, and stays under the clipper knee at the bus.
 
 ## 6. Validation and errors
 
-- Malformed JSON shape (wrong type, unknown field): `-32602`, as today.
-- Semantic problems (unknown patch name, out-of-range value, empty
-  `operators`, `percussion.env` present): result with `isError: true`
-  naming the field path and the allowed range, so the agent learns the
-  schema from the error.
+- Invalid arguments, following the server's existing convention: a
+  malformed JSON shape (wrong type, unknown field) and a patch that fails
+  validation (out-of-range value, empty `operators`, a percussion
+  parameter of another kind) both return `-32602`, with the field path and
+  the allowed range in the message so the agent learns the schema from the
+  error. This applies equally to `define_synth` and to inline patches on
+  notes.
+- Failures while executing (unknown patch name, no audio device, render
+  failure): result with `isError: true`.
 - Values are clamped only where tryx-fx clamps them (`mix`, `feedback`,
   `intensity`); everything else is rejected.
 - An unknown patch name lists the defined and built-in names, mirroring
