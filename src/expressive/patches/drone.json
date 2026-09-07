@@ -1,0 +1,15 @@
+{
+  "name": "drone",
+  "description": "Slow evolving detuned drone with a breathing filter sweep",
+  "category": "pad",
+  "level": 0.6,
+  "subtractive": {
+    "osc1": {"wave": "saw"},
+    "osc2": {"wave": "square", "mix": 0.35, "detune_cents": 6, "octave": -1},
+    "filter": {"type": "low_pass", "cutoff": 500, "resonance": 0.4, "slope": 24,
+               "env_amount": 0.3, "env": {"attack": 4.0, "decay": 4.0, "sustain": 0.5, "release": 4.0}},
+    "env": {"attack": 2.0, "decay": 1.0, "sustain": 0.9, "release": 4.0}
+  },
+  "lfo": {"rate": 0.1, "depth": 0.5, "wave": "triangle", "target": "cutoff"},
+  "effects": [{"type": "reverb", "room_size": 0.9, "dampening": 0.5, "wet_level": 0.4, "intensity": 0.4}]
+}

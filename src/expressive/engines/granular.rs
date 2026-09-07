@@ -1,10 +1,6 @@
 //! Granular synthesis: a cloud of short Hann-windowed grains read from a
 //! single-cycle source waveform at the note's pitch, with random start
 //! positions and random stereo placement.
-//!
-//! `GranularVoice` is not wired into the renderer until the next task, so
-//! most of this module is unused for now.
-#![allow(dead_code)]
 
 use crate::expressive::engines::{Modulation, Voice};
 use crate::expressive::{GateEnvelope, GrainSource, Granular};

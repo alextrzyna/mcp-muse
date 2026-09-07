@@ -195,7 +195,8 @@ mod tests {
         assert!(lib.get("dx7_e_piano").is_some());
         assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
         assert!(lib.get("wt_organ").is_some());
-        assert!(lib.count() >= 39);
+        assert!(lib.get("grain_cloud").is_some() && lib.get("drone").is_some());
+        assert!(lib.count() >= 43);
     }
 
     #[test]
@@ -1405,6 +1406,11 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/wt_vocal_pad.json"),
     include_str!("patches/wt_pwm_lead.json"),
     include_str!("patches/wt_glass_keys.json"),
+    // granular / lfo
+    include_str!("patches/grain_cloud.json"),
+    include_str!("patches/formant_texture.json"),
+    include_str!("patches/noise_texture.json"),
+    include_str!("patches/drone.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.

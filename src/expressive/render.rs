@@ -6,7 +6,8 @@
 #![allow(dead_code)]
 
 use crate::expressive::engines::{
-    FmVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice, WavetableVoice,
+    FmVoice, GranularVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice,
+    WavetableVoice,
 };
 use crate::expressive::{EffectsChain, Lfo, Patch};
 
@@ -99,6 +100,16 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
                 gate_end,
                 gain,
                 voice: Box::new(WavetableVoice::new(wt, note.frequency, sample_rate)),
+            });
+        }
+        if let Some(g) = &patch.granular
+            && g.level > 0.0
+        {
+            voices.push(ActiveVoice {
+                start,
+                gate_end,
+                gain,
+                voice: Box::new(GranularVoice::new(g, note.frequency, sample_rate)),
             });
         }
         if let Some(perc) = &patch.percussion
@@ -480,5 +491,48 @@ mod tests {
         let b = left(&render_patch(&without, &[note(0.0, 0.5, 220.0)], SR));
         assert_eq!(a.len(), b.len());
         assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6));
+    }
+
+    #[test]
+    fn granular_engine_renders_true_stereo() {
+        let p = patch(
+            json!({"name": "g", "granular": {"stereo_width": 1.0, "randomness": 0.5,
+            "density": 30, "env": {"attack": 0.001, "release": 0.2}}}),
+        );
+        let buf = render_patch(&p, &[note(0.0, 1.0, 220.0)], SR);
+        let l: Vec<f32> = buf.iter().map(|s| s[0]).collect();
+        let r: Vec<f32> = buf.iter().map(|s| s[1]).collect();
+        assert!(rms(&l[4410..44100]) > 0.05);
+        let diff: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a - b).collect();
+        assert!(rms(&diff) > 0.02, "left and right differ");
+        assert_eq!(buf.len(), (1.2 * SR) as usize, "gate + release");
+    }
+
+    #[test]
+    fn grain_density_lfo_reaches_the_granular_voice() {
+        let mk = |lfo: serde_json::Value| {
+            patch(
+                json!({"name": "g", "granular": {"density": 4, "grain_ms": 20,
+            "randomness": 0.0, "stereo_width": 0.0, "env": {"attack": 0.001, "release": 0.01}}, "lfo": lfo}),
+            )
+        };
+        let steady = mk(json!({"target": "off"}));
+        let pumped =
+            mk(json!({"rate": 0.5, "depth": 1.0, "wave": "square", "target": "grain_density"}));
+        let a = left(&render_patch(&steady, &[note(0.0, 2.0, 220.0)], SR));
+        let b = left(&render_patch(&pumped, &[note(0.0, 2.0, 220.0)], SR));
+        // Square LFO at 0.5 Hz: first second at 2x density, second second at 0.5x.
+        let first = rms(&b[..44100]);
+        let second = rms(&b[44100..88200]);
+        assert!(
+            first > second * 1.3,
+            "denser first half: {first} vs {second}"
+        );
+        let sa = rms(&a[..44100]);
+        let sb = rms(&a[44100..88200]);
+        assert!(
+            (sa / sb - 1.0).abs() < 0.3,
+            "steady without the LFO: {sa} vs {sb}"
+        );
     }
 }

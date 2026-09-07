@@ -11,8 +11,7 @@ pub mod wavetable;
 
 #[allow(unused_imports)]
 pub use fm::{FM_MOD_DEPTH, FmVoice};
-#[allow(unused_imports)]
-pub use granular::{GranularVoice, MAX_GRAINS, SOURCE_SAMPLES};
+pub use granular::GranularVoice;
 #[allow(unused_imports)]
 pub use percussion::{MIN_HIT_SECONDS, PercussionVoice};
 #[allow(unused_imports)]
