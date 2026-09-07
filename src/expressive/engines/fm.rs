@@ -13,6 +13,10 @@ const MAX_OPERATORS: usize = 4;
 
 pub struct FmVoice {
     cfg: Fm,
+    /// `cfg.operators.len()`, clamped to `MAX_OPERATORS`; operators beyond
+    /// this (an out-of-contract patch bypassing `Fm::validate`) are ignored
+    /// rather than indexed.
+    count: usize,
     frequency: f32,
     phases: [PhaseAccumulator; MAX_OPERATORS],
     envs: Vec<GateEnvelope>,
@@ -24,6 +28,9 @@ pub struct FmVoice {
 
 impl FmVoice {
     pub fn new(cfg: &Fm, frequency: f32, sample_rate: f32) -> Self {
+        let count = cfg.operators.len().min(MAX_OPERATORS);
+        let mut cfg = cfg.clone();
+        cfg.operators.truncate(count);
         let envs = cfg
             .operators
             .iter()
@@ -33,11 +40,12 @@ impl FmVoice {
             .algorithm
             .carriers()
             .iter()
-            .filter(|&&c| c < cfg.operators.len())
+            .filter(|&&c| c < count)
             .count()
             .max(1);
         Self {
-            cfg: cfg.clone(),
+            cfg,
+            count,
             frequency,
             phases: [PhaseAccumulator::new(sample_rate); MAX_OPERATORS],
             envs,
@@ -66,8 +74,8 @@ impl Voice for FmVoice {
     #[inline]
     fn tick(&mut self, mods: &Modulation) -> (f32, f32) {
         let base = self.frequency * mods.pitch_ratio;
-        let count = self.cfg.operators.len();
-        let last = count - 1;
+        let count = self.count;
+        let last = count.saturating_sub(1);
         let mut out = [0.0f32; MAX_OPERATORS];
 
         // Modulators always have higher indices than what they modulate, so a
@@ -309,5 +317,40 @@ mod tests {
         let s = render(&fm(FmAlgorithm::FanIn, vec![op(1.0, 1.0)]), 220.0, 0.5, 0.5);
         assert!(s.iter().all(|x| x.is_finite()));
         assert!(rms(&s) > 0.3);
+    }
+
+    #[test]
+    fn an_empty_operator_list_is_silent_not_a_panic() {
+        let cfg = Fm {
+            operators: vec![],
+            ..Default::default()
+        };
+        let mut v = FmVoice::new(&cfg, 220.0, SR);
+        let mods = Modulation::default();
+        let s: Vec<f32> = (0..100).map(|_| v.tick(&mods).0).collect();
+        assert!(s.iter().all(|x| *x == 0.0));
+        assert!(!v.is_active());
+    }
+
+    #[test]
+    fn more_than_four_operators_are_ignored() {
+        // Stack only ever routes operators 0..4; the 5th and 6th entries here
+        // must be ignored rather than panicking or being indexed. A pure
+        // 220 Hz sine crosses zero twice per cycle (440/s); with weak
+        // modulators the carrier still dominates that rate.
+        let six = vec![
+            op(1.0, 1.0),
+            op(2.0, 0.05),
+            op(3.0, 0.05),
+            op(4.0, 0.05),
+            op(5.0, 0.05),
+            op(6.0, 0.05),
+        ];
+        let s = render(&fm(FmAlgorithm::Stack, six), 220.0, 1.0, 1.0);
+        assert!(s.iter().all(|x| x.is_finite()));
+        assert!(
+            (zero_crossing_rate(&s, SR) - 440.0).abs() < 15.0,
+            "dominated by the carrier"
+        );
     }
 }
