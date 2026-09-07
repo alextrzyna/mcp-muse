@@ -113,6 +113,23 @@ mod tests {
         assert!(matches!(r, SynthRef::Name(n) if n == "minimoog_bass"));
         let r: SynthRef = serde_json::from_value(json!({"name": "x", "subtractive": {}})).unwrap();
         assert!(matches!(r, SynthRef::Inline(_)));
+
+        // An object is always read as an inline patch, so a typo inside it
+        // names the offending field instead of "did not match any variant".
+        let err = serde_json::from_value::<SynthRef>(
+            json!({"name": "x", "subtractive": {"cutoff": 500}}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("cutoff"), "{err}");
+
+        let err = serde_json::from_value::<SynthRef>(json!(42))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("patch name") && err.contains("inline patch object"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -566,12 +583,36 @@ impl Percussion {
 }
 
 /// A patch reference on a note: a stored name or a one-off inline patch.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Serialized untagged (a bare string or a patch object). Deserialization is
+/// hand-written rather than `#[serde(untagged)]`: untagged swallows the inner
+/// error and reports only "data did not match any variant", so a typo in an
+/// inline patch gave the model nothing to fix. Dispatching on the JSON shape
+/// first lets the `Patch` error through with its field name.
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)]
 pub enum SynthRef {
     Name(String),
     Inline(Patch),
+}
+
+impl<'de> Deserialize<'de> for SynthRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+        match serde_json::Value::deserialize(deserializer)? {
+            serde_json::Value::String(name) => Ok(SynthRef::Name(name)),
+            v @ serde_json::Value::Object(_) => serde_json::from_value::<Patch>(v)
+                .map(SynthRef::Inline)
+                .map_err(D::Error::custom),
+            _ => Err(D::Error::custom(
+                "synth must be a patch name (string) or an inline patch object",
+            )),
+        }
+    }
 }
 
 fn check_range(path: &str, value: f32, min: f32, max: f32) -> Result<(), String> {

@@ -1175,6 +1175,22 @@ fn inline_synth_patches_are_accepted_and_invalid_ones_are_invalid_params() {
 }
 
 #[test]
+fn inline_patch_typos_name_the_field() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 22, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": {"name": "x", "subtractive": {"cutoff": 500}}, "note": 60,
+             "start_time": 0.0, "duration": 0.2}]}}
+    }));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    assert!(
+        r["error"]["message"].as_str().unwrap().contains("cutoff"),
+        "{r}"
+    );
+}
+
+#[test]
 fn removed_synth_fields_are_invalid_params() {
     let mut server = TestServer::start();
     let r = server.call(json!({
