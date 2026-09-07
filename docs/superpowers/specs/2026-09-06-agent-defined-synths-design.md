@@ -1,7 +1,7 @@
 # Agent-defined synths and effects
 
 Date: 2026-09-06
-Status: PR 1 and PR 2 implemented; PRs 3-4 pending
+Status: PRs 1-3 implemented; PR 4 pending
 
 ## Goal
 
@@ -117,6 +117,9 @@ and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
 - `source`: `harmonics | noise | formant | inharmonic`.
 - `grain_ms` 5 to 500, `density` 1 to 50 grains per second,
   `pitch_semitones` -24 to 24, `randomness` 0 to 1, `stereo_width` 0 to 1.
+- Each voice builds one peak-normalised source cycle at note-on (`noise`
+  is a fresh random cycle); up to 32 grains overlap, summed with
+  1/sqrt(active) normalisation.
 
 **percussion**
 - `kind` plus `level` and that kind's parameters, using the names already
@@ -143,6 +146,8 @@ and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
   Depth scaling per target: cutoff up to 2 octaves, pitch up to 2
   semitones, amplitude 0 to 100% tremolo, morph the full 0 to 1 range,
   grain density up to 2x.
+- Amplitude depth `d` maps to `1 - d (1 - v) / 2`; morph adds `v d / 2` to
+  the patch's morph and clamps; grain density multiplies by `2^(v d)`.
 
 **effects**
 - The existing ordered `EffectConfig` list (`reverb`, `delay`, `chorus`,
