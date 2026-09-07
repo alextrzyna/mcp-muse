@@ -35,16 +35,18 @@ Prefer that over listen-by-ear checks when changing synthesis or effects.
 
 ### MCP Server (`src/server/mcp.rs`)
 JSON-RPC 2.0 over stdio. `ServerState` holds the audio player (opened on
-first playback) and the session's patterns. Six tools:
+first playback) and the session's patterns and synth patches. Seven tools:
 - `play_notes` - quick sounds and melodies; every note type in one array; takes `mode: replace|layer`
 - `define_sequence_pattern` / `play_sequence` / `list_patterns` - reusable bar-based patterns with transposition, repeats and time signature; `play_sequence` also takes `mode`
-- `list_sounds` - catalog of presets, GM instruments, drum keys, synthesis types, R2D2 emotions and effects
+- `define_synth` - store a validated synth patch for the session; notes reference it by name via `synth`
+- `list_sounds` - catalog of synth patches, GM instruments, drum keys, R2D2 emotions and effects
 - `stop_playback` - silence everything currently playing
 
-Conventions: malformed or invalid arguments return JSON-RPC `-32602`;
-anything that fails while executing (unknown preset, missing pattern, no
-audio device) returns a result with `isError: true` so the model can read
-it. Requests without an id are notifications and get no response.
+Conventions: malformed or invalid arguments (including a patch that fails
+validation) return JSON-RPC `-32602`; anything that fails while executing
+(unknown synth or pattern name, no audio device) returns a result with
+`isError: true` so the model can read it. Requests without an id are
+notifications and get no response.
 
 ### Audio pipeline (`src/midi/engine.rs`, `translate.rs`, `player.rs`)
 One `MidiEngine` per process runs as a never-ending rodio source on the
@@ -54,8 +56,8 @@ pre-rendered R2D2/synthesis buffers, and the MIDI bus `EffectsChain` (one
 per side). `MidiPlayer::play(sequence, mode)` translates and sends a
 `PlayCommand`; it returns the duration including effect tails.
 
-1. `Translator` applies presets (a missing preset is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
-2. R2D2 and synthesis notes are pre-rendered on the tool thread *with their own effects* and scheduled as mono buffers (`SYNTH_BUS_GAIN` applied).
+1. `Translator` resolves `synth` references (session patches, then built-ins, then inline; an unknown name is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
+2. Synthesis notes are grouped by patch, rendered on the tool thread by `render_patch` into one stereo buffer per patch (voices summed, the patch's effects chain applied once, `SYNTH_BUS_GAIN` applied) and scheduled as buffers.
 3. MIDI notes become time-ordered events: per call, the first note on a channel sends a program change (its instrument, or 0), controllers only when specified. Channel 9 is OxiSynth's drum channel; no bank select is needed.
 4. The engine drains commands per 1024-frame chunk and applies events at their exact frame (`LEAD_FRAMES` = 2048 after the command). It sums the buses, soft-clips, and emits stereo.
 5. `mode: replace` (default) fades 6 ms, sends SystemReset, clears the queue and installs the call's bus chain; `layer` mixes on top. `stop_playback` is the same reset with nothing scheduled.
@@ -67,7 +69,7 @@ engine API is the next step if the callback still glitches.
 
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: the R2D2 ring-modulation voice only. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`).
-- `patch.rs` / `render.rs` / `engines/` - agent-defined synth patches: `Patch` (subtractive and percussion engines plus an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
+- `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive and percussion engines plus an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
 - `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh; these carry their own envelopes so the ADSR is skipped.
 - `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::new(sample_rate, &[EffectConfig])` then `process` per sample or `process_buffer`.
 - `effects_presets.rs` - named chains ("studio", "concert_hall", ...).
