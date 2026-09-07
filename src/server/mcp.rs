@@ -316,11 +316,13 @@ fn note_schema() -> Value {
             },
             "start_time": {
                 "type": "number",
-                "description": "⏰ Start time in seconds. Use 0.0 for simultaneous notes (chords), incremental timing for melodies. DEPRECATED: Consider using musical_time for better sync."
+                "description": "⏰ Start time in seconds (at most 300). Use 0.0 for simultaneous notes (chords), incremental timing for melodies. DEPRECATED: Consider using musical_time for better sync.",
+                "maximum": 300
             },
             "duration": {
                 "type": "number",
-                "description": "⏳ Note duration in seconds. Try: 0.25=16th, 0.5=8th, 1.0=quarter, 2.0=half, 4.0=whole note. DEPRECATED: Consider using musical_duration for better sync."
+                "description": "⏳ Note duration in seconds (at most 300). Try: 0.25=16th, 0.5=8th, 1.0=quarter, 2.0=half, 4.0=whole note. DEPRECATED: Consider using musical_duration for better sync.",
+                "maximum": 300
             },
             "musical_time": {
                 "type": "object",
@@ -863,8 +865,9 @@ fn handle_define_synth(
 fn validate_notes(notes: &[SimpleNote]) -> Result<(), String> {
     for (i, note) in notes.iter().enumerate() {
         let checks = [
-            ("R2D2", note.validate_r2d2()),
+            ("timing", note.validate_timing()),
             ("synth", note.validate_synth()),
+            ("R2D2", note.validate_r2d2()),
             ("effects", note.validate_effects()),
         ];
         for (what, result) in checks {

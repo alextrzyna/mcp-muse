@@ -1206,6 +1206,39 @@ fn define_synth_with_an_unknown_field_is_invalid_params() {
 }
 
 #[test]
+fn absurd_durations_are_invalid_params() {
+    let mut server = TestServer::start();
+    let synth = server.call(json!({
+        "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": "sub_bass", "note": 36, "start_time": 0.0, "duration": 100000}]}}
+    }));
+    assert_eq!(synth["error"]["code"], -32602, "{synth}");
+    assert!(
+        synth["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("duration"),
+        "{synth}"
+    );
+
+    let r2d2 = server.call(json!({
+        "jsonrpc": "2.0", "id": 21, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"note_type": "r2d2", "r2d2_emotion": "Happy", "r2d2_intensity": 0.8,
+             "r2d2_complexity": 2, "start_time": 0.0, "duration": 100000}]}}
+    }));
+    assert_eq!(r2d2["error"]["code"], -32602, "{r2d2}");
+    assert!(
+        r2d2["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("duration"),
+        "{r2d2}"
+    );
+}
+
+#[test]
 fn patterns_can_carry_synth_patches() {
     let mut server = TestServer::start();
     let r = server.call(json!({

@@ -477,6 +477,11 @@ fn default_true() -> bool {
     true
 }
 
+/// Longest `start_time` or `duration` (in seconds) a single note may ask for.
+/// Rendering is sized from these, so an unbounded value would allocate
+/// gigabytes and never answer the caller.
+pub const MAX_NOTE_SECONDS: f64 = 300.0;
+
 /// Simple note representation that's easy to work with
 /// Can represent both MIDI notes and R2D2 expressions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1246,6 +1251,21 @@ impl SimpleNote {
         Ok(())
     }
 
+    /// Reject note lengths and offsets that would render an unbounded buffer.
+    pub fn validate_timing(&self) -> Result<(), String> {
+        for (name, value) in [("duration", self.duration), ("start_time", self.start_time)] {
+            if let Some(v) = value
+                && v > MAX_NOTE_SECONDS
+            {
+                return Err(format!(
+                    "{} must be at most {} seconds, got {}",
+                    name, MAX_NOTE_SECONDS, v
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Validate the patch reference: an inline patch must validate, and R2D2 keeps its own voice.
     pub fn validate_synth(&self) -> Result<(), String> {
         match &self.synth {
@@ -1508,6 +1528,30 @@ mod tests {
             "musical_time": {"bar": 1, "beat": 1, "tick": 0}, "musical_duration": "quarter",
             "effects_preset": "studio"});
         assert!(serde_json::from_value::<SimpleNote>(midi).is_ok());
+    }
+
+    #[test]
+    fn a_duration_over_the_limit_is_rejected_by_name() {
+        let long = SimpleNote {
+            duration: Some(100_000.0),
+            ..Default::default()
+        };
+        let err = long.validate_timing().unwrap_err();
+        assert!(err.contains("duration") && err.contains("300"), "{err}");
+
+        let late = SimpleNote {
+            start_time: Some(MAX_NOTE_SECONDS + 1.0),
+            ..Default::default()
+        };
+        let err = late.validate_timing().unwrap_err();
+        assert!(err.contains("start_time") && err.contains("300"), "{err}");
+
+        let ok = SimpleNote {
+            start_time: Some(10.0),
+            duration: Some(MAX_NOTE_SECONDS),
+            ..Default::default()
+        };
+        assert!(ok.validate_timing().is_ok());
     }
 
     #[test]

@@ -10,6 +10,12 @@ use crate::expressive::{EffectsChain, Patch};
 /// Extra silence rendered after the last release so reverbs and delays can ring out.
 pub const EFFECT_TAIL_SECONDS: f32 = 1.0;
 
+/// Hard ceiling on how much audio one `render_patch` call may produce.
+/// `SimpleNote::validate_timing` already rejects absurd note lengths at the
+/// tool boundary (MAX_NOTE_SECONDS); this is defence in depth for every other
+/// caller, so a bad number can never allocate gigabytes and hang the server.
+pub const MAX_RENDER_SECONDS: f32 = 600.0;
+
 /// One note to render, in seconds relative to the buffer start.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NoteEvent {
@@ -46,7 +52,7 @@ pub fn render_length_seconds(patch: &Patch, notes: &[NoteEvent]) -> f32 {
     } else {
         0.0
     };
-    last_gate + patch.release_seconds() + effect_tail
+    (last_gate + patch.release_seconds() + effect_tail).min(MAX_RENDER_SECONDS)
 }
 
 /// Render all `notes` through `patch` into one stereo buffer.
@@ -256,6 +262,21 @@ mod tests {
         assert!(
             rms(&a[..2205]) > rms(&b[..2205]) * 1.2,
             "kick adds energy at the start"
+        );
+    }
+
+    #[test]
+    fn an_absurd_duration_is_capped_at_the_render_limit() {
+        // Rendered at 100 Hz so the capped buffer stays tiny; the point is
+        // that no note can size a buffer beyond MAX_RENDER_SECONDS.
+        let p = patch(json!({"name": "p", "subtractive": {"env": {"release": 0.01}}}));
+        let notes = [note(0.0, 100_000.0, 220.0)];
+        assert!(render_length_seconds(&p, &notes) <= MAX_RENDER_SECONDS);
+        let buf = render_patch(&p, &notes, 100.0);
+        assert!(
+            buf.len() <= (MAX_RENDER_SECONDS * 100.0) as usize,
+            "buffer of {} samples",
+            buf.len()
         );
     }
 
