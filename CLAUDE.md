@@ -53,7 +53,7 @@ One `MidiEngine` per process runs as a never-ending rodio source on the
 output mixer: a single OxiSynth (SoundFont loaded once, polyphony 256), a
 min-heap of MIDI events keyed to the engine's 44.1 kHz sample clock, the
 pre-rendered R2D2/synthesis buffers, and the MIDI bus `EffectsChain` (one
-per side). `MidiPlayer::play(sequence, mode)` translates and sends a
+per side). `MidiPlayer::play(sequence, mode, &session_patches)` translates and sends a
 `PlayCommand`; it returns the duration including effect tails.
 
 1. `Translator` resolves `synth` references (session patches, then built-ins, then inline; an unknown name is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
@@ -70,7 +70,7 @@ engine API is the next step if the callback still glitches.
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: the R2D2 ring-modulation voice only. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`).
 - `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive and percussion engines plus an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
-- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh; these carry their own envelopes so the ADSR is skipped.
+- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh, chime, burst; these carry their own envelopes so the ADSR is skipped.
 - `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::new(sample_rate, &[EffectConfig])` then `process` per sample or `process_buffer`.
 - `effects_presets.rs` - named chains ("studio", "concert_hall", ...).
 - `patches/` - 31 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
@@ -79,7 +79,9 @@ engine API is the next step if the callback still glitches.
 ### Data model (`src/midi/mod.rs`)
 `SimpleNote` is one flat struct covering MIDI, R2D2, `synth` (a patch
 reference) and effects fields (use `..Default::default()`); it is
-`deny_unknown_fields`, so a misspelled key is a `-32602`. `SimpleSequence` carries
+`deny_unknown_fields`, so a misspelled key is a `-32602`. `MAX_NOTE_SECONDS`
+(300) bounds `duration` and `start_time` so no note can size an unbounded
+render buffer. `SimpleSequence` carries
 `tempo` and `beats_per_bar`. `MusicalDuration` is a number (bars) or a
 note-value string. `SequencePattern::quantize_notes` applies
 `quantize_grid` when a pattern is defined. `gm_names.rs` has the GM

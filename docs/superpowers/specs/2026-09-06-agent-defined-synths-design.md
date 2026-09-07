@@ -1,7 +1,7 @@
 # Agent-defined synths and effects
 
 Date: 2026-09-06
-Status: approved design, awaiting implementation plan
+Status: PR 1 (foundation) implemented; PRs 2-4 pending
 
 ## Goal
 
@@ -160,7 +160,10 @@ duration is the gate; the release runs past it.
 - **`SimpleNote.synth`**: a patch name (string) or an inline patch object.
   Inline patches are not stored. A note with `synth` set is a synthesis
   note. `synth` on a `note_type: "r2d2"` note is an error, since R2D2
-  keeps its own voice.
+  keeps its own voice. `effects` and `effects_preset` are likewise rejected
+  on a synth note (implemented): a patch renders through its own `effects`
+  chain, so a note-level chain would be silently dropped. Both fields stay
+  available on MIDI and R2D2 notes.
 - **Removed from `SimpleNote`**: `synth_type`, `synth_frequency`,
   `synth_amplitude`, `synth_attack`, `synth_decay`, `synth_sustain`,
   `synth_release`, `synth_filter_type`, `synth_filter_cutoff`,
@@ -269,7 +272,9 @@ for percussion) without NaN, and stays under the clipper knee at the bus.
 - Values are clamped only where tryx-fx clamps them (`mix`, `feedback`,
   `intensity`); everything else is rejected.
 - An unknown patch name lists the defined and built-in names, mirroring
-  the pattern-not-found message.
+  the pattern-not-found message. Deviation as implemented: an unknown patch
+  name lists the session-defined names and points to `list_sounds` for the
+  built-ins (not all 31 names), to keep the message readable.
 
 ## 7. Testing
 

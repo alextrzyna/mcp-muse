@@ -55,7 +55,7 @@
 
 ### 🏆 **Comprehensive Audio Features**
 - **Mixed Mode Magic** - All 4 audio systems work together in perfect synchronization
-- **187+ Sound Options** - Massive audio vocabulary for every creative need
+- **Huge Sound Vocabulary** - 128 GM instruments, 9 R2D2 emotions and 31 built-in synth patches, plus any patch you define
 - **Real-Time Processing** - Instant musical reactions without conflicts or delays
 - **Professional Quality** - Research-driven algorithms for authentic sound reproduction
 
@@ -78,7 +78,7 @@
 - 🎹 **Built-in Synth Patches**: vintage-style recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
 - 🎛️ **Agent-Defined Synth Patches**: `define_synth` stores a validated subtractive or percussion patch with its own effects chain; notes reference it by name via `synth`
 - 🎭 **Universal Mixed Mode**: All audio systems work together in perfect synchronization
-- 🏆 **185+ Sound Options**: Massive audio vocabulary (128 GM + 9 R2D2 emotions + dozens of synth patches)
+- 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 31 built-in synth patches + your own
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
 - 🔌 **Seven Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`
 - 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per note, stereo output
@@ -276,7 +276,23 @@ Then `{"notes": [{"synth": "rubber_bass", "note": 36, "duration": 0.5}]}`.
 ### Engines
 - **subtractive**: `osc1`/`osc2` (`sine|saw|square|triangle|noise`, `pulse_width`, osc2 `mix`, `detune_cents`, `octave`), `filter` (`low_pass|high_pass|band_pass`, `cutoff`, `resonance` 0-1, `slope` 12|24, `env_amount` -1..1 with its own `env`), amplitude `env`.
 - **percussion**: `kind` `kick|snare|hihat|cymbal|zap|swoosh|chime|burst` with that kind's parameters (`punch`, `snap`, `metallic`, `sweep`, ...) and a `frequency`. Ignores the note's pitch.
-- **effects**: ordered chain of `reverb`, `delay`, `chorus`, `filter`, `compressor`, `distortion`, each with an `intensity` 0-1.
+- **effects**: ordered chain of `reverb`, `delay`, `chorus`, `filter`, `compressor`, `distortion`, each with an `intensity` 0-1. A synth note takes its effects from here, so `effects`/`effects_preset` on the note itself is rejected.
+
+### Migrating from presets and `synth_*` fields
+
+The `preset_*` and `synth_*` note fields are gone; every synthesized sound
+is now a patch behind the single `synth` field. Removed fields fail with
+`-32602` naming the field, so nothing is silently ignored.
+
+| Before | Now |
+|--------|-----|
+| `{"preset_name": "Minimoog Bass"}` | `{"synth": "minimoog_bass"}` |
+| `{"synth_type": "kick", "synth_frequency": 60}` | `{"synth": "tr_808_kick"}`, or `{"synth": {"name": "kick", "percussion": {"kind": "kick", "frequency": 60}}}` |
+| `{"synth_type": "sawtooth", "synth_attack": 0.01, "synth_decay": 0.2, "synth_sustain": 0.6, "synth_release": 0.3, "synth_cutoff": 800}` | `{"synth": {"name": "saw_lead", "subtractive": {"osc1": {"wave": "saw"}, "filter": {"type": "low_pass", "cutoff": 800}, "env": {"attack": 0.01, "decay": 0.2, "sustain": 0.6, "release": 0.3}}}}` |
+
+Preset names map to the built-in patch of the same name in snake_case
+(`"TB-303 Acid"` → `tb_303_acid`, `"JP-8 Strings"` → `jp_8_strings`); call
+`list_sounds` with `{"section": "synths"}` for the current list.
 
 ## 🎭 **Universal Mixed Mode Examples (All Systems Together)**
 
@@ -377,7 +393,7 @@ Then `{"notes": [{"synth": "rubber_bass", "note": 36, "duration": 0.5}]}`.
 - **`chorus`**: 0=clean retro, 60=lush SNES sound, 100=dreamy (MIDI CC 93)
 
 ### **Professional Audio Effects System** 🎛️
-The system includes a comprehensive effects processor with per-channel processing and intelligent limiting:
+The system includes a comprehensive effects processor. Effects are stateful and run per note for synth and R2D2 sounds, and per bus for MIDI:
 
 #### **Available Effects**
 - **Reverb**: Professional Schroeder algorithm with room size, dampening, wet level, and pre-delay
@@ -410,17 +426,15 @@ The system includes a comprehensive effects processor with per-channel processin
 ```
 
 #### **Effects Presets**
-Use `effects_preset` for quick professional-quality effects:
-- `"concert_hall"` - Large space reverb
-- `"small_room"` - Intimate ambience
-- `"cathedral"` - Epic reverb with long decay
-- `"studio"` - Clean, controlled sound
-- `"vintage_analog"` - Warm tape-style effects
+Use `effects_preset` on a MIDI or R2D2 note for quick professional-quality
+effects. The 14 names (also listed by `list_sounds` section `effects`) are:
+`studio`, `concert_hall`, `live_stage`, `tight_mix`, `ambient`, `dreamy`,
+`spacious`, `vintage`, `analog_warmth`, `retro_echo`, `psychedelic`,
+`distorted`, `filtered`, `lush_chorus`.
 
 #### **Important Effects Notes**
-- **Automatic Limiting**: Maximum 3 effects per channel to prevent signal destruction
-- **Gain Compensation**: Automatic 2x boost when effects cause excessive attenuation
-- **Per-Channel Processing**: Each audio type (MIDI, R2D2, synthesis) has independent effects
+- **Where effects live**: MIDI notes share one bus chain per call (the first MIDI note that specifies `effects` defines it); R2D2 notes render their own chain into their buffer; a synth note takes its chain from its patch, so `effects`/`effects_preset` on a synth note is rejected with `-32602`
+- **Stateful and per note**: no effect-count cap and no automatic gain compensation
 - **All effects use the unified `play_notes` tool** - no separate playback methods needed
 
 ## 🎮 Classic Gaming Instruments
@@ -446,7 +460,7 @@ Use `effects_preset` for quick professional-quality effects:
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
-- **185+ Sound Options**: 128 GM instruments + 9 R2D2 emotions + dozens of built-in synth patches, plus unlimited agent-defined patches
+- **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 31 built-in synth patches, plus unlimited agent-defined patches
 - **Mixed Mode Magic**: All audio systems work together in perfect synchronization  
 - **Professional Quality**: Research-driven algorithms for authentic sound reproduction
 - **Real-Time Performance**: Zero latency issues, instant musical reactions
