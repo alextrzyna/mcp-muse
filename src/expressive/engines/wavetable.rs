@@ -140,6 +140,7 @@ mod tests {
             pitch_ratio: 2.0,
             cutoff_ratio: 1.0,
             amplitude: 0.5,
+            ..Modulation::default()
         };
         let s: Vec<f32> = (0..22050).map(|_| v.tick(&mods).0).collect();
         // The organ table's extra harmonics push the zero-crossing rate to

@@ -301,6 +301,7 @@ mod tests {
             pitch_ratio: 2.0,
             cutoff_ratio: 1.0,
             amplitude: 0.5,
+            ..Modulation::default()
         };
         let s: Vec<f32> = (0..SR as usize).map(|_| v.tick(&mods).0).collect();
         assert!((zero_crossing_rate(&s, SR) - 880.0).abs() < 15.0);

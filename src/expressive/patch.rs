@@ -321,6 +321,40 @@ mod tests {
         // operator 2 is a modulator in `stack`, so its 9 s release does not count.
         assert_eq!(p.release_seconds(), 1.5);
     }
+
+    #[test]
+    fn lfo_config_parses_with_defaults_validates_and_reports_activity() {
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {}})).unwrap();
+        let lfo = p.lfo.as_ref().unwrap();
+        assert_eq!((lfo.rate, lfo.depth), (1.0, 0.0));
+        assert_eq!(lfo.wave, LfoWave::Sine);
+        assert_eq!(lfo.target, LfoTarget::Off);
+        assert!(!lfo.is_active());
+        assert!(p.validate().is_ok());
+
+        let p = parse(json!({"name": "x", "subtractive": {},
+            "lfo": {"rate": 0.3, "depth": 0.2, "wave": "sample_hold", "target": "cutoff"}}))
+        .unwrap();
+        assert!(p.lfo.as_ref().unwrap().is_active());
+        assert_eq!(serde_json::to_value(&p).unwrap()["lfo"]["target"], "cutoff");
+
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {"rate": 50}})).unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("lfo.rate") && err.contains("20"), "{err}");
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {"depth": 2}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("lfo.depth"));
+        assert!(
+            parse(json!({"name": "x", "subtractive": {}, "lfo": {"target": "filter"}})).is_err()
+        );
+        assert!(
+            parse(json!({"name": "x", "subtractive": {}, "lfo": {"speed": 1}}))
+                .unwrap_err()
+                .contains("speed")
+        );
+        assert_eq!(LfoTarget::ALL.len(), 6);
+        assert_eq!(LfoTarget::GrainDensity.as_str(), "grain_density");
+        assert_eq!(LfoWave::SampleHold.as_str(), "sample_hold");
+    }
 }
 
 fn one() -> f32 {
@@ -388,6 +422,8 @@ pub struct Patch {
     pub wavetable: Option<Wavetable>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percussion: Option<Percussion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lfo: Option<LfoConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectConfig>,
 }
@@ -924,6 +960,112 @@ impl Wavetable {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfoWave {
+    #[default]
+    Sine,
+    Triangle,
+    Saw,
+    Square,
+    SampleHold,
+}
+
+// `ALL`/`as_str` are for the catalog and validation error messages the
+// renderer task (next PR) and `list_sounds` will use; not called yet.
+#[allow(dead_code)]
+impl LfoWave {
+    pub const ALL: [LfoWave; 5] = [
+        LfoWave::Sine,
+        LfoWave::Triangle,
+        LfoWave::Saw,
+        LfoWave::Square,
+        LfoWave::SampleHold,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LfoWave::Sine => "sine",
+            LfoWave::Triangle => "triangle",
+            LfoWave::Saw => "saw",
+            LfoWave::Square => "square",
+            LfoWave::SampleHold => "sample_hold",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfoTarget {
+    #[default]
+    Off,
+    Cutoff,
+    Pitch,
+    Amplitude,
+    Morph,
+    GrainDensity,
+}
+
+// See the note on `impl LfoWave` above: unused until the renderer and
+// `list_sounds` consume them.
+#[allow(dead_code)]
+impl LfoTarget {
+    pub const ALL: [LfoTarget; 6] = [
+        LfoTarget::Off,
+        LfoTarget::Cutoff,
+        LfoTarget::Pitch,
+        LfoTarget::Amplitude,
+        LfoTarget::Morph,
+        LfoTarget::GrainDensity,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LfoTarget::Off => "off",
+            LfoTarget::Cutoff => "cutoff",
+            LfoTarget::Pitch => "pitch",
+            LfoTarget::Amplitude => "amplitude",
+            LfoTarget::Morph => "morph",
+            LfoTarget::GrainDensity => "grain_density",
+        }
+    }
+}
+
+/// One low-frequency oscillator per patch, free-running from the start of
+/// the rendered buffer, routed to a single target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LfoConfig {
+    pub rate: f32,
+    pub depth: f32,
+    pub wave: LfoWave,
+    pub target: LfoTarget,
+}
+
+impl Default for LfoConfig {
+    fn default() -> Self {
+        Self {
+            rate: 1.0,
+            depth: 0.0,
+            wave: LfoWave::Sine,
+            target: LfoTarget::Off,
+        }
+    }
+}
+
+impl LfoConfig {
+    // Consumed by the renderer in the next PR task, not by production code yet.
+    #[allow(dead_code)]
+    pub fn is_active(&self) -> bool {
+        self.target != LfoTarget::Off && self.depth > 0.0
+    }
+
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.rate"), self.rate, 0.1, 20.0)?;
+        check_range(&format!("{path}.depth"), self.depth, 0.0, 1.0)
+    }
+}
+
 /// A patch reference on a note: a stored name or a one-off inline patch.
 ///
 /// Serialized untagged (a bare string or a patch object). Deserialization is
@@ -1061,6 +1203,9 @@ impl Patch {
         }
         if let Some(perc) = &self.percussion {
             perc.validate("percussion")?;
+        }
+        if let Some(lfo) = &self.lfo {
+            lfo.validate("lfo")?;
         }
         Ok(())
     }

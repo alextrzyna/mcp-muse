@@ -2,6 +2,7 @@ pub mod effects;
 pub mod effects_presets;
 pub mod engines;
 pub mod envelope;
+pub mod lfo;
 pub mod oscillator;
 pub mod patch;
 pub mod percussion;
@@ -17,6 +18,8 @@ pub use effects::*;
 pub use effects_presets::*;
 #[allow(unused_imports)]
 pub use envelope::*;
+#[allow(unused_imports)]
+pub use lfo::*;
 #[allow(unused_imports)]
 pub use oscillator::*;
 #[allow(unused_imports)]
