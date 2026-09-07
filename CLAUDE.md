@@ -12,7 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Commands
 - `cargo test` - Run all unit and integration tests (integration tests spawn the server binary)
-- `cargo clippy --all-targets -- -D warnings` - Check code quality (must pass for CI)
+- `cargo clippy --all-targets --all-features -- -D warnings` - Check code quality (must pass for CI)
+- CI runs clippy on the latest stable toolchain (`dtolnay/rust-toolchain@stable`), not a pinned one. Run `rustup update stable` before clippy so local lints match CI; a stale local toolchain passes locally and fails CI on newer lints.
 - `cargo fmt` - Format code (required before PR)
 
 DSP behaviour is verified by rendering to sample buffers and measuring
