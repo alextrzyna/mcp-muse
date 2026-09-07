@@ -928,22 +928,17 @@ fn handle_define_synth(
     }
     let shadowed = PatchLibrary::new().get(&patch.name).is_some();
     let mut details = format!(
-        "🎛️ Defined synth '{}': {} engine(s) [{}], {} effect(s){}",
+        "🎛️ Defined synth '{}': {} engine(s) [{}], {} effect(s)",
         patch.name,
         engines.len(),
         engines.join(", "),
         patch.effects.iter().filter(|e| e.enabled).count(),
-        if shadowed {
-            " (shadows the built-in patch of the same name for this session)"
-        } else {
-            ""
-        }
     );
-    if patch.lfo.as_ref().is_some_and(|l| l.is_active()) {
-        details.push_str(&format!(
-            " + lfo → {}",
-            patch.lfo.as_ref().unwrap().target.as_str()
-        ));
+    if let Some(lfo) = patch.lfo.as_ref().filter(|l| l.is_active()) {
+        details.push_str(&format!(" + lfo → {}", lfo.target.as_str()));
+    }
+    if shadowed {
+        details.push_str(" (shadows the built-in patch of the same name for this session)");
     }
     if !patch.description.is_empty() {
         details.push_str(&format!("\n{}", patch.description));

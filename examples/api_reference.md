@@ -111,7 +111,7 @@ the patch shares):
 | `fm` | four operators (`ratio` 0.25-16, `level`, `detune_cents`, `env`) routed by `algorithm` `stack\|pairs\|fan_in\|parallel`, plus `feedback`. Operator 1 is always a carrier; a modulator's level is its depth |
 | `wavetable` | `table` `basic\|warm\|bright\|digital\|vocal\|pwm\|organ\|noise`, `morph` 0-1 toward the next table, `env`. Tables are band-limited per octave |
 | `granular` | `source` `harmonics\|noise\|formant\|inharmonic`, `grain_ms` 5-500, `density` 1-50 grains/s, `pitch_semitones` ±24, `randomness`, `stereo_width`, `env`. True stereo |
-| `lfo` (not an engine, one per patch) | `rate` 0.1-20 Hz, `depth` 0-1, `wave` `sine\|triangle\|saw\|square\|sample_hold`, `target` `cutoff\|pitch\|amplitude\|morph\|grain_density` |
+| `lfo` (not an engine, one per patch) | `rate` 0.1-20 Hz, `depth` 0-1, `wave` `sine\|triangle\|saw\|square\|sample_hold`, `target` `off\|cutoff\|pitch\|amplitude\|morph\|grain_density` |
 | `percussion` | `kind` `kick\|snare\|hihat\|cymbal\|zap\|swoosh\|chime\|burst` with that kind's parameters (`punch`, `snap`, `metallic`, `sweep`, ...) and a `frequency`. Ignores the note's pitch |
 
 ```json

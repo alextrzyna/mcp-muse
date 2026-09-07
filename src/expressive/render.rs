@@ -1,8 +1,8 @@
 //! Renders every note of one patch into a single stereo buffer: voices are
 //! summed per sample, then the patch's effects chain runs once over the sum.
-//! The patch's optional LFO free-runs from the start of the buffer, one
-//! sample ahead of the voices, and is mapped to a `Modulation` each sample
-//! (identity when the LFO is absent or inactive).
+//! The patch's optional LFO free-runs from the start of the buffer, read
+//! once per frame, before the voices tick, and is mapped to a `Modulation`
+//! each sample (identity when the LFO is absent or inactive).
 #![allow(dead_code)]
 
 use crate::expressive::engines::{
@@ -190,10 +190,12 @@ mod tests {
         if s.len() <= 2205 {
             return Vec::new();
         }
-        s[2205..]
+        let z: Vec<f32> = s[2205..]
             .chunks_exact(2205)
             .map(|w| crate::expressive::test_util::zero_crossing_rate(w, SR))
-            .collect()
+            .collect();
+        assert!(!z.is_empty(), "buffer too short for a window");
+        z
     }
 
     #[test]

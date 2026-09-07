@@ -161,6 +161,9 @@ pub const SOURCE_SAMPLES: usize = 4096;
 
 /// One cycle of the source waveform, peak-normalised to 1. `noise` is a
 /// fresh random cycle per voice, so it buzzes at the note's pitch.
+// Deterministic sources (harmonics/formant/inharmonic) are recomputed per
+// voice even though they're identical for a given patch; sharing one cycle
+// per patch group is a possible future optimisation.
 pub fn source_cycle(source: GrainSource, rng: &mut impl Rng) -> Vec<f32> {
     let mut cycle = vec![0.0f32; SOURCE_SAMPLES];
     for (i, s) in cycle.iter_mut().enumerate() {
