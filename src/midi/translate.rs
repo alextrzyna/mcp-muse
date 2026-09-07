@@ -169,7 +169,7 @@ impl Translator {
             .find_map(|n| n.effects.clone().filter(|e| !e.is_empty()));
 
         let mut midi_notes: Vec<MidiNote> = Vec::new();
-        let mut buffers: Vec<(u64, Vec<f32>)> = Vec::new();
+        let mut buffers: Vec<(u64, Vec<[f32; 2]>)> = Vec::new();
         let mut note_end = Duration::ZERO;
         let expressive_synth = ExpressiveSynth::new();
         let r2d2_voice = R2D2Voice::new();
@@ -213,7 +213,10 @@ impl Translator {
                     chain.process_buffer(&mut samples);
                 }
                 note_end = note_end.max(start + Duration::from_secs_f32(expression.duration));
-                buffers.push((seconds_to_frames(start), samples));
+                buffers.push((
+                    seconds_to_frames(start),
+                    samples.into_iter().map(|s| [s, s]).collect(),
+                ));
             } else if note.is_synthesis() {
                 note.validate_synthesis()
                     .map_err(|e| format!("Invalid synthesis note: {}", e))?;
@@ -226,7 +229,10 @@ impl Translator {
                 }
                 note_end = note_end
                     .max(start + Duration::from_secs_f64(note.duration.unwrap_or(1.0).max(0.0)));
-                buffers.push((seconds_to_frames(start), samples));
+                buffers.push((
+                    seconds_to_frames(start),
+                    samples.into_iter().map(|s| [s, s]).collect(),
+                ));
             } else if let Some(key) = note.note {
                 let duration = Duration::from_secs_f64(note.duration.unwrap_or(1.0).max(0.0));
                 note_end = note_end.max(start + duration);
@@ -882,7 +888,9 @@ mod tests {
         assert_eq!(t.command.buffers.len(), 1);
         let (offset, samples) = &t.command.buffers[0];
         assert_eq!(*offset, 22_050);
-        let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        let peak = samples
+            .iter()
+            .fold(0.0f32, |m, s| m.max(s[0].abs()).max(s[1].abs()));
         assert!(
             peak <= 0.8 * SYNTH_BUS_GAIN + 0.01,
             "bus gain not applied: peak {peak}"
