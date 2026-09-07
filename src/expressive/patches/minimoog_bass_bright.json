@@ -11,7 +11,7 @@
     "env": {"attack": 0.01, "decay": 0.3, "sustain": 0.7, "release": 0.5}
   },
   "effects": [
-    {"type": "reverb", "room_size": 0.3, "dampening": 0.5, "wet_level": 0.15, "intensity": 0.15},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.15},
     {"type": "compressor", "threshold": -16.0, "ratio": 3.0, "attack": 0.003, "release": 0.05, "intensity": 0.4}
   ]
 }

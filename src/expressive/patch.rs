@@ -709,7 +709,7 @@ impl Default for PatchLibrary {
 }
 
 impl PatchLibrary {
-    /// Parses every embedded patch file; panics on a bad file (covered by test).
+    /// Parses every embedded patch file; panics on a bad file.
     pub fn new() -> Self {
         let mut patches = HashMap::new();
         for source in BUILTIN_PATCHES {
