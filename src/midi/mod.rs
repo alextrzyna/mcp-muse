@@ -640,6 +640,11 @@ pub struct SimpleNote {
     /// Effects preset to apply (e.g., "studio", "concert_hall", "vintage")
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub effects_preset: Option<String>,
+
+    /// Agent-defined synth patch: a name from define_synth / the built-in
+    /// library, or an inline patch object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synth: Option<crate::expressive::SynthRef>,
 }
 
 fn default_note_type() -> String {
@@ -696,6 +701,7 @@ impl Default for SimpleNote {
             preset_random: None,
             effects: None,
             effects_preset: None,
+            synth: None,
         }
     }
 }
@@ -1257,9 +1263,10 @@ impl SimpleNote {
         self.note_type == "r2d2"
     }
 
-    /// Check if this note is a synthesis note
+    /// Check if this note is a synthesis note (legacy `synth_type`, or the
+    /// new agent-defined `synth` patch reference; Task 10 drops `synth_type`).
     pub fn is_synthesis(&self) -> bool {
-        self.synth_type.is_some()
+        self.synth.is_some() || self.synth_type.is_some()
     }
 
     /// Check if this note uses presets
@@ -1351,9 +1358,12 @@ impl SimpleNote {
         Ok(())
     }
 
-    /// Validate synthesis parameters if this is a synthesis note
+    /// Validate synthesis parameters if this is a legacy `synth_type` note.
+    /// The new `synth` patch reference is validated separately by
+    /// `validate_synth`; guard on `synth_type` directly so a note using only
+    /// `synth` does not fall through to the `unwrap()` below.
     pub fn validate_synthesis(&self) -> Result<(), String> {
-        if !self.is_synthesis() {
+        if self.synth_type.is_none() {
             return Ok(());
         }
 
@@ -1562,6 +1572,21 @@ impl SimpleNote {
         }
 
         Ok(())
+    }
+
+    /// Validate the patch reference: an inline patch must validate, and R2D2 keeps its own voice.
+    pub fn validate_synth(&self) -> Result<(), String> {
+        match &self.synth {
+            None => Ok(()),
+            Some(_) if self.note_type == "r2d2" => {
+                Err("a note cannot have both note_type \"r2d2\" and synth".to_string())
+            }
+            Some(crate::expressive::SynthRef::Inline(p)) => p.validate(),
+            Some(crate::expressive::SynthRef::Name(n)) if n.trim().is_empty() => {
+                Err("synth name must not be empty".to_string())
+            }
+            Some(_) => Ok(()),
+        }
     }
 
     /// Validate preset parameters if this note uses presets

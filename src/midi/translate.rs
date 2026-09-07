@@ -2,8 +2,9 @@
 //! pre-rendered R2D2/synthesis buffers and a time-ordered MIDI event list.
 
 use crate::expressive::{
-    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, PresetLibrary, R2D2Emotion,
-    R2D2Expression, R2D2Voice,
+    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, NoteEvent, Patch, PatchLibrary,
+    PresetLibrary, R2D2Emotion, R2D2Expression, R2D2Voice, SynthRef, render_length_seconds,
+    render_patch,
 };
 use crate::midi::engine::{
     EventKind, PlayCommand, PlayMode, SAMPLE_RATE, SYNTH_BUS_GAIN, seconds_to_frames,
@@ -96,6 +97,10 @@ pub(crate) fn midi_events(notes: &[MidiNote]) -> Vec<(u64, EventKind)> {
     events
 }
 
+/// One patch's group: its key, the resolved/inline patch, and every note
+/// scheduled against it this call (absolute start time, event).
+type PatchGroup = (String, Patch, Vec<(f64, NoteEvent)>);
+
 /// Result of translating one call.
 #[derive(Debug)]
 pub struct Translation {
@@ -107,6 +112,7 @@ pub struct Translation {
 pub struct Translator {
     preset_library: PresetLibrary,
     effects_library: EffectsPresetLibrary,
+    patch_library: PatchLibrary,
     /// `Err(reason)` when no SoundFont is loaded; MIDI notes then fail here.
     midi_available: Result<(), String>,
 }
@@ -116,7 +122,37 @@ impl Translator {
         Self {
             preset_library: PresetLibrary::new(),
             effects_library: EffectsPresetLibrary::new(),
+            patch_library: PatchLibrary::new(),
             midi_available,
+        }
+    }
+
+    /// Session patches first (they may shadow built-ins), then the library, then inline.
+    fn resolve_patch<'a>(
+        &'a self,
+        reference: &'a SynthRef,
+        session: &'a HashMap<String, Patch>,
+    ) -> Result<&'a Patch, String> {
+        match reference {
+            SynthRef::Inline(patch) => {
+                patch.validate()?;
+                Ok(patch)
+            }
+            SynthRef::Name(name) => {
+                let key = name.trim().to_lowercase();
+                if let Some(p) = session.get(&key) {
+                    return Ok(p);
+                }
+                if let Some(p) = self.patch_library.get(&key) {
+                    return Ok(p);
+                }
+                let mut defined: Vec<&str> = session.values().map(|p| p.name.as_str()).collect();
+                defined.sort_unstable();
+                Err(format!(
+                    "Unknown synth '{}'. Defined this session: {:?}. Call list_sounds with section \"synths\" for the built-in patches, or define_synth to create one.",
+                    name, defined
+                ))
+            }
         }
     }
 
@@ -124,6 +160,7 @@ impl Translator {
         &self,
         sequence: SimpleSequence,
         mode: PlayMode,
+        session_patches: &HashMap<String, Patch>,
     ) -> Result<Translation, String> {
         if sequence.notes.is_empty() {
             return Ok(Translation {
@@ -174,10 +211,53 @@ impl Translator {
         let expressive_synth = ExpressiveSynth::new();
         let r2d2_voice = R2D2Voice::new();
 
-        for note in processed_notes {
+        // Notes referencing an agent-defined patch, grouped so every note of
+        // one patch in this call renders into a single stereo buffer. `f64`
+        // here is the note's absolute start time; insertion order is kept
+        // with `patch_groups` alongside a lookup index for grouping.
+        let mut patch_groups: Vec<PatchGroup> = Vec::new();
+        let mut patch_group_index: HashMap<String, usize> = HashMap::new();
+
+        for (i, note) in processed_notes.into_iter().enumerate() {
             // A negative start time would panic in `Duration`; treat it as 0.
             let start = Duration::from_secs_f64(note.start_time.unwrap_or(0.0).max(0.0));
-            if note.note_type == "r2d2" {
+            if let Some(reference) = note.synth.as_ref() {
+                note.validate_synth()?;
+                let patch = self.resolve_patch(reference, session_patches)?;
+                let abs_start = note.start_time.unwrap_or(0.0).max(0.0);
+                let duration = note.duration.unwrap_or(1.0).max(0.0) as f32;
+                let velocity = note.velocity.unwrap_or(100) as f32 / 127.0;
+                let frequency = match note.note {
+                    Some(n) => 440.0 * 2f32.powf((n as f32 - 69.0) / 12.0),
+                    None if patch.has_pitched_engine() => {
+                        return Err(format!(
+                            "Note {}: synth '{}' is pitched, so it needs a MIDI note",
+                            i + 1,
+                            patch.name
+                        ));
+                    }
+                    None => 0.0,
+                };
+                let event = NoteEvent {
+                    start: 0.0, // corrected once the group's earliest note is known
+                    duration,
+                    frequency,
+                    velocity,
+                };
+                let group_key = match reference {
+                    SynthRef::Name(_) => patch.key(),
+                    SynthRef::Inline(_) => serde_json::to_string(patch).map_err(|e| {
+                        format!("Note {}: failed to key inline patch: {}", i + 1, e)
+                    })?,
+                };
+                let idx = *patch_group_index
+                    .entry(group_key.clone())
+                    .or_insert_with(|| {
+                        patch_groups.push((group_key, patch.clone(), Vec::new()));
+                        patch_groups.len() - 1
+                    });
+                patch_groups[idx].2.push((abs_start, event));
+            } else if note.note_type == "r2d2" {
                 note.validate_r2d2()
                     .map_err(|e| format!("Invalid R2D2 note: {}", e))?;
                 let emotion = parse_emotion(
@@ -217,7 +297,7 @@ impl Translator {
                     seconds_to_frames(start),
                     samples.into_iter().map(|s| [s, s]).collect(),
                 ));
-            } else if note.is_synthesis() {
+            } else if note.synth_type.is_some() {
                 note.validate_synthesis()
                     .map_err(|e| format!("Invalid synthesis note: {}", e))?;
                 let params = Self::convert_simple_note_to_synth_params(&note)?;
@@ -252,6 +332,31 @@ impl Translator {
                     sustain: note.sustain,
                 });
             }
+        }
+
+        // Render one stereo buffer per patch group, scheduled at the
+        // group's earliest note.
+        for (_, patch, timed_events) in patch_groups {
+            let first = timed_events
+                .iter()
+                .map(|(abs, _)| *abs)
+                .fold(f64::INFINITY, f64::min);
+            let events: Vec<NoteEvent> = timed_events
+                .iter()
+                .map(|(abs, event)| NoteEvent {
+                    start: (*abs - first) as f32,
+                    ..*event
+                })
+                .collect();
+            let mut samples = render_patch(&patch, &events, SAMPLE_RATE as f32);
+            for frame in &mut samples {
+                frame[0] *= SYNTH_BUS_GAIN;
+                frame[1] *= SYNTH_BUS_GAIN;
+            }
+            buffers.push((seconds_to_frames(Duration::from_secs_f64(first)), samples));
+            note_end = note_end.max(Duration::from_secs_f64(
+                first + render_length_seconds(&patch, &events) as f64,
+            ));
         }
 
         if !midi_notes.is_empty()
@@ -858,12 +963,28 @@ mod tests {
 
     use crate::midi::engine::{PlayMode, SYNTH_BUS_GAIN};
     use crate::midi::{SimpleNote, SimpleSequence};
+    use serde_json::json;
 
     fn seq(notes: Vec<SimpleNote>) -> SimpleSequence {
         SimpleSequence {
             notes,
             tempo: 120,
             beats_per_bar: 4,
+        }
+    }
+
+    fn no_session() -> HashMap<String, crate::expressive::Patch> {
+        HashMap::new()
+    }
+
+    fn patch_note(synth: serde_json::Value, note: u8, start: f64, dur: f64) -> SimpleNote {
+        SimpleNote {
+            note: Some(note),
+            velocity: Some(100),
+            start_time: Some(start),
+            duration: Some(dur),
+            synth: Some(serde_json::from_value(synth).unwrap()),
+            ..Default::default()
         }
     }
 
@@ -881,6 +1002,7 @@ mod tests {
                     ..Default::default()
                 }]),
                 PlayMode::Layer,
+                &no_session(),
             )
             .unwrap();
         assert_eq!(t.command.mode, PlayMode::Layer);
@@ -909,7 +1031,9 @@ mod tests {
             duration: Some(0.1),
             ..Default::default()
         }]);
-        let err = translator.translate(midi, PlayMode::Replace).unwrap_err();
+        let err = translator
+            .translate(midi, PlayMode::Replace, &no_session())
+            .unwrap_err();
         assert!(err.contains("SoundFont not found"), "{err}");
 
         let synth = seq(vec![SimpleNote {
@@ -918,7 +1042,11 @@ mod tests {
             duration: Some(0.1),
             ..Default::default()
         }]);
-        assert!(translator.translate(synth, PlayMode::Replace).is_ok());
+        assert!(
+            translator
+                .translate(synth, PlayMode::Replace, &no_session())
+                .is_ok()
+        );
     }
 
     #[test]
@@ -932,6 +1060,7 @@ mod tests {
                 ..Default::default()
             }]),
             PlayMode::Replace,
+            &no_session(),
         );
         assert_eq!(ok.unwrap().command.buffers.len(), 1);
 
@@ -943,6 +1072,7 @@ mod tests {
                     ..Default::default()
                 }]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap_err();
         assert!(err.contains("Definitely Not A Preset"), "{err}");
@@ -967,7 +1097,9 @@ mod tests {
         }]);
         s.tempo = 60;
         s.beats_per_bar = 4;
-        let t = translator.translate(s, PlayMode::Replace).unwrap();
+        let t = translator
+            .translate(s, PlayMode::Replace, &no_session())
+            .unwrap();
         let on = t
             .command
             .events
@@ -987,7 +1119,7 @@ mod tests {
     #[test]
     fn an_empty_sequence_translates_to_nothing() {
         let t = Translator::new(Ok(()))
-            .translate(seq(vec![]), PlayMode::Replace)
+            .translate(seq(vec![]), PlayMode::Replace, &no_session())
             .unwrap();
         assert!(t.command.events.is_empty() && t.command.buffers.is_empty());
         assert_eq!(t.duration, Duration::ZERO);
@@ -1038,6 +1170,7 @@ mod tests {
                     ..Default::default()
                 }]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap();
         assert_eq!(
@@ -1058,6 +1191,7 @@ mod tests {
                     ..Default::default()
                 }]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap();
         let note_off = t
@@ -1083,6 +1217,7 @@ mod tests {
                     ..Default::default()
                 }]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap();
         assert!(t.command.buffers.len() <= 1);
@@ -1125,6 +1260,7 @@ mod tests {
                     },
                 ]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap();
         let chain = t
@@ -1157,6 +1293,7 @@ mod tests {
                     },
                 ]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap();
         assert!(
@@ -1178,6 +1315,7 @@ mod tests {
                     ..Default::default()
                 }]),
                 PlayMode::Replace,
+                &no_session(),
             )
             .unwrap();
         assert_eq!(t.command.buffers.len(), 1);
@@ -1197,5 +1335,93 @@ mod tests {
             (without as f64) < tail,
             "a dry R2D2 note must not be padded, got {without} samples"
         );
+    }
+
+    #[test]
+    fn notes_on_the_same_patch_share_one_buffer_scheduled_at_the_first_note() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let seq = seq(vec![
+            patch_note(json!("minimoog_bass"), 36, 0.5, 0.5),
+            patch_note(json!("minimoog_bass"), 43, 1.0, 0.5),
+            patch_note(json!("tr_808_kick"), 36, 0.0, 0.25),
+        ]);
+        let tr = t.translate(seq, PlayMode::Replace, &no_session()).unwrap();
+        assert_eq!(tr.command.buffers.len(), 2, "one buffer per patch");
+        let starts: Vec<u64> = tr.command.buffers.iter().map(|b| b.0).collect();
+        assert!(starts.contains(&0));
+        assert!(starts.contains(&seconds_to_frames(Duration::from_secs_f64(0.5))));
+        // Bass buffer: two notes -> ends at 1.5 s + release; the reported duration covers it.
+        assert!(tr.duration.as_secs_f64() >= 1.5);
+    }
+
+    #[test]
+    fn inline_patches_render_and_identical_inline_patches_group() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let inline = json!({"name": "blip", "subtractive": {"osc1": {"wave": "square"}}});
+        let seq = seq(vec![
+            patch_note(inline.clone(), 60, 0.0, 0.2),
+            patch_note(inline, 64, 0.2, 0.2),
+        ]);
+        let tr = t.translate(seq, PlayMode::Replace, &no_session()).unwrap();
+        assert_eq!(tr.command.buffers.len(), 1);
+        assert!(tr.command.buffers[0].1.iter().any(|s| s[0].abs() > 0.01));
+    }
+
+    #[test]
+    fn session_patches_shadow_builtins_and_unknown_names_list_what_exists() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let mut session = no_session();
+        let mine: crate::expressive::Patch =
+            serde_json::from_value(json!({"name": "Mine", "percussion": {"kind": "snare"}}))
+                .unwrap();
+        session.insert(mine.key(), mine);
+        let ok = t.translate(
+            seq(vec![patch_note(json!("mine"), 38, 0.0, 0.2)]),
+            PlayMode::Replace,
+            &session,
+        );
+        assert!(ok.is_ok());
+        let err = t
+            .translate(
+                seq(vec![patch_note(json!("nope"), 38, 0.0, 0.2)]),
+                PlayMode::Replace,
+                &session,
+            )
+            .unwrap_err();
+        assert!(
+            err.contains("nope") && err.contains("Mine") && err.contains("list_sounds"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_pitched_patch_needs_a_note_but_percussion_does_not() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let mut n = patch_note(json!("minimoog_bass"), 36, 0.0, 0.2);
+        n.note = None;
+        let err = t
+            .translate(seq(vec![n]), PlayMode::Replace, &no_session())
+            .unwrap_err();
+        assert!(err.contains("note"), "{err}");
+        let mut k = patch_note(json!("tr_808_kick"), 36, 0.0, 0.2);
+        k.note = None;
+        assert!(
+            t.translate(seq(vec![k]), PlayMode::Replace, &no_session())
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_invalid_inline_patch_is_an_error_naming_the_field() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let bad = json!({"name": "hot", "subtractive": {"filter": {"cutoff": 99999}}});
+        let err = t
+            .translate(
+                seq(vec![patch_note(bad, 60, 0.0, 0.2)]),
+                PlayMode::Replace,
+                &no_session(),
+            )
+            .unwrap_err();
+        assert!(err.contains("subtractive.filter.cutoff"), "{err}");
     }
 }

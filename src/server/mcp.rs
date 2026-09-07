@@ -901,7 +901,8 @@ fn start_playback(
             return JsonRpcResponse::tool_error(id, format!("Audio output unavailable: {}", e));
         }
     };
-    match player.play(sequence, mode) {
+    // TODO(Task 11): thread the session's defined patches through instead of an empty map.
+    match player.play(sequence, mode, &HashMap::new()) {
         Ok(duration) => {
             JsonRpcResponse::tool_text(id, playback_started_text(summary, duration, mode))
         }
