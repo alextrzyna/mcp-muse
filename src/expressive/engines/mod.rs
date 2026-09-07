@@ -4,12 +4,15 @@
 use crate::expressive::LfoTarget;
 
 pub mod fm;
+pub mod granular;
 pub mod percussion;
 pub mod subtractive;
 pub mod wavetable;
 
 #[allow(unused_imports)]
 pub use fm::{FM_MOD_DEPTH, FmVoice};
+#[allow(unused_imports)]
+pub use granular::{GranularVoice, MAX_GRAINS, SOURCE_SAMPLES};
 #[allow(unused_imports)]
 pub use percussion::{MIN_HIT_SECONDS, PercussionVoice};
 #[allow(unused_imports)]
