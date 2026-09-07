@@ -184,12 +184,12 @@ mod level_tests {
         }
     }
 
-    fn preset(name: &str, notes: &[u8]) -> SimpleSequence {
+    fn patch(name: &str, notes: &[u8]) -> SimpleSequence {
         SimpleSequence {
             notes: notes
                 .iter()
                 .map(|&n| SimpleNote {
-                    preset_name: Some(name.to_string()),
+                    synth: Some(crate::expressive::SynthRef::Name(name.to_string())),
                     note: Some(n),
                     velocity: Some(100),
                     duration: Some(1.4),
@@ -234,13 +234,13 @@ mod level_tests {
                 midi(&[(36, 110, 9, None), (38, 110, 9, None), (42, 110, 9, None)]),
                 1.0,
             ),
-            ("minimoog bass", preset("Minimoog Bass", &[36]), 0.6),
+            ("minimoog bass", patch("minimoog_bass", &[36]), 0.6),
             (
                 "jp8 strings chord",
-                preset("JP-8 Strings", &[60, 64, 67]),
+                patch("jp_8_strings", &[60, 64, 67]),
                 0.8,
             ),
-            ("tr808 kick", preset("TR-808 Kick", &[36]), 0.6),
+            ("tr808 kick", patch("tr_808_kick", &[36]), 0.6),
         ];
         for (name, seq, max_peak) in cases {
             let (peak, over) = measure(seq);
@@ -263,7 +263,7 @@ mod level_tests {
             return;
         }
         let (flute, _) = measure(midi(&[(76, 100, 0, Some(73))]));
-        let (bass, _) = measure(preset("Minimoog Bass", &[36]));
+        let (bass, _) = measure(patch("minimoog_bass", &[36]));
         assert!(flute > 0.15, "flute peak {flute} is too quiet");
         assert!(bass > 0.15, "bass peak {bass} is too quiet");
     }

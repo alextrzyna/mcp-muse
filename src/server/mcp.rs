@@ -300,137 +300,9 @@ fn note_schema() -> Value {
                 "type": "string",
                 "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
             },
-            "synth_type": {
-                "type": "string",
-                "description": "🎛️ Synthesis type: 'sine', 'square', 'sawtooth', 'triangle', 'noise', 'fm', 'granular', 'wavetable', 'kick', 'snare', 'hihat', 'cymbal', 'swoosh', 'zap', 'chime', 'burst', 'pad', 'texture', 'drone' (optional)"
-            },
-            "synth_frequency": {
-                "type": "number",
-                "description": "🎵 Synthesis frequency in Hz (20-20000, optional, overrides MIDI note if present)",
-                "minimum": 20,
-                "maximum": 20000
-            },
-            "synth_amplitude": {
-                "type": "number",
-                "description": "🔊 Synthesis amplitude (0.0-1.0, optional, defaults to 0.7)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "synth_attack": {
-                "type": "number",
-                "description": "⚡ Attack time in seconds (0.0-5.0, optional)",
-                "minimum": 0.0,
-                "maximum": 5.0
-            },
-            "synth_decay": {
-                "type": "number",
-                "description": "📉 Decay time in seconds (0.0-5.0, optional)",
-                "minimum": 0.0,
-                "maximum": 5.0
-            },
-            "synth_sustain": {
-                "type": "number",
-                "description": "🎹 Sustain level (0.0-1.0, optional)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "synth_release": {
-                "type": "number",
-                "description": "🌊 Release time in seconds (0.0-10.0, optional)",
-                "minimum": 0.0,
-                "maximum": 10.0
-            },
-            "synth_filter_type": {
-                "type": "string",
-                "description": "🎚️ Filter type: 'lowpass', 'highpass', 'bandpass' (optional)",
-                "enum": ["lowpass", "highpass", "bandpass"]
-            },
-            "synth_filter_cutoff": {
-                "type": "number",
-                "description": "🔧 Filter cutoff frequency in Hz (20-20000, optional)",
-                "minimum": 20,
-                "maximum": 20000
-            },
-            "synth_filter_resonance": {
-                "type": "number",
-                "description": "✨ Filter resonance (0.0-1.0, optional)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "synth_reverb": {
-                "type": "number",
-                "description": "🏛️ Synthesis reverb intensity (0.0-1.0, optional)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "synth_chorus": {
-                "type": "number",
-                "description": "✨ Synthesis chorus intensity (0.0-1.0, optional)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "synth_delay": {
-                "type": "number",
-                "description": "🔄 Synthesis delay intensity (0.0-1.0, optional)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "synth_delay_time": {
-                "type": "number",
-                "description": "⏰ Synthesis delay time in seconds (0.0-2.0, optional)",
-                "minimum": 0.0,
-                "maximum": 2.0
-            },
-            "synth_pulse_width": {
-                "type": "number",
-                "description": "📊 Pulse width for square wave (0.1-0.9, optional)",
-                "minimum": 0.1,
-                "maximum": 0.9
-            },
-            "synth_modulator_freq": {
-                "type": "number",
-                "description": "🌀 FM modulator frequency in Hz (0.1-1000.0, optional)",
-                "minimum": 0.1,
-                "maximum": 1000.0
-            },
-            "synth_modulation_index": {
-                "type": "number",
-                "description": "🎛️ FM modulation index (0.0-10.0, optional)",
-                "minimum": 0.0,
-                "maximum": 10.0
-            },
-            "synth_grain_size": {
-                "type": "number",
-                "description": "🌾 Granular grain size in seconds (0.01-0.5, optional)",
-                "minimum": 0.01,
-                "maximum": 0.5
-            },
-            "synth_texture_roughness": {
-                "type": "number",
-                "description": "🎨 Texture roughness (0.0-1.0, optional)",
-                "minimum": 0.0,
-                "maximum": 1.0
-            },
-            "preset_name": {
-                "type": "string",
-                "description": "🎹 Classic synthesizer preset name: Load specific authentic vintage preset (e.g., 'Minimoog Bass', 'TB-303 Acid', 'Jupiter Bass', 'Prophet Lead', 'DX7 E.Piano'). Use for instant access to iconic synthesizer sounds!"
-            },
-            "preset_category": {
-                "type": "string",
-                "description": "🎭 Preset category: pick a random preset from 'bass', 'pad', 'lead', 'keys', 'drums' or 'effects'. Call list_sounds to see every preset by name.",
-                "enum": ["bass", "pad", "lead", "keys", "drums", "effects"]
-            },
-            "preset_variation": {
-                "type": "string",
-                "description": "🎨 Preset variation: Apply subtle variation to base preset (e.g., 'bright', 'dark', 'squelchy'). Great for customizing classic sounds to fit your music!"
-            },
-            "preset_random": {
-                "type": "boolean",
-                "description": "🎲 Random preset selection: Set to true to randomly select a preset. Optionally combine with preset_category to limit random selection to specific category. Perfect for creative inspiration!"
-            },
             "effects": {
                 "type": "array",
-                "description": "🎛️ Effects chain applied to this note in order (overrides a preset's signature effects). Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]",
+                "description": "🎛️ Effects chain applied to this note in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -683,14 +555,14 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
         },
         {
             "name": "list_sounds",
-            "description": "Catalog of every sound this server can make: classic synth presets by name and category, the 128 General MIDI instruments, drum keys for channel 9, synthesis types, R2D2 emotions, effect types and effects presets. Call this before guessing a preset or instrument name.",
+            "description": "Catalog of every sound this server can make: the 128 General MIDI instruments, drum keys for channel 9, R2D2 emotions, effect types and effects presets. Call this before guessing an instrument name.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "section": {
                         "type": "string",
                         "description": "Limit the catalog to one section",
-                        "enum": ["all", "presets", "instruments", "drums", "synthesis", "r2d2", "effects"],
+                        "enum": ["all", "instruments", "drums", "r2d2", "effects"],
                         "default": "all"
                     }
                 },
@@ -708,12 +580,11 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
         },
         {
             "name": "play_notes",
-            "description": "Play quick sounds, effects, and simple melodies. Supports MIDI (128 instruments), R2D2 expressions (9 emotions), and synthesis (19 types). For complex compositions with 3+ notes, use define_sequence_pattern + play_sequence instead.
+            "description": "Play quick sounds, effects, and simple melodies. Supports MIDI (128 instruments), R2D2 expressions (9 emotions) and synthesis through synth patches. For complex compositions with 3+ notes, use define_sequence_pattern + play_sequence instead.
 
 Examples:
 - Success chime: [{\"note\": 72, \"instrument\": 9, \"duration\": 0.5}]
 - R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
-- Kick drum: [{\"synth_type\": \"kick\", \"synth_frequency\": 60, \"duration\": 0.5}]
 
 Pass \"mode\": \"layer\" to play over what is already sounding; the default replaces it.",
             "inputSchema": {
@@ -821,8 +692,7 @@ fn validate_notes(notes: &[SimpleNote]) -> Result<(), String> {
     for (i, note) in notes.iter().enumerate() {
         let checks = [
             ("R2D2", note.validate_r2d2()),
-            ("synthesis", note.validate_synthesis()),
-            ("preset", note.validate_preset()),
+            ("synth", note.validate_synth()),
             ("effects", note.validate_effects()),
         ];
         for (what, result) in checks {
@@ -845,15 +715,12 @@ fn describe_sources(notes: &[SimpleNote]) -> String {
     if notes.iter().any(|n| n.note_type == "r2d2") {
         parts.push("R2D2 expressions");
     }
-    if notes.iter().any(|n| n.is_preset()) {
-        parts.push("classic synth presets");
-    }
-    if notes.iter().any(|n| n.is_synthesis() && !n.is_preset()) {
-        parts.push("custom synthesis");
+    if notes.iter().any(|n| n.is_synthesis()) {
+        parts.push("synth patches");
     }
     if notes
         .iter()
-        .any(|n| n.note_type != "r2d2" && !n.is_synthesis() && !n.is_preset())
+        .any(|n| n.note_type != "r2d2" && !n.is_synthesis())
     {
         parts.push("MIDI instruments");
     }
@@ -1094,39 +961,6 @@ fn handle_list_patterns(state: &ServerState, id: Option<Value>) -> JsonRpcRespon
     JsonRpcResponse::tool_text(id, output)
 }
 
-/// One-line descriptions of the `synth_type` values accepted by play_notes.
-const SYNTH_TYPES: [(&str, &str); 20] = [
-    ("sine", "pure tone"),
-    ("square", "hollow, use synth_pulse_width 0.1-0.9"),
-    ("sawtooth", "bright, buzzy (band-limited)"),
-    ("triangle", "soft, flute-like"),
-    ("noise", "white noise"),
-    (
-        "fm",
-        "two-operator FM, use synth_modulator_freq and synth_modulation_index",
-    ),
-    (
-        "dx7fm",
-        "DX7-style FM (algorithm 1, two operators from the fm parameters)",
-    ),
-    ("granular", "pitched grain cloud, use synth_grain_size"),
-    ("wavetable", "morphs sine → triangle → saw → square"),
-    ("kick", "synthesized kick drum"),
-    ("snare", "synthesized snare"),
-    ("hihat", "synthesized hi-hat"),
-    ("cymbal", "synthesized crash"),
-    ("swoosh", "filtered noise sweep"),
-    ("zap", "descending laser zap"),
-    ("chime", "bell with inharmonic partials"),
-    ("burst", "short spectral burst"),
-    ("pad", "evolving harmonic pad (use a slow synth_attack)"),
-    (
-        "texture",
-        "rough evolving texture, use synth_texture_roughness",
-    ),
-    ("drone", "sustained overtone drone"),
-];
-
 const R2D2_EMOTIONS: [(&str, &str); 9] = [
     ("Happy", "cheerful bouncy warble"),
     ("Sad", "slow descending whine"),
@@ -1146,37 +980,6 @@ fn handle_list_sounds(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
         .unwrap_or("all");
     let want = |name: &str| section == "all" || section == name;
     let mut out = String::new();
-
-    if want("presets") {
-        let library = crate::expressive::PresetLibrary::new();
-        out.push_str(&format!(
-            "# Classic synth presets ({}) — use preset_name, or preset_category for a random pick\n",
-            library.count()
-        ));
-        for (category, presets) in library.catalog() {
-            out.push_str(&format!("\n## {} ({})\n", category.as_str(), presets.len()));
-            for preset in presets {
-                out.push_str(&format!(
-                    "- {} — {} ({})",
-                    preset.name, preset.description, preset.inspiration
-                ));
-                if !preset.variations.is_empty() {
-                    let mut names: Vec<&String> = preset.variations.keys().collect();
-                    names.sort();
-                    out.push_str(&format!(
-                        " · preset_variation: {}",
-                        names
-                            .iter()
-                            .map(|n| n.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ));
-                }
-                out.push('\n');
-            }
-        }
-        out.push('\n');
-    }
 
     if want("instruments") {
         use crate::midi::gm_names::{GM_FAMILIES, GM_INSTRUMENTS};
@@ -1198,14 +1001,6 @@ fn handle_list_sounds(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
         out.push_str("# GM drum kit — use channel: 9 and note: <key>\n");
         for (key, name) in GM_DRUM_KEYS {
             out.push_str(&format!("- {}: {}\n", key, name));
-        }
-        out.push_str("\nSynthesized drums are also available via synth_type kick/snare/hihat/cymbal or the drums preset category.\n\n");
-    }
-
-    if want("synthesis") {
-        out.push_str("# Synthesis types — use synth_type (pitch from note or synth_frequency)\n");
-        for (name, description) in SYNTH_TYPES {
-            out.push_str(&format!("- {}: {}\n", name, description));
         }
         out.push('\n');
     }
