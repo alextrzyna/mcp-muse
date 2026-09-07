@@ -837,6 +837,79 @@ mod tests {
         ));
     }
 
+    /// `effects_preset` is merged for every note, not only for notes that also
+    /// named a (now removed) Rust preset, so a plain MIDI note's named chain
+    /// reaches the bus.
+    #[test]
+    fn effects_preset_on_a_midi_note_becomes_the_bus_chain() {
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    note: Some(60),
+                    duration: Some(0.2),
+                    effects_preset: Some("studio".into()),
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+                &no_session(),
+            )
+            .unwrap();
+        let chain = t
+            .command
+            .midi_effects
+            .expect("the studio preset must reach the MIDI bus");
+        assert!(!chain.is_empty(), "the studio chain must not be empty");
+    }
+
+    #[test]
+    fn explicit_effects_come_before_the_preset_chain() {
+        let distortion: EffectConfig =
+            serde_json::from_value(serde_json::json!({"type": "distortion"})).unwrap();
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    note: Some(60),
+                    duration: Some(0.2),
+                    effects: Some(vec![distortion]),
+                    effects_preset: Some("studio".into()),
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+                &no_session(),
+            )
+            .unwrap();
+        let chain = t.command.midi_effects.expect("effects were supplied");
+        assert!(
+            matches!(chain[0].effect, crate::midi::EffectType::Distortion { .. }),
+            "the note's own effects must stay first, got {:?}",
+            chain[0].effect
+        );
+        assert!(
+            chain.len() > 1,
+            "the preset chain must be appended, got {} effects",
+            chain.len()
+        );
+
+        // An unknown preset name fails `validate_effects`, which warns and
+        // drops both effect fields rather than erroring or panicking.
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![SimpleNote {
+                    note: Some(60),
+                    duration: Some(0.2),
+                    effects_preset: Some("nope".into()),
+                    ..Default::default()
+                }]),
+                PlayMode::Replace,
+                &no_session(),
+            )
+            .unwrap();
+        assert!(
+            t.command.midi_effects.is_none(),
+            "an unknown effects preset must leave the bus dry"
+        );
+    }
+
     #[test]
     fn effects_on_synthesis_notes_never_reach_the_midi_bus() {
         let t = Translator::new(Ok(()))
