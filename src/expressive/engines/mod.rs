@@ -5,7 +5,7 @@ pub mod percussion;
 pub mod subtractive;
 
 #[allow(unused_imports)]
-pub use percussion::PercussionVoice;
+pub use percussion::{MIN_HIT_SECONDS, PercussionVoice};
 #[allow(unused_imports)]
 pub use subtractive::SubtractiveVoice;
 

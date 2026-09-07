@@ -4,6 +4,9 @@
 use crate::expressive::engines::{Modulation, Voice};
 use crate::expressive::{Percussion, percussion};
 
+/// Shortest hit a percussion voice renders regardless of gate.
+pub const MIN_HIT_SECONDS: f32 = 0.05;
+
 pub struct PercussionVoice {
     samples: Vec<f32>,
     pos: usize,
@@ -13,7 +16,7 @@ pub struct PercussionVoice {
 impl PercussionVoice {
     /// Renders `gate_seconds` of the hit (the hit's own envelope shapes it).
     pub fn new(cfg: &Percussion, gate_seconds: f32, sample_rate: f32) -> Self {
-        let count = ((gate_seconds.max(0.05)) * sample_rate) as usize;
+        let count = ((gate_seconds.max(MIN_HIT_SECONDS)) * sample_rate) as usize;
         Self {
             samples: percussion::render(sample_rate, cfg, count),
             pos: 0,

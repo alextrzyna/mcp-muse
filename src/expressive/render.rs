@@ -2,7 +2,9 @@
 //! summed per sample, then the patch's effects chain runs once over the sum.
 #![allow(dead_code)]
 
-use crate::expressive::engines::{Modulation, PercussionVoice, SubtractiveVoice, Voice};
+use crate::expressive::engines::{
+    MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice,
+};
 use crate::expressive::{EffectsChain, Patch};
 
 /// Extra silence rendered after the last release so reverbs and delays can ring out.
@@ -30,9 +32,14 @@ pub fn render_length_seconds(patch: &Patch, notes: &[NoteEvent]) -> f32 {
     if notes.is_empty() {
         return 0.0;
     }
+    let min_gate = if patch.percussion.as_ref().is_some_and(|p| p.level > 0.0) {
+        MIN_HIT_SECONDS
+    } else {
+        0.0
+    };
     let last_gate = notes
         .iter()
-        .map(|n| n.start.max(0.0) + n.duration.max(0.0))
+        .map(|n| n.start.max(0.0) + n.duration.max(0.0).max(min_gate))
         .fold(0.0f32, f32::max);
     let effect_tail = if patch.effects.iter().any(|e| e.enabled) {
         EFFECT_TAIL_SECONDS
@@ -256,5 +263,19 @@ mod tests {
     fn empty_notes_render_nothing() {
         let p = patch(json!({"name": "p", "subtractive": {}}));
         assert!(render_patch(&p, &[], SR).is_empty());
+    }
+
+    #[test]
+    fn a_zero_duration_percussion_note_still_renders_its_hit() {
+        let p = patch(json!({"name": "k", "percussion": {"kind": "kick"}}));
+        let n = [NoteEvent {
+            start: 0.0,
+            duration: 0.0,
+            frequency: 60.0,
+            velocity: 1.0,
+        }];
+        let buf = render_patch(&p, &n, SR);
+        assert_eq!(buf.len(), (MIN_HIT_SECONDS * SR) as usize);
+        assert!(rms(&left(&buf)) > 0.01);
     }
 }
