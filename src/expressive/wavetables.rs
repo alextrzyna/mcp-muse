@@ -44,6 +44,12 @@ fn pulse_partials(duty: f32, max: u32, gain: f32) -> impl Iterator<Item = Partia
 }
 
 /// The additive recipe for each table (mirrors the tryx-fx generators).
+/// Every table is an integer-harmonic series: a 2048-point table can only
+/// hold a whole number of cycles of each partial, so a non-integer ratio
+/// would leave a jump at the wrap whose 1/n tail aliases above Nyquist no
+/// matter how the ratio filter clips the partial list. Integer harmonics
+/// keep each table cycle exactly periodic, so the per-level ratio filter is
+/// a true band limit.
 pub fn partials(table: TableName) -> Vec<Partial> {
     match table {
         TableName::Basic => vec![harmonic(1, 0.8), harmonic(2, 0.15), harmonic(3, 0.05)],
@@ -54,21 +60,9 @@ pub fn partials(table: TableName) -> Vec<Partial> {
         TableName::Bright => (1..=20u32).map(|h| harmonic(h, 0.5 / h as f32)).collect(),
         TableName::Digital => vec![
             harmonic(1, 0.4),
-            Partial {
-                ratio: 2.5,
-                amplitude: 0.3,
-                phase: 0.0,
-            },
-            Partial {
-                ratio: 4.1,
-                amplitude: 0.2,
-                phase: 0.0,
-            },
-            Partial {
-                ratio: 7.3,
-                amplitude: 0.1,
-                phase: 0.0,
-            },
+            harmonic(5, 0.3),
+            harmonic(9, 0.2),
+            harmonic(15, 0.1),
         ],
         TableName::Vocal => vec![
             harmonic(1, 0.3),
@@ -79,6 +73,8 @@ pub fn partials(table: TableName) -> Vec<Partial> {
         ],
         TableName::Pwm => {
             let mut v: Vec<Partial> = Vec::new();
+            // sin(nπd) = 0 for d in {0.3, 0.5, 0.7} at n = 10k, so every 10th
+            // harmonic cancels across the three duty cycles; expected, not a bug.
             for duty in [0.3, 0.5, 0.7] {
                 v.extend(pulse_partials(duty, 48, 0.25));
             }
@@ -242,13 +238,35 @@ mod tests {
     }
 
     #[test]
-    fn high_notes_alias_less_than_the_naive_table() {
+    fn every_table_is_band_limited_and_periodic_at_the_wrap() {
         // 5000 Hz fundamental: harmonics above the 4th fold back below Nyquist.
-        let level = mip_level(5000.0);
-        let limited = render(TableName::Bright, level, 5000.0, 0.5);
-        let naive = render_naive(TableName::Bright, 5000.0, 0.5);
-        // 6th harmonic 30000 Hz folds to 14100 Hz.
+        let freq = 5000.0;
+        let level = mip_level(freq);
+        // 6th harmonic (30000 Hz) folds to 14100 Hz.
         let alias = 14100.0;
+        for table in TableName::ALL {
+            let limited = render(table, level, freq, 0.5);
+            let fundamental = goertzel_power(&limited, freq, SR);
+            let folded = goertzel_power(&limited, alias, SR);
+            let folded_db = db(folded / fundamental);
+            assert!(
+                folded_db < -40.0,
+                "{table:?}: folded 6th harmonic only {folded_db} dB below the fundamental"
+            );
+
+            // Wrap-point jump: sample(t) at phase 0 vs. the last table slot.
+            let start = sample(table, level, 0.0);
+            let end = sample(table, level, (TABLE_SIZE - 1) as f32 / TABLE_SIZE as f32);
+            let jump = (start - end).abs();
+            assert!(
+                jump < 0.05,
+                "{table:?}: wrap-point jump {jump} (not periodic)"
+            );
+        }
+
+        // The naive-vs-limited comparison, kept for Bright specifically.
+        let limited = render(TableName::Bright, level, freq, 0.5);
+        let naive = render_naive(TableName::Bright, freq, 0.5);
         assert!(
             db(goertzel_power(&limited, alias, SR) / goertzel_power(&naive, alias, SR)) < -20.0,
             "band-limited table removes the folded partial"

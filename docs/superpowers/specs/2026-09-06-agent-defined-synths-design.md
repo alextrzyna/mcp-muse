@@ -109,7 +109,9 @@ and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
   (the eight procedural tables from tryx-fx).
 - `morph` 0 to 1 blends toward the next table in that order.
 - Band limiting: ten mip levels, one per octave from 27.5 Hz; a level
-  keeps partials below 20 kHz for every fundamental in its octave.
+  keeps partials below 20 kHz for every fundamental in its octave. Every
+  table is an integer-harmonic series, so a table cycle is periodic and
+  the ratio filter is a true band limit.
 
 **granular**
 - `source`: `harmonics | noise | formant | inharmonic`.
