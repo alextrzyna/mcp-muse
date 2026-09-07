@@ -88,16 +88,6 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
                 voice: Box::new(FmVoice::new(fm, note.frequency, sample_rate)),
             });
         }
-        if let Some(perc) = &patch.percussion
-            && perc.level > 0.0
-        {
-            voices.push(ActiveVoice {
-                start,
-                gate_end,
-                gain,
-                voice: Box::new(PercussionVoice::new(perc, gate, sample_rate)),
-            });
-        }
         if let Some(wt) = &patch.wavetable
             && wt.level > 0.0
         {
@@ -106,6 +96,16 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
                 gate_end,
                 gain,
                 voice: Box::new(WavetableVoice::new(wt, note.frequency, sample_rate)),
+            });
+        }
+        if let Some(perc) = &patch.percussion
+            && perc.level > 0.0
+        {
+            voices.push(ActiveVoice {
+                start,
+                gate_end,
+                gain,
+                voice: Box::new(PercussionVoice::new(perc, gate, sample_rate)),
             });
         }
     }

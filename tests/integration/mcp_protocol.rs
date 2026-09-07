@@ -1354,3 +1354,16 @@ fn fm_schema_errors_name_the_operator_field() {
     assert_eq!(r["error"]["code"], -32602);
     assert!(r["error"]["message"].as_str().unwrap().contains("detune"));
 }
+
+#[test]
+fn inline_fm_patch_errors_name_the_operator_field() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 34, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": {"name": "x", "fm": {"operators": [{"ratio": 1, "detune": 5}]}},
+             "note": 60, "duration": 0.2}]}}
+    }));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    assert!(r["error"]["message"].as_str().unwrap().contains("detune"));
+}

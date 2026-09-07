@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::expressive::{Patch, PatchLibrary};
+use crate::expressive::{FmAlgorithm, Patch, PatchLibrary, PercussionKind, TableName};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
 };
@@ -215,7 +215,7 @@ fn patch_schema() -> Value {
     let env = |what: &str| {
         json!({
             "type": "object",
-            "description": format!("{what} envelope in seconds (0.001-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
+            "description": format!("{what} envelope in seconds (0-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
             "properties": {
                 "attack": {"type": "number", "minimum": 0, "maximum": 10},
                 "decay": {"type": "number", "minimum": 0, "maximum": 10},
@@ -265,7 +265,7 @@ fn patch_schema() -> Value {
                     "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
                     "algorithm": {"type": "string", "enum": ["stack", "pairs", "fan_in", "parallel"], "default": "stack",
                         "description": "stack: 4->3->2->1, one carrier. pairs: 3->1 and 4->2, carriers 1 and 2. fan_in: 2, 3, 4 all modulate 1. parallel: all carriers (additive)"},
-                    "feedback": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Self-modulation of the last operator; adds grit"},
+                    "feedback": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Self-modulation of the last operator in radians (0 to 1); adds grit. A modulator's level 1 is 4 radians, so feedback is a gentler effect"},
                     "operators": {
                         "type": "array", "minItems": 1, "maxItems": 4,
                         "description": "1 to 4 operators in order; missing operators are silent",
@@ -1232,7 +1232,33 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
                 out.push_str(&format!("- {} — {}\n", patch.name, patch.description));
             }
         }
-        out.push_str("\nEngines for inline patches: subtractive, fm (algorithms stack/pairs/fan_in/parallel), wavetable (tables basic/warm/bright/digital/vocal/pwm/organ/noise), percussion (kinds kick/snare/hihat/cymbal/zap/swoosh/chime/burst).\n\n");
+        let algorithms = FmAlgorithm::ALL
+            .iter()
+            .map(FmAlgorithm::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let tables = TableName::ALL
+            .iter()
+            .map(TableName::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let percussion_kinds = [
+            PercussionKind::Kick,
+            PercussionKind::Snare,
+            PercussionKind::Hihat,
+            PercussionKind::Cymbal,
+            PercussionKind::Zap,
+            PercussionKind::Swoosh,
+            PercussionKind::Chime,
+            PercussionKind::Burst,
+        ]
+        .iter()
+        .map(PercussionKind::as_str)
+        .collect::<Vec<_>>()
+        .join("/");
+        out.push_str(&format!(
+            "\nEngines for inline patches: subtractive, fm (algorithms {algorithms}), wavetable (tables {tables}), percussion (kinds {percussion_kinds}).\n\n"
+        ));
     }
 
     if want("instruments") {

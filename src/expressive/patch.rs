@@ -500,7 +500,13 @@ pub enum FmAlgorithm {
 }
 
 impl FmAlgorithm {
-    #[allow(dead_code)] // consumed in Task 2
+    pub const ALL: [FmAlgorithm; 4] = [
+        FmAlgorithm::Stack,
+        FmAlgorithm::Pairs,
+        FmAlgorithm::FanIn,
+        FmAlgorithm::Parallel,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             FmAlgorithm::Stack => "stack",
@@ -863,7 +869,6 @@ impl TableName {
         TableName::Noise,
     ];
 
-    #[allow(dead_code)] // consumed by list_sounds in a later task
     pub fn as_str(&self) -> &'static str {
         match self {
             TableName::Basic => "basic",
