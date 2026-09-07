@@ -1301,3 +1301,56 @@ fn patterns_can_carry_synth_patches() {
     }));
     assert!(r["error"].is_null(), "{r}");
 }
+
+#[test]
+fn fm_and_wavetable_patches_play_by_name_and_inline() {
+    let mut server = TestServer::start();
+    for name in ["dx7_e_piano", "tx81z_lately", "wt_organ"] {
+        let r = server.call(json!({
+            "jsonrpc": "2.0", "id": 30, "method": "tools/call",
+            "params": {"name": "play_notes", "arguments": {"notes": [
+                {"synth": name, "note": 60, "start_time": 0.0, "duration": 0.2}]}}
+        }));
+        assert!(r["error"].is_null(), "{name}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("Playback started") || text.contains("Audio output unavailable"),
+            "{name}: {text}"
+        );
+    }
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 31, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": {"name": "inline_fm", "fm": {"algorithm": "fan_in", "operators": [{"ratio": 1}, {"ratio": 2, "level": 0.3}, {"ratio": 5, "level": 0.2}]}},
+             "note": 64, "start_time": 0.0, "duration": 0.2}]}}
+    }));
+    assert!(r["error"].is_null(), "{r}");
+
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 32, "method": "tools/call",
+        "params": {"name": "list_sounds", "arguments": {"section": "synths"}}
+    }));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    for needle in [
+        "dx7_e_piano",
+        "dx7_slap_bass",
+        "tx81z_lately",
+        "fm_bell",
+        "wt_organ",
+        "wt_pwm_lead",
+        "## keys",
+    ] {
+        assert!(text.contains(needle), "catalog missing {needle}");
+    }
+}
+
+#[test]
+fn fm_schema_errors_name_the_operator_field() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 33, "method": "tools/call",
+        "params": {"name": "define_synth", "arguments": {"name": "x", "fm": {"operators": [{"ratio": 1, "detune": 5}]}}}
+    }));
+    assert_eq!(r["error"]["code"], -32602);
+    assert!(r["error"]["message"].as_str().unwrap().contains("detune"));
+}
