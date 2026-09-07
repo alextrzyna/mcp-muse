@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::expressive::{Patch, PatchLibrary};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
 };
@@ -12,10 +13,12 @@ use std::time::Duration;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Per-process server state: the audio player (opened on first use so that
-/// `tools/list` works without an audio device) and the session's patterns.
+/// `tools/list` works without an audio device), the session's patterns and
+/// the session's `define_synth` patches (keyed by `Patch::key()`).
 pub struct ServerState {
     player: Option<MidiPlayer>,
     patterns: HashMap<String, SequencePattern>,
+    synths: HashMap<String, Patch>,
 }
 
 impl Default for ServerState {
@@ -29,6 +32,7 @@ impl ServerState {
         Self {
             player: None,
             patterns: HashMap::new(),
+            synths: HashMap::new(),
         }
     }
 
@@ -167,6 +171,131 @@ fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcRespon
     )
 }
 
+/// JSON schema for the `effects` chain, shared by `note_schema` and
+/// `patch_schema` so the two cannot drift apart.
+fn effects_schema() -> Value {
+    json!({
+        "type": "array",
+        "description": "🎛️ Effects chain applied in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]",
+        "items": {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["reverb", "delay", "chorus", "filter", "compressor", "distortion"], "description": "Effect type (required)"},
+                "intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.5, "description": "Wet/dry mix: 0.3=subtle, 0.6=moderate, 1.0=maximum"},
+                "enabled": {"type": "boolean", "default": true},
+                "room_size": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: 0.1=closet, 0.5=studio, 0.8=hall, 1.0=cathedral (default 0.5)"},
+                "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: high-frequency damping 0=bright, 1=dark (default 0.3)"},
+                "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb/delay: wet amount (default 0.3)"},
+                "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "reverb: seconds before the reverb starts (default 0.02)"},
+                "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds; 0.125=8th at 120 BPM, 0.25=quarter (default 0.25)"},
+                "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "delay/chorus: repeat amount (delay default 0.4, chorus default 0.2)"},
+                "sync_tempo": {"type": "boolean", "description": "delay: reserved"},
+                "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "chorus: LFO Hz (default 1.5)"},
+                "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: modulation depth (default 0.3)"},
+                "stereo_width": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: reserved"},
+                "filter_type": {"type": "string", "enum": ["low_pass", "high_pass", "band_pass", "notch", "peak", "low_shelf", "high_shelf"], "description": "filter: response (default low_pass)"},
+                "cutoff": {"type": "number", "minimum": 20.0, "maximum": 20000.0, "description": "filter: Hz (default 1000)"},
+                "resonance": {"type": "number", "minimum": 0.1, "maximum": 20.0, "description": "filter: Q (default 1.0)"},
+                "envelope_amount": {"type": "number", "minimum": -1.0, "maximum": 1.0, "description": "filter: reserved"},
+                "threshold": {"type": "number", "minimum": -60.0, "maximum": 0.0, "description": "compressor: dB (default -12)"},
+                "ratio": {"type": "number", "minimum": 1.0, "maximum": 20.0, "description": "compressor: 2=subtle, 4=moderate, 8=heavy (default 4)"},
+                "attack": {"type": "number", "minimum": 0.001, "maximum": 0.1, "description": "compressor: seconds (default 0.01)"},
+                "release": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "compressor: seconds (default 0.1)"},
+                "drive": {"type": "number", "minimum": 0.0, "maximum": 5.0, "description": "distortion: 1=warm, 2.5=crunch, 5=heavy (default 2)"},
+                "tone": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "distortion: 0=dark, 1=bright (default 0.5)"},
+                "output_level": {"type": "number", "minimum": 0.1, "maximum": 2.0, "description": "distortion: output gain (default 1.0)"}
+            },
+            "required": ["type"]
+        }
+    })
+}
+
+/// JSON schema for a synth patch, shared by define_synth and inline `synth` on notes.
+fn patch_schema() -> Value {
+    let env = |what: &str| {
+        json!({
+            "type": "object",
+            "description": format!("{what} envelope in seconds (0.001-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
+            "properties": {
+                "attack": {"type": "number", "minimum": 0, "maximum": 10},
+                "decay": {"type": "number", "minimum": 0, "maximum": 10},
+                "sustain": {"type": "number", "minimum": 0, "maximum": 1},
+                "release": {"type": "number", "minimum": 0, "maximum": 10}
+            },
+            "additionalProperties": false
+        })
+    };
+    let wave = json!({"type": "string", "enum": ["sine", "saw", "square", "triangle", "noise"], "default": "saw"});
+    json!({
+        "type": "object",
+        "description": "A synth patch. Include at least one engine (subtractive or percussion); several may layer.",
+        "properties": {
+            "name": {"type": "string", "description": "Patch name; notes reference it with \"synth\": \"<name>\""},
+            "description": {"type": "string"},
+            "category": {"type": "string", "enum": ["bass", "pad", "lead", "keys", "drums", "fx"]},
+            "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1, "description": "Patch output level; velocity 127 plays at this level"},
+            "subtractive": {
+                "type": "object",
+                "description": "Two oscillators, optional state-variable filter with its own envelope, amplitude envelope",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "osc1": {"type": "object", "properties": {"wave": wave, "pulse_width": {"type": "number", "minimum": 0.1, "maximum": 0.9, "default": 0.5}}, "additionalProperties": false},
+                    "osc2": {"type": "object", "description": "Second oscillator blended with osc1",
+                        "properties": {"wave": wave, "pulse_width": {"type": "number", "minimum": 0.1, "maximum": 0.9},
+                            "mix": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "0 = only osc1, 1 = only osc2"},
+                            "detune_cents": {"type": "number", "minimum": -100, "maximum": 100, "default": 0, "description": "5-15 thickens, 50+ beats audibly"},
+                            "octave": {"type": "integer", "minimum": -2, "maximum": 2, "default": 0}},
+                        "additionalProperties": false},
+                    "filter": {"type": "object",
+                        "properties": {"type": {"type": "string", "enum": ["low_pass", "high_pass", "band_pass"], "default": "low_pass"},
+                            "cutoff": {"type": "number", "minimum": 20, "maximum": 20000, "default": 1000},
+                            "resonance": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.2},
+                            "slope": {"type": "integer", "enum": [12, 24], "default": 12, "description": "dB per octave"},
+                            "env_amount": {"type": "number", "minimum": -1, "maximum": 1, "default": 0, "description": "Filter envelope depth; 1 sweeps up four octaves, -1 down"},
+                            "env": env("Filter")},
+                        "additionalProperties": false},
+                    "env": env("Amplitude")
+                },
+                "additionalProperties": false
+            },
+            "percussion": {
+                "type": "object",
+                "description": "One-shot hit with its own envelope; ignores the note's pitch. Only the parameters of the chosen kind are allowed.",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["kick", "snare", "hihat", "cymbal", "zap", "swoosh", "chime", "burst"]},
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "frequency": {"type": "number", "minimum": 20, "maximum": 20000, "description": "Body (kick 60), tone (snare 200), base (hihat 8000, cymbal 4000), start (zap 800), fundamental (chime 880) or centre (burst 1000)"},
+                    "punch": {"type": "number", "minimum": 0, "maximum": 1, "description": "kick"},
+                    "sustain": {"type": "number", "minimum": 0, "maximum": 1, "description": "kick"},
+                    "click_freq": {"type": "number", "minimum": 20, "maximum": 20000, "description": "kick"},
+                    "snap": {"type": "number", "minimum": 0, "maximum": 1, "description": "snare"},
+                    "buzz": {"type": "number", "minimum": 0, "maximum": 1, "description": "snare"},
+                    "noise_amount": {"type": "number", "minimum": 0, "maximum": 1, "description": "snare"},
+                    "metallic": {"type": "number", "minimum": 0, "maximum": 1, "description": "hihat, cymbal"},
+                    "decay": {"type": "number", "minimum": 0.01, "maximum": 10, "description": "hihat, zap, chime (seconds)"},
+                    "brightness": {"type": "number", "minimum": 0, "maximum": 1, "description": "hihat"},
+                    "size": {"type": "number", "minimum": 0, "maximum": 1, "description": "cymbal"},
+                    "strike_intensity": {"type": "number", "minimum": 0, "maximum": 1, "description": "cymbal"},
+                    "energy": {"type": "number", "minimum": 0, "maximum": 1, "description": "zap"},
+                    "harmonic_content": {"type": "number", "minimum": 0, "maximum": 1, "description": "zap"},
+                    "direction": {"type": "number", "minimum": -1, "maximum": 1, "description": "swoosh"},
+                    "intensity": {"type": "number", "minimum": 0, "maximum": 1, "description": "swoosh, burst"},
+                    "sweep": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2, "description": "swoosh [start_hz, end_hz]"},
+                    "harmonic_count": {"type": "integer", "minimum": 1, "maximum": 16, "description": "chime"},
+                    "inharmonicity": {"type": "number", "minimum": 0, "maximum": 1, "description": "chime"},
+                    "bandwidth": {"type": "number", "minimum": 1, "maximum": 20000, "description": "burst"},
+                    "shape": {"type": "number", "minimum": 0, "maximum": 1, "description": "burst: 0 sharp, 1 smooth"}
+                },
+                "required": ["kind"],
+                "additionalProperties": false
+            },
+            "effects": effects_schema()
+        },
+        "required": ["name"],
+        "additionalProperties": false
+    })
+}
+
 /// JSON schema for one note, shared by play_notes, define_sequence_pattern
 /// and play_sequence so the three tools cannot drift apart.
 fn note_schema() -> Value {
@@ -300,39 +429,13 @@ fn note_schema() -> Value {
                 "type": "string",
                 "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
             },
-            "effects": {
-                "type": "array",
-                "description": "🎛️ Effects chain applied to this note in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "type": {"type": "string", "enum": ["reverb", "delay", "chorus", "filter", "compressor", "distortion"], "description": "Effect type (required)"},
-                        "intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.5, "description": "Wet/dry mix: 0.3=subtle, 0.6=moderate, 1.0=maximum"},
-                        "enabled": {"type": "boolean", "default": true},
-                        "room_size": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: 0.1=closet, 0.5=studio, 0.8=hall, 1.0=cathedral (default 0.5)"},
-                        "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: high-frequency damping 0=bright, 1=dark (default 0.3)"},
-                        "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb/delay: wet amount (default 0.3)"},
-                        "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "reverb: seconds before the reverb starts (default 0.02)"},
-                        "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds; 0.125=8th at 120 BPM, 0.25=quarter (default 0.25)"},
-                        "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "delay/chorus: repeat amount (delay default 0.4, chorus default 0.2)"},
-                        "sync_tempo": {"type": "boolean", "description": "delay: reserved"},
-                        "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "chorus: LFO Hz (default 1.5)"},
-                        "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: modulation depth (default 0.3)"},
-                        "stereo_width": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: reserved"},
-                        "filter_type": {"type": "string", "enum": ["low_pass", "high_pass", "band_pass", "notch", "peak", "low_shelf", "high_shelf"], "description": "filter: response (default low_pass)"},
-                        "cutoff": {"type": "number", "minimum": 20.0, "maximum": 20000.0, "description": "filter: Hz (default 1000)"},
-                        "resonance": {"type": "number", "minimum": 0.1, "maximum": 20.0, "description": "filter: Q (default 1.0)"},
-                        "envelope_amount": {"type": "number", "minimum": -1.0, "maximum": 1.0, "description": "filter: reserved"},
-                        "threshold": {"type": "number", "minimum": -60.0, "maximum": 0.0, "description": "compressor: dB (default -12)"},
-                        "ratio": {"type": "number", "minimum": 1.0, "maximum": 20.0, "description": "compressor: 2=subtle, 4=moderate, 8=heavy (default 4)"},
-                        "attack": {"type": "number", "minimum": 0.001, "maximum": 0.1, "description": "compressor: seconds (default 0.01)"},
-                        "release": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "compressor: seconds (default 0.1)"},
-                        "drive": {"type": "number", "minimum": 0.0, "maximum": 5.0, "description": "distortion: 1=warm, 2.5=crunch, 5=heavy (default 2)"},
-                        "tone": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "distortion: 0=dark, 1=bright (default 0.5)"},
-                        "output_level": {"type": "number", "minimum": 0.1, "maximum": 2.0, "description": "distortion: output gain (default 1.0)"}
-                    },
-                    "required": ["type"]
-                }
+            "effects": effects_schema(),
+            "synth": {
+                "description": "🎛️ Synth patch for this note: the name of a built-in or define_synth patch, or an inline patch object. Pitch comes from `note`; percussion patches ignore it.",
+                "oneOf": [
+                    {"type": "string"},
+                    patch_schema()
+                ]
             },
             "effects_preset": {
                 "type": "string",
@@ -352,6 +455,18 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling tools/list request");
 
     let tools = json!([
+        {
+            "name": "define_synth",
+            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
+
+Examples:
+- Bass: {\"name\": \"rubber_bass\", \"category\": \"bass\", \"subtractive\": {\"osc1\": {\"wave\": \"saw\"}, \"osc2\": {\"wave\": \"square\", \"mix\": 0.3, \"detune_cents\": 6}, \"filter\": {\"type\": \"low_pass\", \"cutoff\": 500, \"resonance\": 0.4, \"slope\": 24, \"env_amount\": 0.7, \"env\": {\"attack\": 0.005, \"decay\": 0.25, \"sustain\": 0.1, \"release\": 0.2}}, \"env\": {\"attack\": 0.005, \"decay\": 0.3, \"sustain\": 0.6, \"release\": 0.15}}, \"effects\": [{\"type\": \"distortion\", \"drive\": 3, \"intensity\": 0.4}, {\"type\": \"compressor\", \"threshold\": -18, \"ratio\": 4, \"intensity\": 1}]}
+- Pad: {\"name\": \"glass_pad\", \"category\": \"pad\", \"level\": 0.7, \"subtractive\": {\"osc1\": {\"wave\": \"triangle\"}, \"osc2\": {\"wave\": \"saw\", \"mix\": 0.35, \"detune_cents\": 9}, \"filter\": {\"cutoff\": 900, \"env_amount\": 0.5, \"env\": {\"attack\": 1.2, \"decay\": 2, \"sustain\": 0.4, \"release\": 3}}, \"env\": {\"attack\": 0.9, \"decay\": 1, \"sustain\": 0.8, \"release\": 2.5}}, \"effects\": [{\"type\": \"chorus\", \"rate\": 0.5, \"depth\": 0.4, \"intensity\": 0.3}, {\"type\": \"reverb\", \"room_size\": 0.8, \"intensity\": 0.4}]}
+- Drum: {\"name\": \"tight_kick\", \"category\": \"drums\", \"percussion\": {\"kind\": \"kick\", \"frequency\": 50, \"punch\": 0.9, \"sustain\": 0.2}}
+
+Call list_sounds with section \"synths\" to see the built-in patches, which double as worked examples.",
+            "inputSchema": patch_schema()
+        },
         {
             "name": "define_sequence_pattern",
             "description": "Create reusable musical patterns (drum beats, bass lines, chord progressions, melodies) that can be referenced with play_sequence. Patterns can be transposed, use different instruments, and repeat with perfect bar-based timing.
@@ -555,14 +670,14 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
         },
         {
             "name": "list_sounds",
-            "description": "Catalog of every sound this server can make: the 128 General MIDI instruments, drum keys for channel 9, R2D2 emotions, effect types and effects presets. Call this before guessing an instrument name.",
+            "description": "Catalog of every sound this server can make: synth patches (built-in and this session's define_synth patches), the 128 General MIDI instruments, drum keys for channel 9, R2D2 emotions, effect types and effects presets. Call this before guessing an instrument or synth name.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "section": {
                         "type": "string",
                         "description": "Limit the catalog to one section",
-                        "enum": ["all", "instruments", "drums", "r2d2", "effects"],
+                        "enum": ["all", "synths", "instruments", "drums", "r2d2", "effects"],
                         "default": "all"
                     }
                 },
@@ -580,11 +695,13 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
         },
         {
             "name": "play_notes",
-            "description": "Play quick sounds, effects, and simple melodies. Supports MIDI (128 instruments), R2D2 expressions (9 emotions) and synthesis through synth patches. For complex compositions with 3+ notes, use define_sequence_pattern + play_sequence instead.
+            "description": "Play quick sounds, effects, and simple melodies. Supports MIDI (128 instruments), R2D2 expressions (9 emotions) and synth patches (built-in or define_synth). For complex compositions with 3+ notes, use define_sequence_pattern + play_sequence instead.
 
 Examples:
 - Success chime: [{\"note\": 72, \"instrument\": 9, \"duration\": 0.5}]
 - R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
+- Drum kick: [{\"synth\": \"tr_808_kick\", \"duration\": 0.5}]
+- Inline synth: [{\"synth\": {\"name\": \"blip\", \"subtractive\": {\"osc1\": {\"wave\": \"square\"}, \"env\": {\"release\": 0.05}}}, \"note\": 84, \"duration\": 0.1}]
 
 Pass \"mode\": \"layer\" to play over what is already sounding; the default replaces it.",
             "inputSchema": {
@@ -677,14 +794,68 @@ fn dispatch_tool(
     id: Option<Value>,
 ) -> JsonRpcResponse {
     match tool_params.name.as_str() {
+        "define_synth" => handle_define_synth(state, tool_params.arguments, id),
         "play_notes" => handle_play_notes(state, tool_params.arguments, id),
         "define_sequence_pattern" => handle_define_pattern(state, tool_params.arguments, id),
         "play_sequence" => handle_play_sequence(state, tool_params.arguments, id),
         "list_patterns" => handle_list_patterns(state, id),
-        "list_sounds" => handle_list_sounds(tool_params.arguments, id),
+        "list_sounds" => handle_list_sounds(state, tool_params.arguments, id),
         "stop_playback" => handle_stop_playback(state, id),
         other => JsonRpcResponse::error(id, METHOD_NOT_FOUND, format!("Unknown tool: {}", other)),
     }
+}
+
+fn handle_define_synth(
+    state: &mut ServerState,
+    arguments: Value,
+    id: Option<Value>,
+) -> JsonRpcResponse {
+    let patch: Patch = match serde_json::from_value(arguments) {
+        Ok(p) => p,
+        Err(e) => {
+            return JsonRpcResponse::error(
+                id,
+                INVALID_PARAMS,
+                format!("Failed to parse synth patch: {}", e),
+            );
+        }
+    };
+    if let Err(e) = patch.validate() {
+        return JsonRpcResponse::tool_error(
+            id,
+            format!("Invalid synth patch '{}': {}", patch.name, e),
+        );
+    }
+    let mut engines = Vec::new();
+    if patch.subtractive.as_ref().is_some_and(|s| s.level > 0.0) {
+        engines.push("subtractive");
+    }
+    if let Some(p) = patch.percussion.as_ref().filter(|p| p.level > 0.0) {
+        engines.push(p.kind.as_str());
+    }
+    let shadowed = PatchLibrary::new().get(&patch.name).is_some();
+    let mut details = format!(
+        "🎛️ Defined synth '{}': {} engine(s) [{}], {} effect(s){}",
+        patch.name,
+        engines.len(),
+        engines.join(", "),
+        patch.effects.iter().filter(|e| e.enabled).count(),
+        if shadowed {
+            " (shadows the built-in patch of the same name for this session)"
+        } else {
+            ""
+        }
+    );
+    if !patch.description.is_empty() {
+        details.push_str(&format!("\n{}", patch.description));
+    }
+    details.push_str(&format!(
+        "\n\nPlay it with play_notes, e.g. {{\"notes\": [{{\"synth\": \"{}\", \"note\": 48, \"duration\": 1}}]}}",
+        patch.name
+    ));
+    tracing::info!("Stored synth patch '{}'", patch.name);
+    state.synths.insert(patch.key(), patch);
+    JsonRpcResponse::tool_text(id, details)
 }
 
 /// Parameter-level validation shared by every tool that accepts notes.
@@ -761,6 +932,7 @@ fn start_playback(
     id: Option<Value>,
     summary: String,
 ) -> JsonRpcResponse {
+    let synths = state.synths.clone();
     let player = match state.player() {
         Ok(p) => p,
         Err(e) => {
@@ -768,8 +940,7 @@ fn start_playback(
             return JsonRpcResponse::tool_error(id, format!("Audio output unavailable: {}", e));
         }
     };
-    // TODO(Task 11): thread the session's defined patches through instead of an empty map.
-    match player.play(sequence, mode, &HashMap::new()) {
+    match player.play(sequence, mode, &synths) {
         Ok(duration) => {
             JsonRpcResponse::tool_text(id, playback_started_text(summary, duration, mode))
         }
@@ -973,13 +1144,36 @@ const R2D2_EMOTIONS: [(&str, &str); 9] = [
     ("Thoughtful", "deep slow pondering"),
 ];
 
-fn handle_list_sounds(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
+fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) -> JsonRpcResponse {
     let section = arguments
         .get("section")
         .and_then(Value::as_str)
         .unwrap_or("all");
     let want = |name: &str| section == "all" || section == name;
     let mut out = String::new();
+
+    if want("synths") {
+        let library = PatchLibrary::new();
+        out.push_str(&format!(
+            "# Synth patches ({} built-in) — use \"synth\": \"<name>\" on a note, or define_synth for your own\n",
+            library.count()
+        ));
+        for (category, patches) in library.catalog() {
+            out.push_str(&format!("\n## {} ({})\n", category.as_str(), patches.len()));
+            for patch in patches {
+                out.push_str(&format!("- {} — {}\n", patch.name, patch.description));
+            }
+        }
+        if !state.synths.is_empty() {
+            let mut mine: Vec<&Patch> = state.synths.values().collect();
+            mine.sort_by(|a, b| a.name.cmp(&b.name));
+            out.push_str(&format!("\n## defined this session ({})\n", mine.len()));
+            for patch in mine {
+                out.push_str(&format!("- {} — {}\n", patch.name, patch.description));
+            }
+        }
+        out.push_str("\nPercussion kinds for inline patches: kick, snare, hihat, cymbal, zap, swoosh, chime, burst.\n\n");
+    }
 
     if want("instruments") {
         use crate::midi::gm_names::{GM_FAMILIES, GM_INSTRUMENTS};
@@ -1002,7 +1196,7 @@ fn handle_list_sounds(arguments: Value, id: Option<Value>) -> JsonRpcResponse {
         for (key, name) in GM_DRUM_KEYS {
             out.push_str(&format!("- {}: {}\n", key, name));
         }
-        out.push('\n');
+        out.push_str("\nSynthesized drums are the tr_808_kick, tr_909_snare, tr_909_hihat, tr_808_hihat and crash_cymbal patches, or a percussion patch of your own.\n\n");
     }
 
     if want("r2d2") {
@@ -1109,4 +1303,102 @@ pub fn run_stdio_server() {
     }
 
     tracing::info!("MCP server shutting down");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn call(state: &mut ServerState, tool: &str, args: Value) -> JsonRpcResponse {
+        dispatch_tool(
+            state,
+            ToolCallParams {
+                name: tool.to_string(),
+                arguments: args,
+            },
+            Some(json!(1)),
+        )
+    }
+
+    fn text(r: &JsonRpcResponse) -> String {
+        r.result.as_ref().unwrap()["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn define_synth_stores_a_validated_patch_and_echoes_usage() {
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "Blip", "subtractive": {"osc1": {"wave": "square"}}}),
+        );
+        assert!(r.error.is_none(), "{:?}", r.error);
+        let t = text(&r);
+        assert!(
+            t.contains("Blip") && t.contains("\"synth\": \"Blip\""),
+            "{t}"
+        );
+        assert!(state.synths.contains_key("blip"));
+    }
+
+    #[test]
+    fn define_synth_rejects_unknown_fields_as_invalid_params_and_ranges_as_tool_errors() {
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "x", "subtractive": {"cutoff": 1}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(r.error.as_ref().unwrap().message.contains("cutoff"));
+
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "x", "subtractive": {"filter": {"cutoff": 1}}}),
+        );
+        assert!(r.error.is_none());
+        assert_eq!(r.result.as_ref().unwrap()["isError"], true);
+        assert!(text(&r).contains("subtractive.filter.cutoff"));
+        assert!(state.synths.is_empty());
+    }
+
+    #[test]
+    fn list_sounds_synths_section_names_builtins_and_session_patches() {
+        let mut state = ServerState::new();
+        call(
+            &mut state,
+            "define_synth",
+            json!({"name": "mine", "percussion": {"kind": "snare"}}),
+        );
+        let r = handle_list_sounds(&state, json!({"section": "synths"}), Some(json!(1)));
+        let t = text(&r);
+        assert!(
+            t.contains("minimoog_bass") && t.contains("tr_808_kick") && t.contains("mine"),
+            "{t}"
+        );
+        assert!(!t.contains("Acoustic Grand Piano"));
+    }
+
+    #[test]
+    fn tools_list_has_seven_tools_and_the_note_schema_has_synth() {
+        let r = handle_tools_list(Some(json!(1)));
+        let tools = r.result.unwrap()["tools"].clone();
+        assert_eq!(tools.as_array().unwrap().len(), 7);
+        let names: Vec<&str> = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"define_synth"));
+        let schema = note_schema();
+        assert!(schema["properties"]["synth"].is_object());
+        assert!(schema["properties"].get("synth_type").is_none());
+        assert!(schema["properties"].get("preset_name").is_none());
+    }
 }

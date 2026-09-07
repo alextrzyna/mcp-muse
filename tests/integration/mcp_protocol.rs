@@ -106,7 +106,7 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 7);
 
     // Check that all tools are present
     let tool_names: Vec<&str> = tools
@@ -147,7 +147,7 @@ fn test_mcp_tools_list() {
         play_notes_tool["description"]
             .as_str()
             .unwrap()
-            .contains("synthesis")
+            .contains("synth patches")
     );
 
     // Verify structure of both tools
