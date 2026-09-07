@@ -821,8 +821,9 @@ fn handle_define_synth(
         }
     };
     if let Err(e) = patch.validate() {
-        return JsonRpcResponse::tool_error(
+        return JsonRpcResponse::error(
             id,
+            INVALID_PARAMS,
             format!("Invalid synth patch '{}': {}", patch.name, e),
         );
     }
@@ -1346,7 +1347,7 @@ mod tests {
     }
 
     #[test]
-    fn define_synth_rejects_unknown_fields_as_invalid_params_and_ranges_as_tool_errors() {
+    fn define_synth_rejects_unknown_fields_and_out_of_range_values_as_invalid_params() {
         let mut state = ServerState::new();
         let r = call(
             &mut state,
@@ -1355,15 +1356,21 @@ mod tests {
         );
         assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
         assert!(r.error.as_ref().unwrap().message.contains("cutoff"));
+        assert!(state.synths.is_empty());
 
         let r = call(
             &mut state,
             "define_synth",
             json!({"name": "x", "subtractive": {"filter": {"cutoff": 1}}}),
         );
-        assert!(r.error.is_none());
-        assert_eq!(r.result.as_ref().unwrap()["isError"], true);
-        assert!(text(&r).contains("subtractive.filter.cutoff"));
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(
+            r.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("subtractive.filter.cutoff")
+        );
         assert!(state.synths.is_empty());
     }
 

@@ -908,21 +908,25 @@ fn initialize_reports_crate_version() {
 }
 
 #[test]
-fn unknown_preset_is_a_tool_error_not_a_piano() {
+fn unknown_synth_is_a_tool_error_not_a_piano() {
     let mut server = TestServer::start();
     let response = server.call(json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": {"name": "play_notes", "arguments": {"notes": [
-            {"preset_name": "Definitely Not A Preset", "note": 60, "start_time": 0.0, "duration": 0.2}
+            {"synth": "definitely_not_a_patch", "note": 60, "start_time": 0.0, "duration": 0.2}
         ]}}
     }));
+    // An unknown synth *name* is an execution failure (it depends on session
+    // state, not the request's shape), so it must never be a JSON-RPC error
+    // — only a malformed inline patch value is -32602.
+    assert!(response["error"].is_null(), "response: {response}");
     let result = &response["result"];
-    // Either the audio device is unavailable (CI) or the preset is rejected;
+    // Either the audio device is unavailable (CI) or the synth is rejected;
     // both must surface as isError rather than a protocol error.
     assert_eq!(result["isError"], true, "response: {response}");
     let text = result["content"][0]["text"].as_str().unwrap();
     assert!(
-        text.contains("Definitely Not A Preset") || text.contains("Audio output unavailable"),
+        text.contains("definitely_not_a_patch") || text.contains("Audio output unavailable"),
         "unexpected text: {text}"
     );
 }
@@ -947,23 +951,23 @@ fn list_sounds_catalog_names_everything() {
     }));
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
     for needle in [
-        "Minimoog Bass",
-        "TR-808 Kick",
+        "minimoog_bass",
+        "tr_808_kick",
         "Acoustic Grand Piano",
         "Closed Hi-Hat",
         "Happy",
         "studio",
-        "dx7fm",
+        "define_synth",
     ] {
         assert!(text.contains(needle), "catalog missing {needle}");
     }
 
     let response = server.call(json!({
         "jsonrpc": "2.0", "id": 5, "method": "tools/call",
-        "params": {"name": "list_sounds", "arguments": {"section": "r2d2"}}
+        "params": {"name": "list_sounds", "arguments": {"section": "synths"}}
     }));
     let text = response["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("Thoughtful") && !text.contains("Minimoog"));
+    assert!(text.contains("sub_bass") && !text.contains("Acoustic Grand Piano"));
 }
 
 #[test]
@@ -991,7 +995,7 @@ fn custom_effects_chains_are_accepted_in_both_forms() {
     let flat = server.call(json!({
         "jsonrpc": "2.0", "id": 10, "method": "tools/call",
         "params": {"name": "play_notes", "arguments": {"notes": [{
-            "synth_type": "sawtooth", "note": 48, "start_time": 0.0, "duration": 0.3,
+            "synth": "saw_bass", "note": 48, "start_time": 0.0, "duration": 0.3,
             "effects": [
                 {"type": "filter", "filter_type": "low_pass", "cutoff": 900, "resonance": 2.0, "intensity": 0.8},
                 {"type": "delay", "delay_time": 0.25, "feedback": 0.3, "intensity": 0.5},
@@ -1081,7 +1085,7 @@ fn play_mode_is_in_both_schemas_and_validated() {
 #[test]
 fn consecutive_plays_layer_or_replace_and_stop_reports_the_count() {
     let mut server = TestServer::start();
-    let note = json!([{"synth_type": "sine", "synth_frequency": 440, "duration": 3.0}]);
+    let note = json!([{"synth": "sub_bass", "note": 36, "duration": 3.0}]);
     let first = server.call(json!({
         "jsonrpc": "2.0", "id": 32, "method": "tools/call",
         "params": {"name": "play_notes", "arguments": {"notes": note.clone()}}
@@ -1121,4 +1125,100 @@ fn consecutive_plays_layer_or_replace_and_stop_reports_the_count() {
         text.contains("Stopped 1"),
         "replace should have dropped the earlier count: {text}"
     );
+}
+
+#[test]
+fn define_synth_then_play_by_name() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": {"name": "define_synth", "arguments": {
+            "name": "blip", "subtractive": {"osc1": {"wave": "square"}, "env": {"release": 0.05}}}}
+    }));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("blip") && r["result"]["isError"] != true,
+        "{text}"
+    );
+
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": "blip", "note": 84, "start_time": 0.0, "duration": 0.1}]}}
+    }));
+    // Either playback started, or the CI box has no audio device; never a parse error.
+    assert!(r["error"].is_null(), "{r}");
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("Playback started") || text.contains("Audio output unavailable"),
+        "{text}"
+    );
+}
+
+#[test]
+fn inline_synth_patches_are_accepted_and_invalid_ones_are_invalid_params() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": {"name": "k", "percussion": {"kind": "kick", "punch": 0.9}}, "start_time": 0.0, "duration": 0.3}]}}
+    }));
+    assert!(r["error"].is_null(), "{r}");
+
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 13, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": {"name": "k", "percussion": {"kind": "kick", "snap": 0.9}}, "start_time": 0.0, "duration": 0.3}]}}
+    }));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    assert!(r["error"]["message"].as_str().unwrap().contains("snap"));
+}
+
+#[test]
+fn removed_synth_fields_are_invalid_params() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 14, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth_type": "sine", "synth_frequency": 440, "duration": 0.2}]}}
+    }));
+    assert_eq!(r["error"]["code"], -32602);
+    // serde_json's default map is a BTreeMap, so of the two removed fields on
+    // this note the alphabetically-first one is the one reported.
+    assert!(
+        r["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("synth_frequency"),
+        "{r}"
+    );
+}
+
+#[test]
+fn define_synth_with_an_unknown_field_is_invalid_params() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 15, "method": "tools/call",
+        "params": {"name": "define_synth", "arguments": {"name": "x", "subtractive": {"cutoff": 500}}}
+    }));
+    assert_eq!(r["error"]["code"], -32602);
+    assert!(r["error"]["message"].as_str().unwrap().contains("cutoff"));
+}
+
+#[test]
+fn patterns_can_carry_synth_patches() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 16, "method": "tools/call",
+        "params": {"name": "define_sequence_pattern", "arguments": {
+            "name": "kick4", "pattern_bars": 1, "notes": [
+                {"synth": "tr_808_kick", "musical_time": {"bar": 1, "beat": 1, "tick": 0}, "musical_duration": "quarter"},
+                {"synth": "tr_808_kick", "musical_time": {"bar": 1, "beat": 3, "tick": 0}, "musical_duration": "quarter"}]}}
+    }));
+    assert!(r["error"].is_null(), "{r}");
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 17, "method": "tools/call",
+        "params": {"name": "play_sequence", "arguments": {"patterns": [{"pattern_name": "kick4", "start_bar": 1, "repeat_count": 2}]}}
+    }));
+    assert!(r["error"].is_null(), "{r}");
 }
