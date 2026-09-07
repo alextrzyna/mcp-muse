@@ -299,6 +299,20 @@ fn patch_schema() -> Value {
 /// JSON schema for one note, shared by play_notes, define_sequence_pattern
 /// and play_sequence so the three tools cannot drift apart.
 fn note_schema() -> Value {
+    // Effects on a note drive the MIDI bus chain or the R2D2 buffer; a synth
+    // note renders through its patch's own chain, so both fields are rejected
+    // there rather than silently dropped.
+    let note_effects = {
+        let mut schema = effects_schema();
+        let base = schema["description"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        schema["description"] = json!(format!(
+            "{base} Applies to MIDI and R2D2 notes only; a synth note takes its effects from its patch's \"effects\" chain (define_synth or an inline patch)."
+        ));
+        schema
+    };
     json!({
         "type": "object",
         "properties": {
@@ -431,7 +445,7 @@ fn note_schema() -> Value {
                 "type": "string",
                 "description": "💭 R2D2 context: Optional conversation context for enhanced expression adaptation"
             },
-            "effects": effects_schema(),
+            "effects": note_effects,
             "synth": {
                 "description": "🎛️ Synth patch for this note: the name of a built-in or define_synth patch, or an inline patch object. Pitch comes from `note`; percussion patches ignore it.",
                 "oneOf": [
@@ -441,7 +455,7 @@ fn note_schema() -> Value {
             },
             "effects_preset": {
                 "type": "string",
-                "description": "🎭 EFFECTS PRESET: Apply curated effect combinations. Choose from professional presets: 'studio' (clean + subtle reverb), 'concert_hall' (spacious reverb), 'vintage' (analog warmth), 'ambient' (lush atmospheric), 'live_stage' (punchy compression), 'tight_mix' (controlled dynamics), 'dreamy' (soft ethereal), 'spacious' (wide reverb), 'analog_warmth' (tube character), 'retro_echo' (tape delay), 'psychedelic' (wild modulation), 'distorted' (aggressive), 'filtered' (prominent filtering), 'lush_chorus' (rich modulation). Effects presets provide instant professional sound character!",
+                "description": "🎭 EFFECTS PRESET: Apply curated effect combinations to MIDI and R2D2 notes (a synth note takes its effects from its patch's \"effects\" chain instead). Choose from professional presets: 'studio' (clean + subtle reverb), 'concert_hall' (spacious reverb), 'vintage' (analog warmth), 'ambient' (lush atmospheric), 'live_stage' (punchy compression), 'tight_mix' (controlled dynamics), 'dreamy' (soft ethereal), 'spacious' (wide reverb), 'analog_warmth' (tube character), 'retro_echo' (tape delay), 'psychedelic' (wild modulation), 'distorted' (aggressive), 'filtered' (prominent filtering), 'lush_chorus' (rich modulation). Effects presets provide instant professional sound character!",
                 "enum": ["studio", "concert_hall", "vintage", "ambient", "live_stage", "tight_mix", "dreamy", "spacious", "analog_warmth", "retro_echo", "psychedelic", "distorted", "filtered", "lush_chorus"]
             }
         },
@@ -1392,6 +1406,19 @@ mod tests {
             "{t}"
         );
         assert!(!t.contains("Acoustic Grand Piano"));
+    }
+
+    #[test]
+    fn the_synth_r2d2_conflict_is_reported_before_a_missing_r2d2_field() {
+        let note: SimpleNote = serde_json::from_value(json!({
+            "synth": "sub_bass", "note_type": "r2d2", "start_time": 0.0, "duration": 0.2
+        }))
+        .unwrap();
+        let err = validate_notes(&[note]).unwrap_err();
+        assert!(
+            err.contains("both note_type \"r2d2\" and synth"),
+            "the synth/R2D2 conflict should win over the missing emotion: {err}"
+        );
     }
 
     #[test]

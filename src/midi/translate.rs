@@ -911,8 +911,11 @@ mod tests {
     }
 
     #[test]
-    fn effects_on_synthesis_notes_never_reach_the_midi_bus() {
-        let t = Translator::new(Ok(()))
+    fn effects_on_synthesis_notes_are_rejected_and_never_reach_the_midi_bus() {
+        // A patch renders through its own chain, so a note-level chain would
+        // be dropped: the translator refuses it instead of leaking it onto
+        // the shared MIDI bus.
+        let err = Translator::new(Ok(()))
             .translate(
                 seq(vec![
                     SimpleNote {
@@ -920,6 +923,23 @@ mod tests {
                         effects: Some(vec![reverb()]),
                         ..patch_note(json!("sub_bass"), 36, 0.0, 0.2)
                     },
+                    SimpleNote {
+                        note: Some(60),
+                        duration: Some(0.2),
+                        ..Default::default()
+                    },
+                ]),
+                PlayMode::Replace,
+                &no_session(),
+            )
+            .unwrap_err();
+        assert!(err.contains("patch's \"effects\" chain"), "{err}");
+
+        // Without them the bus stays dry: the patch's audio is pre-rendered.
+        let t = Translator::new(Ok(()))
+            .translate(
+                seq(vec![
+                    patch_note(json!("sub_bass"), 36, 0.0, 0.2),
                     SimpleNote {
                         note: Some(60),
                         duration: Some(0.2),

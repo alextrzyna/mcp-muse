@@ -991,11 +991,12 @@ fn musical_duration_number_means_bars_and_time_signature_is_honoured() {
 #[test]
 fn custom_effects_chains_are_accepted_in_both_forms() {
     let mut server = TestServer::start();
-    // Flat form, as documented in the schema.
+    // Flat form, as documented in the schema. Note-level effects belong to
+    // MIDI and R2D2 notes; a synth note takes its chain from its patch.
     let flat = server.call(json!({
         "jsonrpc": "2.0", "id": 10, "method": "tools/call",
         "params": {"name": "play_notes", "arguments": {"notes": [{
-            "synth": "saw_bass", "note": 48, "start_time": 0.0, "duration": 0.3,
+            "instrument": 38, "note": 48, "start_time": 0.0, "duration": 0.3,
             "effects": [
                 {"type": "filter", "filter_type": "low_pass", "cutoff": 900, "resonance": 2.0, "intensity": 0.8},
                 {"type": "delay", "delay_time": 0.25, "feedback": 0.3, "intensity": 0.5},
@@ -1172,6 +1173,35 @@ fn inline_synth_patches_are_accepted_and_invalid_ones_are_invalid_params() {
     }));
     assert_eq!(r["error"]["code"], -32602, "{r}");
     assert!(r["error"]["message"].as_str().unwrap().contains("snap"));
+}
+
+#[test]
+fn effects_on_synth_notes_are_invalid_params() {
+    let mut server = TestServer::start();
+    for (id, extra) in [
+        (
+            23,
+            json!({"effects": [{"type": "reverb", "intensity": 0.4}]}),
+        ),
+        (24, json!({"effects_preset": "studio"})),
+    ] {
+        let mut note = json!({"synth": "saw_bass", "note": 48, "start_time": 0.0, "duration": 0.3});
+        for (k, v) in extra.as_object().unwrap() {
+            note[k] = v.clone();
+        }
+        let r = server.call(json!({
+            "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": "play_notes", "arguments": {"notes": [note]}}
+        }));
+        assert_eq!(r["error"]["code"], -32602, "{r}");
+        assert!(
+            r["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("patch's \"effects\" chain"),
+            "{r}"
+        );
+    }
 }
 
 #[test]

@@ -1273,6 +1273,12 @@ impl SimpleNote {
             Some(_) if self.note_type == "r2d2" => {
                 Err("a note cannot have both note_type \"r2d2\" and synth".to_string())
             }
+            // A patch renders through its own chain, so a note-level chain
+            // would be silently dropped; say so instead.
+            Some(_) if self.effects.is_some() || self.effects_preset.is_some() => Err(
+                "effects on a synth note belong in the patch's \"effects\" chain (define_synth, or an inline patch); remove effects/effects_preset from the note"
+                    .to_string(),
+            ),
             Some(crate::expressive::SynthRef::Inline(p)) => p.validate(),
             Some(crate::expressive::SynthRef::Name(n)) if n.trim().is_empty() => {
                 Err("synth name must not be empty".to_string())
@@ -1552,6 +1558,40 @@ mod tests {
             ..Default::default()
         };
         assert!(ok.validate_timing().is_ok());
+    }
+
+    #[test]
+    fn effects_on_a_synth_note_are_rejected() {
+        let synth: crate::expressive::SynthRef = serde_json::from_value(json!("sub_bass")).unwrap();
+        let with_chain = SimpleNote {
+            synth: Some(synth.clone()),
+            effects: Some(vec![serde_json::from_str(r#"{"type": "reverb"}"#).unwrap()]),
+            ..Default::default()
+        };
+        let err = with_chain.validate_synth().unwrap_err();
+        assert!(
+            err.contains("effects") && err.contains("define_synth"),
+            "{err}"
+        );
+
+        let with_preset = SimpleNote {
+            synth: Some(synth.clone()),
+            effects_preset: Some("studio".into()),
+            ..Default::default()
+        };
+        assert!(with_preset.validate_synth().is_err());
+
+        // MIDI and R2D2 notes keep both fields.
+        let midi = SimpleNote {
+            effects_preset: Some("studio".into()),
+            ..Default::default()
+        };
+        assert!(midi.validate_synth().is_ok());
+        let plain_synth = SimpleNote {
+            synth: Some(synth),
+            ..Default::default()
+        };
+        assert!(plain_synth.validate_synth().is_ok());
     }
 
     #[test]
