@@ -7,6 +7,7 @@ pub mod patch;
 pub mod percussion;
 pub mod presets;
 pub mod r2d2;
+pub mod render;
 pub mod synth;
 
 #[cfg(test)]
@@ -22,4 +23,6 @@ pub use oscillator::*;
 pub use patch::*;
 pub use presets::*;
 pub use r2d2::*;
+#[allow(unused_imports)]
+pub use render::*;
 pub use synth::*;

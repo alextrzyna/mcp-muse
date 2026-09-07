@@ -528,9 +528,7 @@ impl Oscillator {
     }
 }
 
-/// Extra silence rendered through the effects chain so reverb/delay tails
-/// are not cut off at the note boundary.
-const EFFECT_TAIL_SECONDS: f32 = 1.0;
+use crate::expressive::render::EFFECT_TAIL_SECONDS;
 
 impl ExpressiveSynth {
     pub const SAMPLE_RATE: f32 = 44100.0;
