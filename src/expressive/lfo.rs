@@ -1,8 +1,5 @@
 //! Low-frequency oscillator: a -1..1 control signal in one of five shapes,
 //! advanced once per sample and mapped onto a `Modulation` by the renderer.
-// Not yet wired into the renderer (that's the next PR task), so this whole
-// module is dead code from `cargo build`'s point of view for now.
-#![allow(dead_code)]
 
 use crate::expressive::LfoWave;
 use rand::RngExt;

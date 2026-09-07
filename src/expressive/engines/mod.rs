@@ -46,8 +46,6 @@ impl Modulation {
     /// Map an LFO sample (`value` in -1..1) at `depth` onto `target` with the
     /// spec's ranges: cutoff ±2 octaves, pitch ±2 semitones, amplitude down to
     /// silence, morph ±0.5, grain density 0.5x..2x.
-    // Not called by the renderer until the next PR task wires the LFO in.
-    #[allow(dead_code)]
     pub fn from_lfo(target: LfoTarget, depth: f32, value: f32) -> Self {
         let d = depth.clamp(0.0, 1.0);
         let v = value.clamp(-1.0, 1.0);

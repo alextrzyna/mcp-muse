@@ -3,6 +3,7 @@
   "description": "Slow detuned saw pad with a filter sweep",
   "category": "pad",
   "level": 0.7,
+  "lfo": {"rate": 0.3, "depth": 0.2, "wave": "sine", "target": "cutoff"},
   "subtractive": {
     "osc1": {"wave": "saw"},
     "osc2": {"wave": "saw", "mix": 0.4, "detune_cents": 12, "octave": 0},
