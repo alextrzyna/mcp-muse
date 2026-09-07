@@ -1,0 +1,15 @@
+{
+  "name": "fm_bell",
+  "description": "Glassy FM bell: a 3.5-ratio modulator that decays quickly over a long carrier tail",
+  "category": "keys",
+  "level": 0.7,
+  "fm": {
+    "algorithm": "stack",
+    "feedback": 0.1,
+    "operators": [
+      {"ratio": 1.0, "level": 1.0, "env": {"attack": 0.002, "decay": 1.5, "sustain": 0.2, "release": 2.5}},
+      {"ratio": 3.5, "level": 0.55, "env": {"attack": 0.001, "decay": 0.6, "sustain": 0.0, "release": 0.5}}
+    ]
+  },
+  "effects": [{"type": "reverb", "room_size": 0.7, "dampening": 0.4, "wet_level": 0.5, "intensity": 0.35}]
+}

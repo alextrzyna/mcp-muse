@@ -192,6 +192,9 @@ mod tests {
                 "sorted by name"
             );
         }
+        assert!(lib.get("dx7_e_piano").is_some());
+        assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
+        assert!(lib.count() >= 35);
     }
 
     #[test]
@@ -972,6 +975,11 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/sweep_up.json"),
     include_str!("patches/chime.json"),
     include_str!("patches/burst.json"),
+    // fm
+    include_str!("patches/dx7_e_piano.json"),
+    include_str!("patches/dx7_slap_bass.json"),
+    include_str!("patches/tx81z_lately.json"),
+    include_str!("patches/fm_bell.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.
