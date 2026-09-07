@@ -1,5 +1,6 @@
 pub mod effects;
 pub mod effects_presets;
+pub mod engines;
 pub mod envelope;
 pub mod oscillator;
 pub mod patch;
