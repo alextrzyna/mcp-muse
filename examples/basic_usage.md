@@ -64,32 +64,62 @@ Timing in bars and beats at 100 BPM. Channel 9 is the GM drum kit
 }
 ```
 
-## Example 5: Classic Synth Preset
+## Example 5: Built-in Synth Patch
 
-Call `list_sounds` (section `presets`) to see every name. Presets bring
-their own effects unless you pass `effects` yourself.
+Call `list_sounds` (section `synths`) to see every name. A patch carries
+its own effects chain, so a note that names one must not also set
+`effects` or `effects_preset`.
 
 ```json
 {
   "notes": [
-    {"preset_name": "Minimoog Bass", "note": 36, "velocity": 110, "start_time": 0.0, "duration": 0.5},
-    {"preset_name": "Minimoog Bass", "note": 43, "velocity": 100, "start_time": 0.5, "duration": 0.5},
-    {"preset_name": "JP-8 Strings", "note": 64, "start_time": 0.0, "duration": 3.0},
-    {"preset_name": "JP-8 Strings", "note": 67, "start_time": 0.0, "duration": 3.0}
+    {"synth": "minimoog_bass", "note": 36, "velocity": 110, "start_time": 0.0, "duration": 0.5},
+    {"synth": "minimoog_bass", "note": 43, "velocity": 100, "start_time": 0.5, "duration": 0.5},
+    {"synth": "jp_8_strings", "note": 64, "start_time": 0.0, "duration": 3.0},
+    {"synth": "jp_8_strings", "note": 67, "start_time": 0.0, "duration": 3.0}
   ]
 }
 ```
 
-## Example 6: R2D2 Reaction plus Synthesis Effect
+## Example 6: Define Your Own Patch
+
+`define_synth` stores a patch for the rest of the session; notes then
+reference it by name.
+
+```json
+{"name": "gritty_bass", "category": "bass",
+ "subtractive": {
+   "osc1": {"wave": "saw"},
+   "osc2": {"wave": "square", "mix": 0.3, "detune_cents": 7},
+   "filter": {"type": "low_pass", "cutoff": 600, "resonance": 0.5, "slope": 24,
+              "env_amount": 0.7, "env": {"attack": 0.005, "decay": 0.2, "sustain": 0.1, "release": 0.2}},
+   "env": {"attack": 0.005, "decay": 0.3, "sustain": 0.6, "release": 0.15}},
+ "effects": [{"type": "distortion", "drive": 3, "intensity": 0.4}]}
+```
+
+```json
+{
+  "notes": [
+    {"synth": "gritty_bass", "note": 36, "start_time": 0.0, "duration": 0.5},
+    {"synth": "gritty_bass", "note": 39, "start_time": 0.5, "duration": 0.5}
+  ]
+}
+```
+
+## Example 7: R2D2 Reaction plus an Inline Patch
+
+A patch object passed straight on the note works for one-off sounds.
 
 ```json
 {
   "notes": [
     {"note_type": "r2d2", "r2d2_emotion": "Excited", "r2d2_intensity": 0.8, "r2d2_complexity": 3, "start_time": 0.0, "duration": 1.2},
-    {"synth_type": "zap", "synth_frequency": 900, "start_time": 1.2, "duration": 0.4}
+    {"synth": {"name": "blaster", "percussion": {"kind": "zap", "frequency": 900, "decay": 0.3}}, "start_time": 1.2, "duration": 0.4}
   ]
 }
 ```
+
+The built-in `sci_fi_zap` patch does the same thing without the object.
 
 ## Stopping and Timing
 
@@ -131,7 +161,7 @@ run including effect tails. Call `stop_playback` to cut it short.
 3. Look at the newest `mcp-muse.log.*` file (see `api_reference.md` for locations)
 
 ### Tool result says isError
-The text explains why: usually a preset or pattern name that does not
+The text explains why: usually a synth patch or pattern name that does not
 exist. `list_sounds` and `list_patterns` show the valid names.
 
 ## Sequence Patterns Examples

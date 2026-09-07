@@ -1,0 +1,11 @@
+{
+  "name": "crash_cymbal",
+  "description": "Bright crash cymbal with complex harmonic content (Acoustic Drum Kits)",
+  "category": "drums",
+  "level": 0.7,
+  "percussion": {"kind": "cymbal", "frequency": 3000, "size": 0.7, "metallic": 0.9, "strike_intensity": 0.8},
+  "effects": [
+    {"type": "filter", "filter_type": "high_pass", "cutoff": 8000, "resonance": 0.1, "intensity": 1.0},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.3}
+  ]
+}

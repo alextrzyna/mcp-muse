@@ -1,0 +1,17 @@
+{
+  "name": "rubber_bass",
+  "description": "Elastic bass character with bouncy, rubber-like feel (Creative Sound Design)",
+  "category": "bass",
+  "level": 0.8,
+  "subtractive": {
+    "osc1": {"wave": "saw"},
+    "filter": {"type": "low_pass", "cutoff": 600, "resonance": 0.7},
+    "env": {"attack": 0.08, "decay": 0.4, "sustain": 0.5, "release": 0.6}
+  },
+  "effects": [
+    {"type": "chorus", "rate": 1.2, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.7, "intensity": 0.4},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.18},
+    {"type": "compressor", "threshold": -14.0, "ratio": 4.0, "attack": 0.001, "release": 0.03, "intensity": 0.6},
+    {"type": "filter", "filter_type": "high_pass", "cutoff": 80.0, "resonance": 0.3, "envelope_amount": 0.0, "intensity": 0.4}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "tb_303_acid_squelchy",
+  "description": "TB-303 Acid with maximum resonance for acid house character (Roland TB-303 Bassline)",
+  "category": "bass",
+  "level": 0.75,
+  "subtractive": {
+    "osc1": {"wave": "square", "pulse_width": 0.5},
+    "filter": {"type": "low_pass", "cutoff": 600, "resonance": 0.9},
+    "env": {"attack": 0.005, "decay": 0.2, "sustain": 0.4, "release": 0.3}
+  },
+  "effects": [
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.1},
+    {"type": "filter", "filter_type": "low_pass", "cutoff": 800.0, "resonance": 2.0, "envelope_amount": 0.5, "intensity": 0.6},
+    {"type": "delay", "delay_time": 0.125, "feedback": 0.2, "wet_level": 0.15, "sync_tempo": true, "intensity": 0.3}
+  ]
+}

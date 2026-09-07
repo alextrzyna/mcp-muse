@@ -1,0 +1,10 @@
+{
+  "name": "sci_fi_zap",
+  "description": "Classic science fiction energy zap sound (Classic Sci-Fi Films)",
+  "category": "fx",
+  "level": 0.8,
+  "percussion": {"kind": "zap", "frequency": 800, "energy": 0.8, "decay": 0.6, "harmonic_content": 0.7},
+  "effects": [
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.2}
+  ]
+}

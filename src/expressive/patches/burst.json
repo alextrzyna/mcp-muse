@@ -1,0 +1,7 @@
+{
+  "name": "burst",
+  "description": "Short shaped noise burst centered on a frequency, useful as a percussive accent or riser hit",
+  "category": "fx",
+  "level": 0.8,
+  "percussion": {"kind": "burst", "frequency": 1000, "bandwidth": 500, "intensity": 0.8, "shape": 0.5}
+}

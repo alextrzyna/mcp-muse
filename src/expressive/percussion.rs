@@ -5,95 +5,83 @@
 //! Every swept oscillator accumulates phase; `sin(2π·f(t)·t)` would shift the
 //! perceived pitch by `t·f'(t)` and make descending sweeps bounce back up.
 
-use crate::expressive::synth::{PhaseAccumulator, SynthType};
+use crate::expressive::oscillator::PhaseAccumulator;
+use crate::expressive::{Percussion, PercussionKind};
 use rand::{Rng, RngExt};
 use std::f32::consts::TAU;
 
-/// Render `sample_count` samples of a percussive type at unit amplitude.
-/// Returns `None` for non-percussive types.
-pub fn render(
-    sample_rate: f32,
-    synth_type: &SynthType,
-    frequency: f32,
-    sample_count: usize,
-) -> Option<Vec<f32>> {
-    let out = match synth_type {
-        SynthType::Kick {
-            punch,
-            sustain,
-            click_freq,
-            body_freq,
-        } => kick(
+/// Render one percussive hit of `sample_count` samples. Every kind carries its
+/// own envelope; the caller only applies `level`.
+pub fn render(sample_rate: f32, p: &Percussion, sample_count: usize) -> Vec<f32> {
+    let freq = p.frequency.unwrap_or(p.kind.default_frequency());
+    match p.kind {
+        PercussionKind::Kick => kick(
             sample_rate,
-            *punch,
-            *sustain,
-            *click_freq,
-            *body_freq,
+            p.punch.unwrap_or(0.8),
+            p.sustain.unwrap_or(0.3),
+            p.click_freq.unwrap_or(8000.0),
+            freq,
             sample_count,
         ),
-        SynthType::Snare {
-            snap,
-            buzz,
-            tone_freq,
-            noise_amount,
-        } => snare(
+        PercussionKind::Snare => snare(
             sample_rate,
-            *snap,
-            *buzz,
-            *tone_freq,
-            *noise_amount,
+            p.snap.unwrap_or(0.7),
+            p.buzz.unwrap_or(0.6),
+            freq,
+            p.noise_amount.unwrap_or(0.8),
             sample_count,
         ),
-        SynthType::HiHat {
-            metallic,
-            decay,
-            brightness,
-        } => hihat(
+        PercussionKind::Hihat => hihat(
             sample_rate,
-            *metallic,
-            *decay,
-            *brightness,
-            frequency,
+            p.metallic.unwrap_or(0.8),
+            p.decay.unwrap_or(0.15),
+            p.brightness.unwrap_or(0.9),
+            freq,
             sample_count,
         ),
-        SynthType::Cymbal {
-            size,
-            metallic,
-            strike_intensity,
-        } => cymbal(
+        PercussionKind::Cymbal => cymbal(
             sample_rate,
-            *size,
-            *metallic,
-            *strike_intensity,
-            frequency,
+            p.size.unwrap_or(0.7),
+            p.metallic.unwrap_or(0.9),
+            p.strike_intensity.unwrap_or(0.8),
+            freq,
             sample_count,
         ),
-        SynthType::Zap {
-            energy,
-            decay,
-            harmonic_content,
-        } => zap(
+        PercussionKind::Zap => zap(
             sample_rate,
-            frequency,
-            *energy,
-            *decay,
-            *harmonic_content,
+            freq,
+            p.energy.unwrap_or(0.8),
+            p.decay.unwrap_or(0.3),
+            p.harmonic_content.unwrap_or(0.7),
             sample_count,
         ),
-        SynthType::Swoosh {
-            direction,
-            intensity,
-            frequency_sweep,
-        } => swoosh(
+        PercussionKind::Swoosh => {
+            let [start, end] = p.sweep.unwrap_or([200.0, 2000.0]);
+            swoosh(
+                sample_rate,
+                p.direction.unwrap_or(0.0),
+                p.intensity.unwrap_or(0.7),
+                (start, end),
+                sample_count,
+            )
+        }
+        PercussionKind::Chime => chime(
             sample_rate,
-            *direction,
-            *intensity,
-            *frequency_sweep,
+            freq,
+            p.harmonic_count.unwrap_or(5),
+            p.decay.unwrap_or(0.5),
+            p.inharmonicity.unwrap_or(0.1),
             sample_count,
         ),
-        _ => return None,
-    };
-    Some(out)
+        PercussionKind::Burst => burst(
+            sample_rate,
+            freq,
+            p.bandwidth.unwrap_or(500.0),
+            p.intensity.unwrap_or(0.8),
+            p.shape.unwrap_or(0.5),
+            sample_count,
+        ),
+    }
 }
 
 fn noise(rng: &mut impl Rng) -> f32 {
@@ -244,7 +232,9 @@ fn zap(
     let mut rng = rand::rng();
     let mut base = PhaseAccumulator::new(sample_rate);
     let duration = n as f32 / sample_rate;
-    let env_rate = 8.0 + decay * 12.0;
+    // `decay` is a time, as it is for hihat and chime: larger rings longer.
+    // 11.6 * 0.3 keeps the default 0.3 s zap at its original rate of 11.6.
+    let env_rate = 11.6 * 0.3 / decay.max(0.01);
 
     (0..n)
         .map(|i| {
@@ -300,4 +290,185 @@ fn swoosh(
             lp2 * env * 2.0
         })
         .collect()
+}
+
+/// Sum of decaying inharmonic partials, like a struck bell or bar.
+fn chime(
+    sample_rate: f32,
+    fundamental: f32,
+    harmonic_count: u8,
+    decay: f32,
+    inharmonicity: f32,
+    sample_count: usize,
+) -> Vec<f32> {
+    let count = harmonic_count.max(1) as usize;
+    let norm = 1.0 / (count as f32).sqrt();
+    (0..sample_count)
+        .map(|i| {
+            let t = i as f32 / sample_rate;
+            let mut out = 0.0;
+            for n in 1..=count {
+                let partial =
+                    fundamental * n as f32 * (1.0 + inharmonicity * (n as f32 - 1.0) * 0.01);
+                let env = (-t * (1.0 / decay.max(0.01)) * (1.0 + n as f32 * 0.1)).exp();
+                out += (TAU * partial * t).sin() * env / n as f32;
+            }
+            out * norm
+        })
+        .collect()
+}
+
+/// Noise centered on `center_freq` with a shaped decay envelope.
+fn burst(
+    sample_rate: f32,
+    center_freq: f32,
+    bandwidth: f32,
+    intensity: f32,
+    shape: f32,
+    sample_count: usize,
+) -> Vec<f32> {
+    let mut rng = rand::rng();
+    let mut tone = PhaseAccumulator::new(sample_rate);
+    let mut lp = 0.0f32;
+    let alpha = (TAU * (center_freq + bandwidth) / sample_rate).min(0.99);
+    let duration = (sample_count as f32 / sample_rate).max(0.1);
+    (0..sample_count)
+        .map(|i| {
+            let progress = i as f32 / sample_rate / duration;
+            let env = if shape < 0.5 {
+                (-progress * 8.0).exp()
+            } else {
+                (-(progress * 3.0).powi(2)).exp()
+            };
+            lp += alpha * (noise(&mut rng) - lp);
+            (lp * 1.5 + tone.next(center_freq) * 0.3) * env * intensity
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expressive::PercussionKind;
+    use crate::expressive::test_util::{goertzel_power, rms, zero_crossing_rate};
+
+    const SR: f32 = 44100.0;
+
+    fn cfg(kind: PercussionKind) -> Percussion {
+        Percussion {
+            kind,
+            level: 1.0,
+            frequency: None,
+            punch: None,
+            sustain: None,
+            click_freq: None,
+            snap: None,
+            buzz: None,
+            noise_amount: None,
+            metallic: None,
+            decay: None,
+            brightness: None,
+            size: None,
+            strike_intensity: None,
+            energy: None,
+            harmonic_content: None,
+            direction: None,
+            intensity: None,
+            sweep: None,
+            harmonic_count: None,
+            inharmonicity: None,
+            bandwidth: None,
+            shape: None,
+        }
+    }
+
+    #[test]
+    fn every_kind_renders_finite_bounded_audio() {
+        for kind in [
+            PercussionKind::Kick,
+            PercussionKind::Snare,
+            PercussionKind::Hihat,
+            PercussionKind::Cymbal,
+            PercussionKind::Zap,
+            PercussionKind::Swoosh,
+            PercussionKind::Chime,
+            PercussionKind::Burst,
+        ] {
+            let s = render(SR, &cfg(kind), (0.5 * SR) as usize);
+            assert_eq!(s.len(), (0.5 * SR) as usize);
+            // Zap sums three incommensurate partials plus a noise burst, so
+            // constructive interference can push its peak toward ~1.8 even
+            // though every other kind stays under 1.4; 2.0 still catches a
+            // genuine runaway (NaN/blow-up) while tolerating that legitimate
+            // peak.
+            assert!(
+                s.iter().all(|x| x.is_finite() && x.abs() <= 2.0),
+                "{kind:?}"
+            );
+            assert!(rms(&s) > 0.01, "{kind:?} is silent");
+        }
+    }
+
+    #[test]
+    fn kick_pitch_sweeps_downward() {
+        let s = render(SR, &cfg(PercussionKind::Kick), (0.5 * SR) as usize);
+        let early = zero_crossing_rate(&s[..2205], SR);
+        let late = zero_crossing_rate(&s[8820..13230], SR);
+        assert!(early > late * 1.3, "early {early} vs late {late}");
+    }
+
+    #[test]
+    fn frequency_moves_the_kick_body() {
+        let mut low = cfg(PercussionKind::Kick);
+        low.frequency = Some(45.0);
+        let mut high = cfg(PercussionKind::Kick);
+        high.frequency = Some(90.0);
+        let l = render(SR, &low, (0.5 * SR) as usize);
+        let h = render(SR, &high, (0.5 * SR) as usize);
+        assert!(zero_crossing_rate(&h[4410..], SR) > zero_crossing_rate(&l[4410..], SR) * 1.5);
+    }
+
+    #[test]
+    fn chime_has_a_partial_at_its_fundamental_that_decays() {
+        let mut c = cfg(PercussionKind::Chime);
+        c.frequency = Some(880.0);
+        let s = render(SR, &c, SR as usize);
+        let early = goertzel_power(&s[..8820], 880.0, SR);
+        let late = goertzel_power(&s[35280..], 880.0, SR);
+        assert!(
+            early > goertzel_power(&s[..8820], 1100.0, SR) * 10.0,
+            "fundamental present"
+        );
+        assert!(early > late * 4.0, "decays: {early} vs {late}");
+    }
+
+    #[test]
+    fn longer_zap_decay_rings_longer() {
+        // `decay` is a time for hihat and chime; zap reads it the same way.
+        let n = (0.5 * SR) as usize;
+        let tail = (0.6 * n as f32) as usize;
+        let render_with = |decay: f32| {
+            let mut c = cfg(PercussionKind::Zap);
+            c.decay = Some(decay);
+            render(SR, &c, n)
+        };
+        let short = render_with(0.1);
+        let long = render_with(1.0);
+        assert!(
+            rms(&long[tail..]) > rms(&short[tail..]),
+            "decay 1.0 tail {} should exceed decay 0.1 tail {}",
+            rms(&long[tail..]),
+            rms(&short[tail..])
+        );
+    }
+
+    #[test]
+    fn swoosh_sweeps_between_its_endpoints() {
+        let mut up = cfg(PercussionKind::Swoosh);
+        up.sweep = Some([200.0, 4000.0]);
+        let s = render(SR, &up, SR as usize);
+        let early = zero_crossing_rate(&s[..4410], SR);
+        let late = zero_crossing_rate(&s[39690..], SR);
+        assert!(late > early * 2.0, "rises: {early} -> {late}");
+    }
 }

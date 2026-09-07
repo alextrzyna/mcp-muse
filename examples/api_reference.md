@@ -5,9 +5,9 @@ Technical documentation for the `mcp-muse` MCP server.
 ## Overview
 
 `mcp-muse` implements the Model Context Protocol over stdio using JSON-RPC
-2.0. It exposes six tools that let an AI agent play General MIDI music,
-R2D2-style expressions, classic synthesizer presets and custom synthesis
-through the local audio device.
+2.0. It exposes seven tools that let an AI agent play General MIDI music,
+R2D2-style expressions and agent-defined synth patches through the local
+audio device.
 
 ## MCP Protocol Compliance
 
@@ -15,7 +15,7 @@ through the local audio device.
 |--------|-------------|
 | `initialize` | Handshake; returns capabilities and the crate version |
 | `ping` | Returns `{}` |
-| `tools/list` | Lists the six tools with JSON schemas |
+| `tools/list` | Lists the seven tools with JSON schemas |
 | `tools/call` | Executes a tool |
 | `resources/list` | Empty list |
 | `prompts/list` | Empty list |
@@ -30,16 +30,17 @@ through the local audio device.
 |-----------|----------|
 | Unparseable JSON | JSON-RPC error `-32700`, `"id": null` |
 | Unknown method or tool | JSON-RPC error `-32601` |
-| Arguments fail to parse or validate (empty notes, out-of-range value, unknown effects preset) | JSON-RPC error `-32602` |
-| The tool ran but failed (unknown preset name, pattern not defined, no audio device) | Normal result with `"isError": true` and a text explanation |
+| Arguments fail to parse or validate (empty notes, out-of-range value, unknown field, unknown effects preset, `duration`/`start_time` over 300 s, `effects` on a synth note) | JSON-RPC error `-32602` |
+| The tool ran but failed (unknown synth name, pattern not defined, no audio device) | Normal result with `"isError": true` and a text explanation |
 
 ## Tools
 
 ### play_notes
 
 Play a sequence of notes immediately. Each note can be a MIDI instrument
-note, an R2D2 expression, a custom synthesis sound or a classic preset;
-they may be mixed freely in one array. Returns as soon as playback starts.
+note, an R2D2 expression or a synth patch (built-in, defined with
+`define_synth`, or inline); they may be mixed freely in one array.
+Returns as soon as playback starts.
 
 Top-level arguments:
 
@@ -56,9 +57,10 @@ Note fields (all optional unless noted):
 | Timing | `start_time` + `duration` (seconds) **or** `musical_time` `{bar, beat, tick}` + `musical_duration` (number = bars, or `"whole"`, `"half"`, `"quarter"`, `"eighth"`, `"sixteenth"`, `"triplet"`) |
 | MIDI | `note` (0-127), `velocity`, `channel` (9 = drums), `instrument` (GM program), `reverb`, `chorus`, `volume`, `pan`, `balance`, `expression`, `sustain` (all 0-127) |
 | R2D2 | `note_type: "r2d2"`, `r2d2_emotion` (required), `r2d2_intensity` 0-1 (required), `r2d2_complexity` 1-5 (required), `r2d2_pitch_range` `[min_hz, max_hz]` |
-| Synthesis | `synth_type` (see `list_sounds`), `synth_frequency`, `synth_amplitude`, `synth_attack/decay/sustain/release`, `synth_filter_type/cutoff/resonance`, `synth_reverb/chorus/delay/delay_time`, `synth_pulse_width`, `synth_modulator_freq`, `synth_modulation_index`, `synth_grain_size`, `synth_texture_roughness` |
-| Presets | `preset_name`, `preset_category` (`bass`, `pad`, `lead`, `keys`, `drums`, `effects`), `preset_variation`, `preset_random` |
-| Effects | `effects` (array of `{type, ...params, intensity, enabled}`), `effects_preset` (name) |
+| Synth | `synth`: a patch name (`"minimoog_bass"`, `"tr_808_kick"`, ... — see `list_sounds` section `synths`) or an inline patch object with the same shape as `define_synth`. Pitch comes from `note`; percussion patches ignore it |
+| Effects | `effects` (array of `{type, ...params, intensity, enabled}`), `effects_preset` (name). MIDI and R2D2 notes only — a synth note takes its effects from its patch's own `effects` chain |
+
+`start_time` and `duration` are capped at 300 seconds each.
 
 Success text includes the total playback time, effect tails included:
 
@@ -96,11 +98,36 @@ undefined pattern name is an `isError` result listing the defined patterns.
 
 Lists the patterns defined in this session grouped by category.
 
+### define_synth
+
+Store a synth patch for this server session. Arguments: `name` (required),
+`description`, `category` (`bass`, `pad`, `lead`, `keys`, `drums`, `fx`),
+`level` (0-1), `subtractive` and/or `percussion` (at least one engine), and
+`effects` (the chain every note of the patch shares).
+
+```json
+{
+  "name": "gritty_bass", "category": "bass",
+  "subtractive": {
+    "osc1": {"wave": "saw"},
+    "osc2": {"wave": "square", "mix": 0.3, "detune_cents": 7},
+    "filter": {"type": "low_pass", "cutoff": 600, "resonance": 0.5, "slope": 24,
+               "env_amount": 0.7, "env": {"attack": 0.005, "decay": 0.2, "sustain": 0.1, "release": 0.2}},
+    "env": {"attack": 0.005, "decay": 0.3, "sustain": 0.6, "release": 0.15}
+  },
+  "effects": [{"type": "distortion", "drive": 3, "intensity": 0.4}]
+}
+```
+
+Notes then use `{"synth": "gritty_bass", "note": 36, "duration": 0.5}`.
+Defining the same name again replaces the stored patch. An unknown field or
+an out-of-range value is `-32602` and names the field.
+
 ### list_sounds
 
-Returns a text catalog. Optional `section`: `all` (default), `presets`,
-`instruments`, `drums`, `synthesis`, `r2d2`, `effects`. Use it before
-guessing a preset or instrument name.
+Returns a text catalog. Optional `section`: `all` (default), `synths`,
+`instruments`, `drums`, `r2d2`, `effects`. Use it before guessing a synth
+patch or instrument name.
 
 ### stop_playback
 
@@ -128,8 +155,8 @@ Stops every active playback and reports how many were stopped.
 mcp-muse                 # start the MCP server (default)
 mcp-muse server          # same, explicit
 mcp-muse setup           # interactive setup: SoundFont download, Cursor config
-mcp-muse test-presets    # listen-by-ear demos: test-drums, test-pads,
-                         # test-volumes, test-effects, debug-dx7
+mcp-muse test-synths     # listen-by-ear demos: test-synths, test-drums,
+                         # test-effects
 ```
 
 ### Setup

@@ -1,6 +1,7 @@
 //! Owns the audio output for the process and the one `MidiEngine` running on
 //! it. Tool calls translate sequences into engine commands; playback state
 //! lives on the audio thread.
+use crate::expressive::Patch;
 use crate::midi::SimpleSequence;
 use crate::midi::engine::{
     EngineCommand, EngineHandle, EngineSource, LEAD_FRAMES, MidiEngine, PlayMode, find_soundfont,
@@ -8,6 +9,7 @@ use crate::midi::engine::{
 };
 use crate::midi::translate::{Translation, Translator};
 use rodio::OutputStream;
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub struct MidiPlayer {
@@ -46,10 +48,16 @@ impl MidiPlayer {
 
     /// Schedule a sequence. Returns the time until it finishes, including
     /// effect tails. `Replace` cuts whatever is playing first.
-    pub fn play(&mut self, sequence: SimpleSequence, mode: PlayMode) -> Result<Duration, String> {
+    pub fn play(
+        &mut self,
+        sequence: SimpleSequence,
+        mode: PlayMode,
+        session_patches: &HashMap<String, Patch>,
+    ) -> Result<Duration, String> {
         let now = self.engine.clock();
         self.playback_ends.retain(|&end| end > now);
-        let Translation { command, duration } = self.translator.translate(sequence, mode)?;
+        let Translation { command, duration } =
+            self.translator.translate(sequence, mode, session_patches)?;
         if command.events.is_empty() && command.buffers.is_empty() {
             tracing::warn!("Nothing to play");
             if mode == PlayMode::Layer {
@@ -129,7 +137,7 @@ mod level_tests {
         let (mut engine, _handle) =
             crate::midi::engine::tests::engine_with_soundfont().expect("caller checked");
         let translation = Translator::new(Ok(()))
-            .translate(seq, PlayMode::Replace)
+            .translate(seq, PlayMode::Replace, &HashMap::new())
             .unwrap();
         engine.apply(EngineCommand::Play(translation.command));
 
@@ -176,12 +184,12 @@ mod level_tests {
         }
     }
 
-    fn preset(name: &str, notes: &[u8]) -> SimpleSequence {
+    fn patch(name: &str, notes: &[u8]) -> SimpleSequence {
         SimpleSequence {
             notes: notes
                 .iter()
                 .map(|&n| SimpleNote {
-                    preset_name: Some(name.to_string()),
+                    synth: Some(crate::expressive::SynthRef::Name(name.to_string())),
                     note: Some(n),
                     velocity: Some(100),
                     duration: Some(1.4),
@@ -226,13 +234,13 @@ mod level_tests {
                 midi(&[(36, 110, 9, None), (38, 110, 9, None), (42, 110, 9, None)]),
                 1.0,
             ),
-            ("minimoog bass", preset("Minimoog Bass", &[36]), 0.6),
+            ("minimoog bass", patch("minimoog_bass", &[36]), 0.6),
             (
                 "jp8 strings chord",
-                preset("JP-8 Strings", &[60, 64, 67]),
+                patch("jp_8_strings", &[60, 64, 67]),
                 0.8,
             ),
-            ("tr808 kick", preset("TR-808 Kick", &[36]), 0.6),
+            ("tr808 kick", patch("tr_808_kick", &[36]), 0.6),
         ];
         for (name, seq, max_peak) in cases {
             let (peak, over) = measure(seq);
@@ -255,7 +263,7 @@ mod level_tests {
             return;
         }
         let (flute, _) = measure(midi(&[(76, 100, 0, Some(73))]));
-        let (bass, _) = measure(preset("Minimoog Bass", &[36]));
+        let (bass, _) = measure(patch("minimoog_bass", &[36]));
         assert!(flute > 0.15, "flute peak {flute} is too quiet");
         assert!(bass > 0.15, "bass peak {bass} is too quiet");
     }

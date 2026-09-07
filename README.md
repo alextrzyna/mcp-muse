@@ -50,12 +50,12 @@
 ### 🎵 **Universal Audio Capabilities (All Tested & Confirmed)**
 - **🎮 Authentic SNES Gaming Sounds** - 128 GM instruments with FluidR3_GM for classic 16-bit console tone
 - **🤖 R2D2 Expressive Emotions** - 9 distinct robotic vocalizations (Happy, Excited, Curious, Worried, etc.)
-- **🎹 Classic Synthesizer Presets** - 29 authentic vintage recreations (Minimoog Bass, TB-303 Acid, Jupiter Pads, TR-808 Drums, etc.)
-- **🎛️ Custom Synthesis Engine** - 20 synthesis types including FM, Granular, Professional Drums, Sound Effects
+- **🎹 Built-in Synth Patches** - vintage-style recreations across bass, pad, lead and drums (Minimoog Bass, TB-303 Acid, Jupiter Pads, TR-808 Drums, etc.)
+- **🎛️ Agent-Defined Synth Patches** - `define_synth` builds a subtractive or percussion patch with its own effects chain, or pass one inline on a note
 
 ### 🏆 **Comprehensive Audio Features**
 - **Mixed Mode Magic** - All 4 audio systems work together in perfect synchronization
-- **187+ Sound Options** - Massive audio vocabulary for every creative need
+- **Huge Sound Vocabulary** - 128 GM instruments, 9 R2D2 emotions and 31 built-in synth patches, plus any patch you define
 - **Real-Time Processing** - Instant musical reactions without conflicts or delays
 - **Professional Quality** - Research-driven algorithms for authentic sound reproduction
 
@@ -75,12 +75,12 @@
 
 - 🎮 **16-Bit SNES Sound**: Authentic retro gaming audio using FluidR3_GM SoundFont
 - 🤖 **R2D2 Expressions**: 9 distinct robotic emotions with ring modulation synthesis
-- 🎹 **Classic Synthesizer Presets**: 29 authentic vintage recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
-- 🎛️ **Custom Synthesis Engine**: 20 synthesis types (FM, DX7-style FM, Granular, drums, effects)
-- 🎭 **Universal Mixed Mode**: All 4 audio systems work together in perfect synchronization
-- 🏆 **185+ Sound Options**: Massive audio vocabulary (128 GM + 9 R2D2 + 29 Presets + 20 Synthesis)
+- 🎹 **Built-in Synth Patches**: vintage-style recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
+- 🎛️ **Agent-Defined Synth Patches**: `define_synth` stores a validated subtractive or percussion patch with its own effects chain; notes reference it by name via `synth`
+- 🎭 **Universal Mixed Mode**: All audio systems work together in perfect synchronization
+- 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 31 built-in synth patches + your own
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
-- 🔌 **Six Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `list_sounds`, `stop_playback`
+- 🔌 **Seven Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`
 - 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per note, stereo output
 - ⚙️ **Zero Setup**: Automatic SoundFont download and multi-engine configuration
 - 🧪 **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
@@ -191,11 +191,10 @@ The system has been thoroughly validated through a comprehensive 10-scenario tes
 **✅ All Audio Systems Confirmed Working:**
 - **MIDI Instruments** - Piano, Trumpet, Flute sequences
 - **R2D2 Expressions** - Happy, Excited, Curious emotions  
-- **Classic Presets** - Minimoog Bass, TB-303 Acid, Jupiter Pads
-- **Custom Synthesis** - FM, Granular, Zap Effects, Professional Drums
+- **Built-in Synth Patches** - Minimoog Bass, TB-303 Acid, Jupiter Pads
+- **Agent-Defined Synth Patches** - custom subtractive and percussion patches, Zap Effects, Professional Drums
 - **Mixed Combinations** - All systems working together in perfect sync
-- **Preset Variations** - Dynamic parameter modifications
-- **Random Selection** - AI-driven preset discovery
+- **Inline Patches** - one-off synth patches passed directly on a note
 - **Professional Quality** - Authentic vintage sound reproductions
 
 ## 🎮 Classic SNES Gaming Examples
@@ -245,91 +244,66 @@ The system has been thoroughly validated through a comprehensive 10-scenario tes
 
 **Perfect for**: Major accomplishments, completing difficult tasks, celebrating victories
 
-## 🎹 **NEW: Classic Synthesizer Preset Examples**
+## 🎛️ Synth Patches (agent-defined instruments)
 
-### 🎵 Authentic Minimoog Bass (Vintage Recreation)
+Every synthesized sound is a **patch**: a JSON object with one or more engines, envelopes and an effects chain. Use a built-in patch by name, define your own once with `define_synth`, or pass a patch inline on a note. All notes of a patch in one call share its effects, so reverb and delay tails are real.
+
+### Built-in patch by name
 ```json
-{
-  "notes": [
-    {"preset_name": "Minimoog Bass", "note": 36, "velocity": 120, "start_time": 0, "duration": 1},
-    {"preset_name": "Minimoog Bass", "note": 36, "velocity": 100, "start_time": 1.5, "duration": 1},
-    {"preset_name": "Minimoog Bass", "note": 38, "velocity": 110, "start_time": 3, "duration": 1}
-  ]
-}
+{"notes": [
+  {"synth": "minimoog_bass", "note": 36, "velocity": 120, "start_time": 0, "duration": 1},
+  {"synth": "minimoog_bass", "note": 43, "velocity": 100, "start_time": 1, "duration": 1},
+  {"synth": "tr_808_kick", "start_time": 0, "duration": 0.5},
+  {"synth": "tr_909_snare", "start_time": 0.5, "duration": 0.3}
+]}
 ```
+Call `list_sounds` with `{"section": "synths"}` for the full list (bass, pad, lead, drums, fx).
 
-### 🏭 TB-303 Acid Bass (Classic House/Techno)
+### Define your own
 ```json
-{
-  "notes": [
-    {"preset_name": "TB-303 Acid", "preset_variation": "squelchy", "note": 43, "velocity": 120, "start_time": 0, "duration": 0.5},
-    {"preset_name": "TB-303 Acid", "note": 40, "velocity": 100, "start_time": 0.5, "duration": 0.5},
-    {"preset_name": "TB-303 Acid", "note": 43, "velocity": 110, "start_time": 1, "duration": 1}
-  ]
-}
+{"name": "rubber_bass", "category": "bass",
+ "subtractive": {
+   "osc1": {"wave": "saw"},
+   "osc2": {"wave": "square", "mix": 0.3, "detune_cents": 6},
+   "filter": {"type": "low_pass", "cutoff": 500, "resonance": 0.4, "slope": 24,
+              "env_amount": 0.7, "env": {"attack": 0.005, "decay": 0.25, "sustain": 0.1, "release": 0.2}},
+   "env": {"attack": 0.005, "decay": 0.3, "sustain": 0.6, "release": 0.15}},
+ "effects": [{"type": "distortion", "drive": 3, "intensity": 0.4},
+             {"type": "compressor", "threshold": -18, "ratio": 4, "intensity": 1}]}
 ```
+Then `{"notes": [{"synth": "rubber_bass", "note": 36, "duration": 0.5}]}`.
 
-### 🌌 Jupiter-8 Lush Pads (Atmospheric)
-```json
-{
-  "notes": [
-    {"preset_name": "JP-8 Strings", "note": 60, "velocity": 80, "start_time": 0, "duration": 4},
-    {"preset_name": "JP-8 Strings", "note": 64, "velocity": 80, "start_time": 0, "duration": 4},
-    {"preset_name": "JP-8 Strings", "note": 67, "velocity": 80, "start_time": 0, "duration": 4}
-  ]
-}
-```
+### Engines
+- **subtractive**: `osc1`/`osc2` (`sine|saw|square|triangle|noise`, `pulse_width`, osc2 `mix`, `detune_cents`, `octave`), `filter` (`low_pass|high_pass|band_pass`, `cutoff`, `resonance` 0-1, `slope` 12|24, `env_amount` -1..1 with its own `env`), amplitude `env`.
+- **percussion**: `kind` `kick|snare|hihat|cymbal|zap|swoosh|chime|burst` with that kind's parameters (`punch`, `snap`, `metallic`, `sweep`, ...) and a `frequency`. Ignores the note's pitch.
+- **effects**: ordered chain of `reverb`, `delay`, `chorus`, `filter`, `compressor`, `distortion`, each with an `intensity` 0-1. A synth note takes its effects from here, so `effects`/`effects_preset` on the note itself is rejected.
 
-### 🥁 Professional TR-808/909 Drums (Classic Drum Machines)
-```json
-{
-  "notes": [
-    {"preset_name": "TR-808 Kick", "note": 36, "velocity": 127, "start_time": 0, "duration": 0.5},
-    {"preset_name": "TR-909 Snare", "note": 38, "velocity": 110, "start_time": 0.5, "duration": 0.3},
-    {"preset_name": "TR-808 Kick", "note": 36, "velocity": 100, "start_time": 1, "duration": 0.5}
-  ]
-}
-```
+### Migrating from presets and `synth_*` fields
 
-## 🎛️ **NEW: Custom Synthesis Examples**
+The `preset_*` and `synth_*` note fields are gone; every synthesized sound
+is now a patch behind the single `synth` field. Removed fields fail with
+`-32602` naming the field, so nothing is silently ignored.
 
-### ⚡ Sci-Fi Zap Effect (Sound Design)
-```json
-{
-  "notes": [
-    {"synth_type": "zap", "synth_frequency": 800, "synth_energy": 0.9, "start_time": 0, "duration": 0.3}
-  ]
-}
-```
+| Before | Now |
+|--------|-----|
+| `{"preset_name": "Minimoog Bass"}` | `{"synth": "minimoog_bass"}` |
+| `{"synth_type": "kick", "synth_frequency": 60}` | `{"synth": "tr_808_kick"}`, or `{"synth": {"name": "kick", "percussion": {"kind": "kick", "frequency": 60}}}` |
+| `{"synth_type": "sawtooth", "synth_attack": 0.01, "synth_decay": 0.2, "synth_sustain": 0.6, "synth_release": 0.3, "synth_cutoff": 800}` | `{"synth": {"name": "saw_lead", "subtractive": {"osc1": {"wave": "saw"}, "filter": {"type": "low_pass", "cutoff": 800}, "env": {"attack": 0.01, "decay": 0.2, "sustain": 0.6, "release": 0.3}}}}` |
 
-### 🎵 Professional FM Bass (Electronic Music)
-```json
-{
-  "notes": [
-    {"synth_type": "fm", "synth_frequency": 110, "synth_modulator_freq": 220, "synth_modulation_index": 2, "start_time": 0, "duration": 2}
-  ]
-}
-```
-
-### 🥁 Custom Kick Drum (Synthesis-Based)
-```json
-{
-  "notes": [
-    {"synth_type": "kick", "synth_frequency": 60, "synth_punch": 0.8, "synth_sustain": 0.3, "start_time": 0, "duration": 1}
-  ]
-}
-```
+Preset names map to the built-in patch of the same name in snake_case
+(`"TB-303 Acid"` → `tb_303_acid`, `"JP-8 Strings"` → `jp_8_strings`); call
+`list_sounds` with `{"section": "synths"}` for the current list.
 
 ## 🎭 **Universal Mixed Mode Examples (All Systems Together)**
 
-### 🏆 Ultimate Victory Celebration (MIDI + R2D2 + Presets + Synthesis)
+### 🏆 Ultimate Victory Celebration (MIDI + R2D2 + Synth Patches)
 ```json
 {
   "notes": [
-    {"preset_name": "JP-8 Strings", "note": 60, "velocity": 70, "start_time": 0, "duration": 4},
+    {"synth": "jp_8_strings", "note": 60, "velocity": 70, "start_time": 0, "duration": 4},
     {"note": 72, "velocity": 100, "start_time": 1, "duration": 1, "instrument": 56, "reverb": 60},
     {"note_type": "r2d2", "r2d2_emotion": "Excited", "r2d2_intensity": 0.9, "start_time": 2.5, "duration": 1},
-    {"synth_type": "chime", "synth_frequency": 880, "start_time": 3.5, "duration": 0.5}
+    {"synth": "chime", "start_time": 3.5, "duration": 0.5}
   ]
 }
 ```
@@ -419,7 +393,7 @@ The system has been thoroughly validated through a comprehensive 10-scenario tes
 - **`chorus`**: 0=clean retro, 60=lush SNES sound, 100=dreamy (MIDI CC 93)
 
 ### **Professional Audio Effects System** 🎛️
-The system includes a comprehensive effects processor with per-channel processing and intelligent limiting:
+The system includes a comprehensive effects processor. Effects are stateful and run per note for synth and R2D2 sounds, and per bus for MIDI:
 
 #### **Available Effects**
 - **Reverb**: Professional Schroeder algorithm with room size, dampening, wet level, and pre-delay
@@ -452,17 +426,15 @@ The system includes a comprehensive effects processor with per-channel processin
 ```
 
 #### **Effects Presets**
-Use `effects_preset` for quick professional-quality effects:
-- `"concert_hall"` - Large space reverb
-- `"small_room"` - Intimate ambience
-- `"cathedral"` - Epic reverb with long decay
-- `"studio"` - Clean, controlled sound
-- `"vintage_analog"` - Warm tape-style effects
+Use `effects_preset` on a MIDI or R2D2 note for quick professional-quality
+effects. The 14 names (also listed by `list_sounds` section `effects`) are:
+`studio`, `concert_hall`, `live_stage`, `tight_mix`, `ambient`, `dreamy`,
+`spacious`, `vintage`, `analog_warmth`, `retro_echo`, `psychedelic`,
+`distorted`, `filtered`, `lush_chorus`.
 
 #### **Important Effects Notes**
-- **Automatic Limiting**: Maximum 3 effects per channel to prevent signal destruction
-- **Gain Compensation**: Automatic 2x boost when effects cause excessive attenuation
-- **Per-Channel Processing**: Each audio type (MIDI, R2D2, synthesis) has independent effects
+- **Where effects live**: MIDI notes share one bus chain per call (the first MIDI note that specifies `effects` defines it); R2D2 notes render their own chain into their buffer; a synth note takes its chain from its patch, so `effects`/`effects_preset` on a synth note is rejected with `-32602`
+- **Stateful and per note**: no effect-count cap and no automatic gain compensation
 - **All effects use the unified `play_notes` tool** - no separate playback methods needed
 
 ## 🎮 Classic Gaming Instruments
@@ -479,29 +451,30 @@ Use `effects_preset` for quick professional-quality effects:
 
 ## Technical Architecture ✅ **All Systems Tested & Operational**
 
-### **Universal Quad-Engine Audio System**
+### **Universal Audio Engine**
 - **🎮 OxiSynth Engine**: Pure Rust SoundFont synthesis for authentic SNES gaming sounds (✅ **Tested**)
 - **🤖 ExpressiveSynth Engine**: Ring modulation synthesis for R2D2-style vocalizations (✅ **Tested**)  
-- **🎹 Classic Preset Engine**: 29 authentic vintage synthesizer recreations (✅ **Tested**)
-- **🎛️ Custom Synthesis Engine**: 20 synthesis types with band-limited oscillators, a state-variable filter and DX7 operator routing (✅ **Tested**)
+- **🎹 Built-in Synth Patches**: vintage-style synthesizer recreations, embedded as JSON and loaded by `PatchLibrary` (✅ **Tested**)
+- **🎛️ Agent-Defined Synth Patches**: subtractive and percussion engines with band-limited oscillators, a state-variable filter and a stateful effects chain, rendered by `render_patch` (✅ **Tested**)
 - **🔄 MidiEngine**: One long-lived stereo mixer with stateful effects chains and a soft clipper (✅ **Tested**)
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
-- **185+ Sound Options**: 128 GM instruments + 9 R2D2 emotions + 29 vintage presets + 20 synthesis types
+- **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 31 built-in synth patches, plus unlimited agent-defined patches
 - **Mixed Mode Magic**: All audio systems work together in perfect synchronization  
 - **Professional Quality**: Research-driven algorithms for authentic sound reproduction
 - **Real-Time Performance**: Zero latency issues, instant musical reactions
 - **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
 
 ### **Tools**
-- **`play_notes`**: Universal JSON interface supporting all 4 audio systems in single sequences
+- **`play_notes`**: Universal JSON interface supporting all audio systems in single sequences
 - **`define_sequence_pattern` / `play_sequence` / `list_patterns`**: reusable bar-based patterns with transposition, repeats and time signature
-- **`list_sounds`**: catalog of presets, GM instruments, drum keys, synthesis types, R2D2 emotions and effects
+- **`define_synth`**: store a validated synth patch for the session; notes reference it by name via `synth`
+- **`list_sounds`**: catalog of synth patches, GM instruments, drum keys, R2D2 emotions and effects
 - **`stop_playback`**: silence everything currently playing
 - Both play tools take `"mode": "replace"` (default: stop what is playing first) or `"mode": "layer"` (mix on top). One synthesizer serves the whole session, so overlapping calls do not multiply CPU or memory.
 
-Playback tools return immediately with the expected duration. Failures the agent can act on (unknown preset, missing pattern) come back as `isError` results.
+Playback tools return immediately with the expected duration. Failures the agent can act on (unknown synth or pattern name) come back as `isError` results.
 
 ### **Tool Schema**
 

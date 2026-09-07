@@ -1,0 +1,16 @@
+{
+  "name": "prophet_lead",
+  "description": "Classic Sequential Prophet-5 lead sound (Sequential Prophet-5)",
+  "category": "lead",
+  "level": 0.8,
+  "subtractive": {
+    "osc1": {"wave": "saw"},
+    "filter": {"type": "low_pass", "cutoff": 1200, "resonance": 0.5},
+    "env": {"attack": 0.05, "decay": 0.3, "sustain": 0.6, "release": 0.5}
+  },
+  "effects": [
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.25},
+    {"type": "delay", "delay_time": 0.25, "feedback": 0.3, "wet_level": 0.25, "sync_tempo": false, "intensity": 0.5},
+    {"type": "chorus", "rate": 1.5, "depth": 0.3, "feedback": 0.2, "stereo_width": 0.6, "intensity": 0.4}
+  ]
+}

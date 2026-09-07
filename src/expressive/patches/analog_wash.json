@@ -1,0 +1,18 @@
+{
+  "name": "analog_wash",
+  "description": "Atmospheric analog pad with flowing texture and movement (Analog Synthesizer Traditions)",
+  "category": "pad",
+  "level": 0.75,
+  "subtractive": {
+    "osc1": {"wave": "saw"},
+    "osc2": {"wave": "saw", "mix": 0.5, "detune_cents": 13, "octave": 0},
+    "filter": {"type": "low_pass", "cutoff": 1080, "resonance": 0.3, "slope": 24},
+    "env": {"attack": 1.2, "decay": 0.8, "sustain": 0.85, "release": 2.0}
+  },
+  "effects": [
+    {"type": "chorus", "rate": 1.2, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.7, "intensity": 0.4},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.6},
+    {"type": "reverb", "room_size": 0.7, "dampening": 0.3, "wet_level": 0.4, "pre_delay": 0.04, "intensity": 0.6},
+    {"type": "chorus", "rate": 0.8, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.8, "intensity": 0.5}
+  ]
+}

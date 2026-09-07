@@ -1,0 +1,16 @@
+{
+  "name": "sub_bass",
+  "description": "Deep fundamental bass for electronic music foundations (Modern Electronic Production)",
+  "category": "bass",
+  "level": 0.9,
+  "subtractive": {
+    "osc1": {"wave": "sine"},
+    "filter": {"type": "low_pass", "cutoff": 120, "resonance": 0.2},
+    "env": {"attack": 0.02, "decay": 0.1, "sustain": 0.9, "release": 0.8}
+  },
+  "effects": [
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.05},
+    {"type": "compressor", "threshold": -14.0, "ratio": 4.0, "attack": 0.001, "release": 0.03, "intensity": 0.6},
+    {"type": "filter", "filter_type": "high_pass", "cutoff": 80.0, "resonance": 0.3, "envelope_amount": 0.0, "intensity": 0.4}
+  ]
+}

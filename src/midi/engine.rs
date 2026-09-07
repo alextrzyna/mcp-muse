@@ -89,8 +89,8 @@ pub enum EventKind {
 pub struct PlayCommand {
     /// MIDI events in time order (stable: setup before note-on at equal offsets).
     pub events: Vec<(u64, EventKind)>,
-    /// Pre-rendered mono buffers (R2D2, synthesis) already at bus level.
-    pub buffers: Vec<(u64, Vec<f32>)>,
+    /// Pre-rendered stereo buffers (R2D2, synthesis) already at bus level.
+    pub buffers: Vec<(u64, Vec<[f32; 2]>)>,
     /// MIDI bus effects chain for this call, if any note specified one.
     pub midi_effects: Option<Vec<EffectConfig>>,
     pub mode: PlayMode,
@@ -209,7 +209,7 @@ impl Ord for ScheduledEvent {
 
 struct ScheduledBuffer {
     start: u64,
-    samples: Vec<f32>,
+    samples: Vec<[f32; 2]>,
     pos: usize,
 }
 
@@ -427,8 +427,8 @@ impl MidiEngine {
                 .zip(right[offset..offset + count].iter_mut())
                 .zip(samples)
             {
-                *l += *s;
-                *r += *s;
+                *l += s[0];
+                *r += s[1];
             }
             buffer.pos += count;
         }
@@ -581,7 +581,7 @@ pub(crate) mod tests {
         let (mut engine, handle) = MidiEngine::new(None);
         handle
             .send(EngineCommand::Play(PlayCommand {
-                buffers: vec![(0, vec![0.25; 10])],
+                buffers: vec![(0, vec![[0.25, 0.25]; 10])],
                 ..Default::default()
             }))
             .unwrap();
@@ -605,7 +605,7 @@ pub(crate) mod tests {
         let (mut engine, handle) = MidiEngine::new(None);
         handle
             .send(EngineCommand::Play(PlayCommand {
-                buffers: vec![(0, vec![0.5; SAMPLE_RATE as usize])],
+                buffers: vec![(0, vec![[0.5, 0.5]; SAMPLE_RATE as usize])],
                 ..Default::default()
             }))
             .unwrap();
@@ -658,7 +658,7 @@ pub(crate) mod tests {
         .unwrap()
     }
 
-    fn play(buffers: Vec<(u64, Vec<f32>)>, mode: PlayMode) -> EngineCommand {
+    fn play(buffers: Vec<(u64, Vec<[f32; 2]>)>, mode: PlayMode) -> EngineCommand {
         EngineCommand::Play(PlayCommand {
             buffers,
             mode,
@@ -669,21 +669,40 @@ pub(crate) mod tests {
     #[test]
     fn a_buffer_scheduled_at_t_is_mixed_from_t_on_both_sides() {
         let (mut engine, _handle) = MidiEngine::new(None);
-        engine.apply(play(vec![(10, vec![0.5; 1000])], PlayMode::Replace));
+        engine.apply(play(vec![(10, vec![[0.5, 0.5]; 1000])], PlayMode::Replace));
         let (left, right) = render_all(&mut engine, 4 * CHUNK_FRAMES);
         let start = LEAD_FRAMES as usize + 10;
         assert_eq!(left[start - 1], 0.0);
         assert_eq!(left[start], 0.5);
         assert_eq!(left[start + 999], 0.5);
         assert_eq!(left[start + 1000], 0.0);
-        assert_eq!(left, right, "mono buffers must be centered");
+        assert_eq!(right[start], 0.5, "both sides carry the buffer");
         assert!(engine.buffers.is_empty(), "exhausted buffers are dropped");
     }
 
     #[test]
+    fn stereo_buffers_keep_their_channels() {
+        let (mut engine, _h) = MidiEngine::new(None);
+        engine.apply(play(
+            vec![(0, vec![[0.25, -0.5]; CHUNK_FRAMES])],
+            PlayMode::Replace,
+        ));
+        let (mut l, mut r) = (vec![0.0; CHUNK_FRAMES], vec![0.0; CHUNK_FRAMES]);
+        // Skip the lead-in.
+        let mut rendered = 0;
+        while rendered < LEAD_FRAMES as usize {
+            engine.render_unclipped(&mut l, &mut r);
+            rendered += CHUNK_FRAMES;
+        }
+        engine.render_unclipped(&mut l, &mut r);
+        assert!(l.iter().any(|&x| (x - 0.25).abs() < 1e-6));
+        assert!(r.iter().any(|&x| (x + 0.5).abs() < 1e-6));
+    }
+
+    #[test]
     fn layer_keeps_the_current_buffer_and_replace_cuts_it() {
-        let a = vec![0.25f32; 3 * SAMPLE_RATE as usize];
-        let b = vec![0.5f32; 3 * SAMPLE_RATE as usize];
+        let a = vec![[0.25f32, 0.25]; 3 * SAMPLE_RATE as usize];
+        let b = vec![[0.5f32, 0.5]; 3 * SAMPLE_RATE as usize];
 
         let (mut engine, _handle) = MidiEngine::new(None);
         engine.apply(play(vec![(0, a.clone())], PlayMode::Replace));
@@ -717,7 +736,7 @@ pub(crate) mod tests {
     #[test]
     fn replace_and_stop_fade_within_one_chunk() {
         let (mut engine, _handle) = MidiEngine::new(None);
-        engine.apply(play(vec![(0, vec![0.5; 44_100])], PlayMode::Replace));
+        engine.apply(play(vec![(0, vec![[0.5, 0.5]; 44_100])], PlayMode::Replace));
         render_all(&mut engine, 4 * CHUNK_FRAMES);
         engine.apply(EngineCommand::Stop);
         let (left, _) = render_all(&mut engine, CHUNK_FRAMES);
@@ -920,7 +939,7 @@ pub(crate) mod tests {
     fn engine_source_is_stereo_interleaved_and_never_ends() {
         use rodio::Source;
         let (mut engine, _handle) = MidiEngine::new(None);
-        engine.apply(play(vec![(0, vec![0.5; 100])], PlayMode::Replace));
+        engine.apply(play(vec![(0, vec![[0.5, 0.5]; 100])], PlayMode::Replace));
         let mut source = EngineSource::new(engine);
         assert_eq!(source.channels(), 2);
         assert_eq!(source.sample_rate(), SAMPLE_RATE);

@@ -1,0 +1,17 @@
+{
+  "name": "crystal_pad",
+  "description": "Bright, crystalline pad with clean digital character (Modern Digital Synthesizers)",
+  "category": "pad",
+  "level": 0.75,
+  "subtractive": {
+    "osc1": {"wave": "triangle"},
+    "filter": {"type": "low_pass", "cutoff": 2000, "resonance": 0.1},
+    "env": {"attack": 0.6, "decay": 0.2, "sustain": 0.9, "release": 1.5}
+  },
+  "effects": [
+    {"type": "chorus", "rate": 1.2, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.7, "intensity": 0.3},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.5},
+    {"type": "reverb", "room_size": 0.7, "dampening": 0.3, "wet_level": 0.4, "pre_delay": 0.04, "intensity": 0.6},
+    {"type": "chorus", "rate": 0.8, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.8, "intensity": 0.5}
+  ]
+}

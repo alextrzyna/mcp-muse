@@ -1,0 +1,16 @@
+{
+  "name": "odyssey_bite",
+  "description": "Sharp, aggressive bass with cutting edge character (ARP Odyssey)",
+  "category": "bass",
+  "level": 0.85,
+  "subtractive": {
+    "osc1": {"wave": "saw"},
+    "filter": {"type": "low_pass", "cutoff": 900, "resonance": 0.7},
+    "env": {"attack": 0.005, "decay": 0.15, "sustain": 0.6, "release": 0.4}
+  },
+  "effects": [
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.08},
+    {"type": "distortion", "drive": 0.8, "tone": 0.3, "output_level": 0.95, "intensity": 0.2},
+    {"type": "compressor", "threshold": -20.0, "ratio": 2.5, "attack": 0.01, "release": 0.08, "intensity": 0.5}
+  ]
+}

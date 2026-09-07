@@ -1,0 +1,7 @@
+{
+  "name": "tr_909_hihat",
+  "description": "Sharp, metallic TR-909 hi-hat with crisp attack (Roland TR-909)",
+  "category": "drums",
+  "level": 0.6,
+  "percussion": {"kind": "hihat", "frequency": 20000, "metallic": 0.8, "decay": 0.1, "brightness": 1.0}
+}

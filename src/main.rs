@@ -133,26 +133,15 @@ pub enum Commands {
     /// Run setup for MCP hosts
     Setup,
 
-    /// Test preset functionality
-    #[command(name = "test-presets")]
-    TestPresets,
+    /// Play every built-in synth patch (listen-by-ear check)
+    #[command(name = "test-synths")]
+    TestSynths,
 
-    /// Test drum synthesis
+    /// Play the synthesized drum patches
     #[command(name = "test-drums")]
     TestDrums,
 
-    /// Debug DX7 synthesis issues
-    #[command(name = "debug-dx7")]
-    DebugDX7,
-
-    /// Test enhanced pad presets
-    #[command(name = "test-pads")]
-    TestPads,
-
-    /// Test volume-corrected presets
-    #[command(name = "test-volumes")]
-    TestVolumes,
-
+    /// Play a MIDI piano dry, then through effect chains
     #[command(name = "test-effects")]
     TestEffects,
 }
@@ -175,23 +164,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Setup) => {
             setup::run_setup();
         }
-        Some(Commands::TestPresets) => {
-            demos::test_preset_integration()?;
+        Some(Commands::TestSynths) => {
+            demos::test_synths()?;
         }
         Some(Commands::TestDrums) => {
-            demos::test_drum_synthesis()?;
-        }
-        Some(Commands::DebugDX7) => {
-            demos::test_dx7_debugging()?;
-        }
-        Some(Commands::TestPads) => {
-            demos::test_enhanced_pads()?;
-        }
-        Some(Commands::TestVolumes) => {
-            demos::test_volume_consistency()?;
+            demos::test_drums()?;
         }
         Some(Commands::TestEffects) => {
-            demos::test_effects_system()?;
+            demos::test_effects()?;
         }
         None => {
             // Default behavior: start the MCP server
