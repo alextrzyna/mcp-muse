@@ -222,8 +222,11 @@ impl Translator {
             // A negative start time would panic in `Duration`; treat it as 0.
             let start = Duration::from_secs_f64(note.start_time.unwrap_or(0.0).max(0.0));
             if let Some(reference) = note.synth.as_ref() {
-                note.validate_synth()?;
-                let patch = self.resolve_patch(reference, session_patches)?;
+                note.validate_synth()
+                    .map_err(|e| format!("Note {}: {}", i + 1, e))?;
+                let patch = self
+                    .resolve_patch(reference, session_patches)
+                    .map_err(|e| format!("Note {}: {}", i + 1, e))?;
                 let abs_start = note.start_time.unwrap_or(0.0).max(0.0);
                 let duration = note.duration.unwrap_or(1.0).max(0.0) as f32;
                 let velocity = note.velocity.unwrap_or(100) as f32 / 127.0;
@@ -1423,5 +1426,6 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("subtractive.filter.cutoff"), "{err}");
+        assert!(err.starts_with("Note 1:"), "{err}");
     }
 }
