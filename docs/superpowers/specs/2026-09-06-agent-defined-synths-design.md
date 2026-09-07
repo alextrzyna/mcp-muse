@@ -1,7 +1,7 @@
 # Agent-defined synths and effects
 
 Date: 2026-09-06
-Status: PR 1 (foundation) implemented; PRs 2-4 pending
+Status: PR 1 and PR 2 implemented; PRs 3-4 pending
 
 ## Goal
 
@@ -100,11 +100,16 @@ and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
   `detune_cents` -100 to 100, `env`. A modulator's `level` is its
   modulation depth; a carrier's `level` is its output gain.
 - `feedback` 0 to 1 on the last operator.
+- Missing operators (fewer than the algorithm routes) are silent.
+  Modulation depth is 4 radians at level 1 (`FM_MOD_DEPTH`). The FM engine
+  has no filter; use a `filter` entry in the patch's `effects`.
 
 **wavetable**
 - `table`: `basic | warm | bright | digital | vocal | pwm | organ | noise`
   (the eight procedural tables from tryx-fx).
 - `morph` 0 to 1 blends toward the next table in that order.
+- Band limiting: ten mip levels, one per octave from 27.5 Hz; a level
+  keeps partials below 20 kHz for every fundamental in its octave.
 
 **granular**
 - `source`: `harmonics | noise | formant | inharmonic`.

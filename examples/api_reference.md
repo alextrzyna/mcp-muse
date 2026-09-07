@@ -102,8 +102,15 @@ Lists the patterns defined in this session grouped by category.
 
 Store a synth patch for this server session. Arguments: `name` (required),
 `description`, `category` (`bass`, `pad`, `lead`, `keys`, `drums`, `fx`),
-`level` (0-1), `subtractive` and/or `percussion` (at least one engine), and
-`effects` (the chain every note of the patch shares).
+`level` (0-1), one or more engines, and `effects` (the chain every note of
+the patch shares):
+
+| Engine | Description |
+|--------|-------------|
+| `subtractive` | `osc1`/`osc2` (`sine\|saw\|square\|triangle\|noise`, `pulse_width`, osc2 `mix`, `detune_cents`, `octave`), `filter` (`low_pass\|high_pass\|band_pass`, `cutoff`, `resonance` 0-1, `slope` 12\|24, `env_amount` -1..1 with its own `env`), amplitude `env` |
+| `fm` | four operators (`ratio` 0.25-16, `level`, `detune_cents`, `env`) routed by `algorithm` `stack\|pairs\|fan_in\|parallel`, plus `feedback`. Operator 1 is always a carrier; a modulator's level is its depth |
+| `wavetable` | `table` `basic\|warm\|bright\|digital\|vocal\|pwm\|organ\|noise`, `morph` 0-1 toward the next table, `env`. Tables are band-limited per octave |
+| `percussion` | `kind` `kick\|snare\|hihat\|cymbal\|zap\|swoosh\|chime\|burst` with that kind's parameters (`punch`, `snap`, `metallic`, `sweep`, ...) and a `frequency`. Ignores the note's pitch |
 
 ```json
 {
