@@ -191,7 +191,9 @@ mod tests {
             return Vec::new();
         }
         let z: Vec<f32> = s[2205..]
-            .chunks_exact(2205)
+            .as_chunks::<2205>()
+            .0
+            .iter()
             .map(|w| crate::expressive::test_util::zero_crossing_rate(w, SR))
             .collect();
         assert!(!z.is_empty(), "buffer too short for a window");
