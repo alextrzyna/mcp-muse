@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::expressive::{FmAlgorithm, Patch, PatchLibrary, PercussionKind, TableName};
+use crate::expressive::{
+    FmAlgorithm, GrainSource, LfoTarget, LfoWave, Patch, PatchLibrary, PercussionKind, TableName,
+};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
 };
@@ -228,7 +230,7 @@ fn patch_schema() -> Value {
     let wave = json!({"type": "string", "enum": ["sine", "saw", "square", "triangle", "noise"], "default": "saw"});
     json!({
         "type": "object",
-        "description": "A synth patch. Include at least one engine (subtractive, fm, wavetable or percussion); several may layer.",
+        "description": "A synth patch. Include at least one engine (subtractive, fm, wavetable, granular or percussion); several may layer. An optional lfo modulates one target.",
         "properties": {
             "name": {"type": "string", "description": "Patch name; notes reference it with \"synth\": \"<name>\""},
             "description": {"type": "string"},
@@ -291,6 +293,22 @@ fn patch_schema() -> Value {
                 },
                 "additionalProperties": false
             },
+            "granular": {
+                "type": "object",
+                "description": "A cloud of short Hann-windowed grains read from a one-cycle source at the note's pitch; the first engine with true stereo. Long grains + low density = smooth; short grains + high density = dense texture.",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "source": {"type": "string", "enum": ["harmonics", "noise", "formant", "inharmonic"], "default": "harmonics",
+                        "description": "harmonics: warm; noise: pitched buzz; formant: vowel-like; inharmonic: bell-like"},
+                    "grain_ms": {"type": "number", "minimum": 5, "maximum": 500, "default": 50, "description": "Grain length in ms"},
+                    "density": {"type": "number", "minimum": 1, "maximum": 50, "default": 10, "description": "Grains started per second"},
+                    "pitch_semitones": {"type": "number", "minimum": -24, "maximum": 24, "default": 0},
+                    "randomness": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.2, "description": "Random grain start position; higher = more chaotic"},
+                    "stereo_width": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "Random stereo placement per grain"},
+                    "env": env("Amplitude")
+                },
+                "additionalProperties": false
+            },
             "percussion": {
                 "type": "object",
                 "description": "One-shot hit with its own envelope; ignores the note's pitch. Only the parameters of the chosen kind are allowed.",
@@ -320,6 +338,18 @@ fn patch_schema() -> Value {
                     "shape": {"type": "number", "minimum": 0, "maximum": 1, "description": "burst: 0 sharp, 1 smooth"}
                 },
                 "required": ["kind"],
+                "additionalProperties": false
+            },
+            "lfo": {
+                "type": "object",
+                "description": "One free-running LFO per patch routed to a single target. Depth 1 = cutoff ±2 octaves, pitch ±2 semitones, amplitude down to silence, morph ±0.5, grain density 0.5x-2x.",
+                "properties": {
+                    "rate": {"type": "number", "minimum": 0.1, "maximum": 20, "default": 1, "description": "Hz"},
+                    "depth": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                    "wave": {"type": "string", "enum": ["sine", "triangle", "saw", "square", "sample_hold"], "default": "sine"},
+                    "target": {"type": "string", "enum": ["off", "cutoff", "pitch", "amplitude", "morph", "grain_density"], "default": "off",
+                        "description": "cutoff: subtractive filter; pitch: every pitched engine (vibrato); amplitude: tremolo; morph: wavetable; grain_density: granular"}
+                },
                 "additionalProperties": false
             },
             "effects": effects_schema()
@@ -506,7 +536,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     let tools = json!([
         {
             "name": "define_synth",
-            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope), fm (four operators, four algorithms), wavetable (eight band-limited tables with morph) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
+            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope), fm (four operators, four algorithms), wavetable (eight band-limited tables with morph), granular (grain cloud with stereo width) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An optional lfo modulates one target (cutoff/pitch/amplitude/morph/grain_density). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
 
 Examples:
 - Bass: {\"name\": \"rubber_bass\", \"category\": \"bass\", \"subtractive\": {\"osc1\": {\"wave\": \"saw\"}, \"osc2\": {\"wave\": \"square\", \"mix\": 0.3, \"detune_cents\": 6}, \"filter\": {\"type\": \"low_pass\", \"cutoff\": 500, \"resonance\": 0.4, \"slope\": 24, \"env_amount\": 0.7, \"env\": {\"attack\": 0.005, \"decay\": 0.25, \"sustain\": 0.1, \"release\": 0.2}}, \"env\": {\"attack\": 0.005, \"decay\": 0.3, \"sustain\": 0.6, \"release\": 0.15}}, \"effects\": [{\"type\": \"distortion\", \"drive\": 3, \"intensity\": 0.4}, {\"type\": \"compressor\", \"threshold\": -18, \"ratio\": 4, \"intensity\": 1}]}
@@ -514,6 +544,7 @@ Examples:
 - Drum: {\"name\": \"tight_kick\", \"category\": \"drums\", \"percussion\": {\"kind\": \"kick\", \"frequency\": 50, \"punch\": 0.9, \"sustain\": 0.2}}
 - Bell: {\"name\": \"glass_bell\", \"category\": \"keys\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"attack\": 0.002, \"decay\": 1.5, \"sustain\": 0.2, \"release\": 2.5}}, {\"ratio\": 3.5, \"level\": 0.55, \"env\": {\"decay\": 0.6, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.7, \"intensity\": 0.35}]}
 - Organ: {\"name\": \"organ\", \"category\": \"keys\", \"wavetable\": {\"table\": \"organ\", \"env\": {\"attack\": 0.005, \"sustain\": 1, \"release\": 0.15}}}
+- Texture: {\"name\": \"cloud\", \"category\": \"pad\", \"level\": 0.6, \"granular\": {\"source\": \"formant\", \"grain_ms\": 120, \"density\": 15, \"pitch_semitones\": 7, \"randomness\": 0.7, \"stereo_width\": 0.9, \"env\": {\"attack\": 1.5, \"release\": 3}}, \"lfo\": {\"rate\": 0.2, \"depth\": 0.4, \"target\": \"grain_density\"}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.9, \"intensity\": 0.5}]}
 
 Call list_sounds with section \"synths\" to see the built-in patches, which double as worked examples.",
             "inputSchema": patch_schema()
@@ -889,6 +920,9 @@ fn handle_define_synth(
     if patch.wavetable.as_ref().is_some_and(|w| w.level > 0.0) {
         engines.push("wavetable");
     }
+    if patch.granular.as_ref().is_some_and(|g| g.level > 0.0) {
+        engines.push("granular");
+    }
     if let Some(p) = patch.percussion.as_ref().filter(|p| p.level > 0.0) {
         engines.push(p.kind.as_str());
     }
@@ -905,6 +939,12 @@ fn handle_define_synth(
             ""
         }
     );
+    if patch.lfo.as_ref().is_some_and(|l| l.is_active()) {
+        details.push_str(&format!(
+            " + lfo → {}",
+            patch.lfo.as_ref().unwrap().target.as_str()
+        ));
+    }
     if !patch.description.is_empty() {
         details.push_str(&format!("\n{}", patch.description));
     }
@@ -1256,8 +1296,23 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
         .map(PercussionKind::as_str)
         .collect::<Vec<_>>()
         .join("/");
+        let sources = GrainSource::ALL
+            .iter()
+            .map(GrainSource::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let lfo_targets = LfoTarget::ALL
+            .iter()
+            .map(LfoTarget::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let lfo_waves = LfoWave::ALL
+            .iter()
+            .map(LfoWave::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
         out.push_str(&format!(
-            "\nEngines for inline patches: subtractive, fm (algorithms {algorithms}), wavetable (tables {tables}), percussion (kinds {percussion_kinds}).\n\n"
+            "\nEngines for inline patches: subtractive, fm (algorithms {algorithms}), wavetable (tables {tables}), granular (sources {sources}), percussion (kinds {percussion_kinds}).\nOptional lfo targets: {lfo_targets} (waves {lfo_waves}).\n\n"
         ));
     }
 
@@ -1555,5 +1610,77 @@ mod tests {
                 .message
                 .contains("fm.operators[0].ratio")
         );
+    }
+
+    #[test]
+    fn patch_schema_describes_lfo_and_granular_and_they_validate_through_define_synth() {
+        let schema = patch_schema();
+        let lfo = &schema["properties"]["lfo"]["properties"];
+        assert_eq!(
+            lfo["wave"]["enum"],
+            json!(["sine", "triangle", "saw", "square", "sample_hold"])
+        );
+        assert_eq!(
+            lfo["target"]["enum"],
+            json!([
+                "off",
+                "cutoff",
+                "pitch",
+                "amplitude",
+                "morph",
+                "grain_density"
+            ])
+        );
+        let g = &schema["properties"]["granular"]["properties"];
+        assert_eq!(
+            g["source"]["enum"],
+            json!(["harmonics", "noise", "formant", "inharmonic"])
+        );
+        for field in [
+            "grain_ms",
+            "density",
+            "pitch_semitones",
+            "randomness",
+            "stereo_width",
+            "env",
+            "level",
+        ] {
+            assert!(g[field].is_object(), "{field}");
+        }
+
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "cloud",
+                "granular": {"source": "formant", "stereo_width": 0.9},
+                "lfo": {"rate": 0.2, "depth": 0.4, "target": "grain_density"}}),
+        );
+        assert!(r.error.is_none(), "{:?}", r.error);
+        assert!(
+            text(&r).contains("granular") && text(&r).contains("lfo"),
+            "{}",
+            text(&r)
+        );
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad", "granular": {"density": 500}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(
+            r.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("granular.density")
+        );
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad2", "subtractive": {}, "lfo": {"rate": 99}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(r.error.as_ref().unwrap().message.contains("lfo.rate"));
     }
 }

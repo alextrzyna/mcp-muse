@@ -1026,9 +1026,6 @@ pub enum GrainSource {
     Inharmonic,
 }
 
-// `ALL`/`as_str` are for the catalog and `list_sounds` (like `LfoWave`
-// and `LfoTarget` below); not called from production code yet.
-#[allow(dead_code)]
 impl GrainSource {
     pub const ALL: [GrainSource; 4] = [
         GrainSource::Harmonics,
@@ -1107,9 +1104,6 @@ pub enum LfoWave {
     SampleHold,
 }
 
-// `ALL`/`as_str` are for the catalog and validation error messages the
-// renderer task (next PR) and `list_sounds` will use; not called yet.
-#[allow(dead_code)]
 impl LfoWave {
     pub const ALL: [LfoWave; 5] = [
         LfoWave::Sine,
@@ -1142,9 +1136,6 @@ pub enum LfoTarget {
     GrainDensity,
 }
 
-// See the note on `impl LfoWave` above: unused until the renderer and
-// `list_sounds` consume them.
-#[allow(dead_code)]
 impl LfoTarget {
     pub const ALL: [LfoTarget; 6] = [
         LfoTarget::Off,
@@ -1190,8 +1181,6 @@ impl Default for LfoConfig {
 }
 
 impl LfoConfig {
-    // Consumed by the renderer in the next PR task, not by production code yet.
-    #[allow(dead_code)]
     pub fn is_active(&self) -> bool {
         self.target != LfoTarget::Off && self.depth > 0.0
     }
