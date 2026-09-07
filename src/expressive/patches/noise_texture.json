@@ -2,7 +2,7 @@
   "name": "noise_texture",
   "description": "Filtered noise grains sample-and-held into a pulsing density for risers and beds",
   "category": "fx",
-  "level": 0.5,
+  "level": 0.8,
   "granular": {"source": "noise", "grain_ms": 30, "density": 40, "randomness": 1.0, "stereo_width": 1.0,
                "env": {"attack": 0.5, "decay": 0.5, "sustain": 0.6, "release": 1.5}},
   "lfo": {"rate": 0.3, "depth": 0.6, "wave": "sample_hold", "target": "grain_density"},
