@@ -226,8 +226,15 @@ impl Reverb {
     }
 }
 
-/// Longest delay line Time Fracture can address: 4 beats at 30 BPM.
+/// Longest delay time Time Fracture will honour: 4 beats (the validated
+/// maximum) at 30 BPM. Beyond this the requested time is clamped, so an
+/// absurdly slow tempo cannot size an unbounded buffer.
 const MAX_DELAY_SECONDS: f32 = 8.0;
+
+/// Room above the delay time for a downward-transposed repeat to walk the read
+/// position backwards before it restarts. Matches the reference implementation's
+/// whole buffer, and outlasts any grain a realistic `random_rate` produces.
+const DRIFT_HEADROOM_SECONDS: f32 = 4.0;
 
 /// Time Fracture state: a random delay time gliding between two bounds,
 /// and a pitch accumulator that drifts the read position so each repeat
@@ -236,6 +243,13 @@ const MAX_DELAY_SECONDS: f32 = 8.0;
 struct Fracture {
     min_samples: f32,
     max_samples: f32,
+    /// Longest delay the line can actually serve; past it `read_fractional`
+    /// would clamp and the read would stick, so a repeat restarts instead.
+    max_read: f32,
+    /// Whether the delay time wanders at all (`random_rate > 0`). The grain
+    /// clock also runs for pitch shifting, so this cannot be inferred from
+    /// `phase_inc`.
+    random_motion: bool,
     /// Cycles per sample of the random-walk phase (0 = never moves).
     phase_inc: f32,
     phase: f32,
@@ -278,12 +292,7 @@ impl Fracture {
         self.phase += self.phase_inc;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
-            self.last_random = self.next_random;
-            self.next_random = if self.phase_inc > 0.0 && self.max_samples > self.min_samples {
-                self.next_unit()
-            } else {
-                0.0
-            };
+            self.roll_endpoints();
             if !self.intervals.is_empty() {
                 self.pitch_ratio = 2f32.powf(self.next_semitones() / 12.0);
                 self.pitch_accumulator = 0.0;
@@ -294,13 +303,24 @@ impl Fracture {
         }
         let mut delay = self.current_delay() - self.pitch_accumulator;
         // A transposed repeat that has run out of buffer starts over.
-        if !self.intervals.is_empty() && (delay < 1.0 || delay >= self.max_samples * 2.0) {
+        if !self.intervals.is_empty() && (delay < 1.0 || delay >= self.max_read) {
+            self.roll_endpoints();
             self.pitch_accumulator = 0.0;
             self.phase = 0.0;
             self.pitch_ratio = 2f32.powf(self.next_semitones() / 12.0);
             delay = self.current_delay();
         }
         delay.max(1.0)
+    }
+
+    /// Take the next pair of random-walk endpoints. Without random motion the
+    /// endpoints stay at zero, which pins the delay time to `min_samples`.
+    #[inline]
+    fn roll_endpoints(&mut self) {
+        if self.random_motion && self.max_samples > self.min_samples {
+            self.last_random = self.next_random;
+            self.next_random = self.next_unit();
+        }
     }
 
     /// The next repeat's transposition, following [`PitchMode`].
@@ -400,13 +420,19 @@ impl Delay {
         intensity: f32,
     ) -> Self {
         let seconds_per_beat = 60.0 / tempo.max(1) as f32;
-        let to_samples = |beats: f32| (beats * seconds_per_beat * sample_rate).max(1.0);
+        let to_samples = |beats: f32| {
+            (beats * seconds_per_beat * sample_rate).clamp(1.0, MAX_DELAY_SECONDS * sample_rate)
+        };
         let min_samples = to_samples(min_beats);
         let max_samples = to_samples(max_beats).max(min_samples);
         let wet = (wet_level * intensity).clamp(0.0, 1.0);
+        // The delay itself plus room for a downward repeat to drift backwards.
+        let line =
+            DelayLine::new((max_samples + DRIFT_HEADROOM_SECONDS * sample_rate) as usize + 1);
+        let random_motion = random_rate > 0.0;
         // With no random motion the delay sits at `min`; with pitch shifting and
         // no random motion, a new repeat (and interval) starts every delay period.
-        let phase_inc = if random_rate > 0.0 {
+        let phase_inc = if random_motion {
             random_rate / sample_rate
         } else if !pitch_intervals.is_empty() {
             1.0 / min_samples
@@ -416,6 +442,10 @@ impl Delay {
         let mut fracture = Fracture {
             min_samples,
             max_samples,
+            // `read_fractional` clamps to `len - 1`, so a delay that long would
+            // stick rather than track; restart the repeat instead.
+            max_read: line.len() as f32 - 1.0,
+            random_motion,
             phase_inc,
             phase: 0.0,
             last_random: 0.0,
@@ -430,14 +460,12 @@ impl Delay {
             pitch_accumulator: 0.0,
             rng: rand::rng().random::<u32>() | 1,
         };
-        if random_rate > 0.0 {
+        if random_motion {
             fracture.last_random = fracture.next_unit();
             fracture.next_random = fracture.next_unit();
         }
         Self {
-            // One sample over the maximum: `read_fractional` clamps to `len - 1`,
-            // so the longest delay must still be shorter than the line.
-            line: DelayLine::new((MAX_DELAY_SECONDS * sample_rate) as usize + 1),
+            line,
             feedback: (feedback * intensity).clamp(0.0, 0.95),
             lp: 0.0,
             wet,
@@ -938,6 +966,123 @@ mod tests {
         assert!(
             seen_max - seen_min > 0.1 * (max_s - min_s),
             "delay time actually moves"
+        );
+    }
+
+    #[test]
+    fn zero_random_rate_holds_the_delay_time_even_with_pitch_intervals() {
+        // `random_rate: 0` is documented as a static delay time. Pitch shifting
+        // still runs the grain clock, so every wrap used to draw a new random
+        // endpoint and glide the delay across the whole [min, max] range.
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            0.25,
+            1.0,
+            0.0,
+            &[12.0],
+            PitchMode::Up,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let min_samples = 0.25 * 0.5 * SR;
+        // Eight grains: with `random_rate` 0 the grain is `min_samples` long.
+        for _ in 0..(8.0 * min_samples) as usize {
+            d.process(0.0);
+            let cur = d.current_delay_samples();
+            assert!(
+                (cur - min_samples).abs() < 1e-3,
+                "delay time moved to {cur}, expected a fixed {min_samples}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_downward_repeat_restarts_before_the_read_saturates() {
+        // 4 beats at 30 BPM is the longest supported delay. A -12 repeat walks
+        // the read position backwards, so the restart has to fire on the line's
+        // real bound; anything larger leaves `read_fractional` clamping (a stuck
+        // read) instead. A slow grain clock keeps the phase from wrapping first.
+        let mut d = Delay::time_fracture(
+            SR,
+            30,
+            4.0,
+            4.0,
+            0.05,
+            &[-12.0],
+            PitchMode::Up,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let max_read = d.line.len() as f32 - 1.0;
+        let f = d.fracture.as_mut().unwrap();
+        let mut restarts = 0;
+        let mut previous = 0.0f32;
+        for _ in 0..(45.0 * SR) as usize {
+            let delay = f.advance();
+            assert!(
+                (1.0..max_read).contains(&delay),
+                "read saturated at {delay} (line bound {max_read})"
+            );
+            if delay < previous {
+                restarts += 1;
+            }
+            previous = delay;
+        }
+        assert!(restarts >= 2, "expected repeats to restart, saw {restarts}");
+    }
+
+    #[test]
+    fn each_restart_draws_a_new_delay_time_when_the_time_is_random() {
+        // An octave-up repeat restarts long before the slow grain clock wraps,
+        // so without a fresh pair of endpoints every restart would reuse the
+        // same delay time.
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            0.25,
+            1.0,
+            1.0,
+            &[12.0],
+            PitchMode::Up,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let (min_s, max_s) = (0.125 * SR, 0.5 * SR);
+        let f = d.fracture.as_mut().unwrap();
+        // An upward repeat shortens the delay every sample, so a restart is the
+        // one place the delay jumps back up.
+        let mut restarts: Vec<f32> = Vec::new();
+        let mut previous = f32::MAX;
+        for _ in 0..(8.0 * SR) as usize {
+            let delay = f.advance();
+            if delay > previous + 1.0 {
+                restarts.push(delay);
+            }
+            previous = delay;
+        }
+        // Eight seconds is eight grains at 1 Hz, and each grain holds two or
+        // more repeats, so most restarts happen inside a grain.
+        assert!(
+            restarts.len() >= 12,
+            "expected many restarts, saw {}",
+            restarts.len()
+        );
+        assert!(
+            restarts
+                .iter()
+                .all(|d| *d >= min_s - 1.0 && *d <= max_s + 1.0),
+            "a restart landed outside [{min_s}, {max_s}]"
+        );
+        restarts.sort_by(f32::total_cmp);
+        let distinct = 1 + restarts.windows(2).filter(|w| w[1] - w[0] > 1.0).count();
+        assert!(
+            distinct + 1 >= restarts.len(),
+            "restarts reused delay times: {distinct} distinct of {}",
+            restarts.len()
         );
     }
 
