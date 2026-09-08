@@ -8,7 +8,8 @@
 use crate::midi::{EffectConfig, EffectType, FilterType, PitchMode};
 use rand::RngExt;
 
-/// Tempo assumed by [`EffectsChain::new`] when the caller has no sequence tempo.
+/// Tempo assumed when the caller has no sequence tempo (an idle engine, and
+/// [`EffectsChain::new`] in tests).
 pub const DEFAULT_TEMPO: u32 = 120;
 
 /// Filter response selected on an [`Svf`].
@@ -250,9 +251,12 @@ struct Fracture {
     /// clock also runs for pitch shifting, so this cannot be inferred from
     /// `phase_inc`.
     random_motion: bool,
-    /// Cycles per sample of the random-walk phase (0 = never moves).
-    phase_inc: f32,
-    phase: f32,
+    /// Cycles per sample of the random-walk phase (0 = never moves). Kept in
+    /// f64 like [`crate::expressive::Lfo`]: at a low `random_rate` the
+    /// increment is ~1e-7, which an f32 accumulator stops resolving well
+    /// before the phase wraps.
+    phase_inc: f64,
+    phase: f64,
     last_random: f32,
     next_random: f32,
     intervals: Vec<f32>,
@@ -281,7 +285,7 @@ impl Fracture {
 
     /// Delay in samples for the current random-walk phase, before pitch drift.
     fn current_delay(&self) -> f32 {
-        let alpha = 0.5 - 0.5 * (std::f32::consts::PI * self.phase).cos();
+        let alpha = 0.5 - 0.5 * (std::f32::consts::PI * self.phase as f32).cos();
         let r = self.last_random * (1.0 - alpha) + self.next_random * alpha;
         self.min_samples + (self.max_samples - self.min_samples) * r
     }
@@ -436,9 +440,9 @@ impl Delay {
         // With no random motion the delay sits at `min`; with pitch shifting and
         // no random motion, a new repeat (and interval) starts every delay period.
         let phase_inc = if random_motion {
-            random_rate / sample_rate
+            random_rate as f64 / sample_rate as f64
         } else if !pitch_intervals.is_empty() {
-            1.0 / min_samples
+            1.0 / min_samples as f64
         } else {
             0.0
         };
@@ -489,6 +493,19 @@ impl Delay {
         self.lp += 0.5 * (delayed - self.lp);
         self.line.write(x + self.lp * self.feedback);
         (x * self.dry + self.lp * self.wet).clamp(-1.0, 1.0)
+    }
+
+    /// Replace the fracture's RNG state (and the endpoints already drawn from
+    /// it) so a test sees the same random walk on every run.
+    #[cfg(test)]
+    pub(crate) fn seed_fracture(&mut self, seed: u32) {
+        if let Some(f) = self.fracture.as_mut() {
+            f.rng = seed | 1;
+            if f.random_motion {
+                f.last_random = f.next_unit();
+                f.next_random = f.next_unit();
+            }
+        }
     }
 
     #[cfg(test)]
@@ -806,11 +823,10 @@ pub struct EffectsChain {
 }
 
 impl EffectsChain {
-    /// Build a chain at [`DEFAULT_TEMPO`], for callers with no sequence tempo.
-    /// Every production call site now threads a real tempo through
-    /// [`Self::with_tempo`]; this is kept for API completeness and the
-    /// static-delay-is-tempo-independent test below.
-    #[allow(dead_code)]
+    /// Build a chain at [`DEFAULT_TEMPO`]. Every production call site threads a
+    /// real tempo through [`Self::with_tempo`], so this exists only for the
+    /// tests that pin the tempo-independent behaviour.
+    #[cfg(test)]
     pub fn new(sample_rate: f32, configs: &[EffectConfig]) -> Self {
         Self::with_tempo(sample_rate, DEFAULT_TEMPO, configs)
     }
@@ -929,6 +945,56 @@ mod tests {
     }
 
     #[test]
+    fn a_very_slow_random_rate_still_advances_the_phase() {
+        // 0.001 Hz is 2.3e-8 cycles per sample: less than half an f32 ulp near
+        // phase 1, so an f32 accumulator would round the increment away and
+        // never wrap again. The phase is f64 for exactly this reason.
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            0.25,
+            1.0,
+            0.001,
+            &[],
+            PitchMode::Random,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let f = d.fracture.as_mut().unwrap();
+        f.phase = 1.0 - 1e-5;
+        let steps = (1e-5 / f.phase_inc).ceil() as usize + 2;
+        for _ in 0..steps {
+            f.advance();
+        }
+        assert!(
+            f.phase < 0.5,
+            "the random walk stalled at phase {}",
+            f.phase
+        );
+    }
+
+    #[test]
+    fn pitch_intervals_without_random_beats_keep_the_configured_delay_time() {
+        // `pitch_intervals` alone takes the Time Fracture path, which works in
+        // beats: `delay_time` (seconds, no `sync_tempo`) has to be converted.
+        let cfg: EffectConfig = serde_json::from_str(
+            r#"{"type": "delay", "delay_time": 0.5, "pitch_intervals": [12], "feedback": 0.0, "wet_level": 1.0, "intensity": 1.0}"#,
+        )
+        .unwrap();
+        // 0.5 s at 120 BPM is 1 beat, so min and max are both 1 beat = 0.5 s.
+        let mut chain = EffectsChain::with_tempo(SR, 120, std::slice::from_ref(&cfg));
+        let out: Vec<f32> = (0..30000)
+            .map(|i| chain.process(if i == 0 { 1.0 } else { 0.0 }))
+            .collect();
+        let echo = first_echo_index(&out);
+        assert!(
+            (echo as i64 - 22_050).abs() <= 100,
+            "expected the echo near 0.5 s, got sample {echo}"
+        );
+    }
+
+    #[test]
     fn no_delay_configuration_can_size_an_unbounded_line() {
         // The chain is built on the audio thread from a tempo the tool layer has
         // already bounded, but the DSP keeps its own ceiling: `sync_tempo` beats
@@ -985,6 +1051,7 @@ mod tests {
             1.0,
             1.0,
         );
+        d.seed_fracture(0x5EED_1234);
         let (min_s, max_s) = (0.125 * SR, 0.5 * SR);
         let mut seen_min = f32::MAX;
         let mut seen_max = 0.0f32;
@@ -1086,6 +1153,7 @@ mod tests {
             1.0,
             1.0,
         );
+        d.seed_fracture(0x1234_5678);
         let (min_s, max_s) = (0.125 * SR, 0.5 * SR);
         let f = d.fracture.as_mut().unwrap();
         // An upward repeat shortens the delay every sample, so a restart is the
@@ -1220,6 +1288,7 @@ mod tests {
             1.0,
             1.0,
         );
+        random.seed_fracture(0x0BAD_C0DE);
         for _ in 0..20 {
             let s = random.next_pitch_semitones();
             assert!(s == 3.0 || s == 7.0);
