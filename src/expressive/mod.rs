@@ -3,6 +3,7 @@ pub mod effects_presets;
 pub mod engines;
 pub mod envelope;
 pub mod lfo;
+pub mod limiter;
 pub mod oscillator;
 pub mod patch;
 pub mod percussion;

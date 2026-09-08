@@ -9,6 +9,7 @@ use crate::expressive::engines::{
     FmVoice, GranularVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice,
     WavetableVoice,
 };
+use crate::expressive::limiter::PeakLimiter;
 use crate::expressive::{EffectsChain, Lfo, Patch};
 use crate::midi::effects_tail_seconds;
 
@@ -17,6 +18,12 @@ use crate::midi::effects_tail_seconds;
 /// tool boundary (MAX_NOTE_SECONDS); this is defence in depth for every other
 /// caller, so a bad number can never allocate gigabytes and hang the server.
 pub const MAX_RENDER_SECONDS: f32 = 600.0;
+
+/// Ceiling for the per-patch limiter that runs after the effects chain.
+/// `SYNTH_BUS_GAIN` 0.5 × 1.5 = 0.75, under the engine's 0.8 soft-clip knee.
+pub const PATCH_LIMITER_CEILING: f32 = 1.5;
+/// Release time for the per-patch limiter.
+pub const PATCH_LIMITER_RELEASE_SECONDS: f32 = 0.05;
 
 /// One note to render, in seconds relative to the buffer start.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -130,6 +137,11 @@ pub fn render_patch(
         .map(|l| (Lfo::new(l.rate, l.wave, sample_rate), l.target, l.depth));
     let mut chain_l = EffectsChain::with_tempo(sample_rate, tempo, &patch.effects);
     let mut chain_r = EffectsChain::with_tempo(sample_rate, tempo, &patch.effects);
+    let mut limiter = PeakLimiter::new(
+        PATCH_LIMITER_CEILING,
+        PATCH_LIMITER_RELEASE_SECONDS,
+        sample_rate,
+    );
     let mut out = vec![[0.0f32; 2]; total];
 
     for (i, frame) in out.iter_mut().enumerate() {
@@ -149,7 +161,9 @@ pub fn render_patch(
             l += vl * v.gain;
             r += vr * v.gain;
         }
-        *frame = [chain_l.process(l), chain_r.process(r)];
+        let (l, r) = (chain_l.process(l), chain_r.process(r));
+        let (l, r) = limiter.process(l, r);
+        *frame = [l, r];
     }
     out
 }
@@ -242,8 +256,11 @@ mod tests {
 
     #[test]
     fn overlapping_notes_sum() {
+        // level 0.5 keeps the pair's peak (1.0) under PATCH_LIMITER_CEILING
+        // (1.5): this test is about voice summation, not the limiter, which
+        // has its own dedicated tests below.
         let p = patch(
-            json!({"name": "p", "subtractive": {"osc1": {"wave": "sine"},
+            json!({"name": "p", "level": 0.5, "subtractive": {"osc1": {"wave": "sine"},
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}}),
         );
         let one = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR, 120));
@@ -552,6 +569,49 @@ mod tests {
         let diff: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a - b).collect();
         assert!(rms(&diff) > 0.02, "left and right differ");
         assert_eq!(buf.len(), (1.2 * SR) as usize, "gate + release");
+    }
+
+    #[test]
+    fn a_hot_chord_is_limited_before_the_bus() {
+        // Three saws at level 1.0 sum well past the ceiling.
+        let p = patch(json!({"name": "hot", "level": 1.0,
+            "subtractive": {"osc1": {"wave": "saw"}, "env": {"attack": 0.001, "release": 0.05}}}));
+        let chord = [
+            note(0.0, 0.5, 130.81),
+            note(0.0, 0.5, 196.0),
+            note(0.0, 0.5, 261.63),
+        ];
+        let buf = render_patch(&p, &chord, SR, 120);
+        let peak = buf
+            .iter()
+            .flat_map(|s| s.iter())
+            .fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(peak <= PATCH_LIMITER_CEILING + 1e-6, "peak {peak}");
+        assert!(peak > 1.4, "the chord actually drove the limiter: {peak}");
+    }
+
+    #[test]
+    fn a_quiet_note_is_unchanged_by_the_limiter() {
+        let p = patch(json!({"name": "q", "level": 0.3,
+            "subtractive": {"osc1": {"wave": "sine"}, "env": {"attack": 0.01, "release": 0.05}}}));
+        let n = [note(0.0, 0.5, 220.0)];
+        let buf = render_patch(&p, &n, SR, 120);
+        let peak = buf
+            .iter()
+            .flat_map(|s| s.iter())
+            .fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(peak < 0.5);
+        // Same render through a limiter is a no-op: compare against a manual pass.
+        let mut lim = crate::expressive::limiter::PeakLimiter::new(
+            PATCH_LIMITER_CEILING,
+            PATCH_LIMITER_RELEASE_SECONDS,
+            SR,
+        );
+        for s in &buf {
+            let (l, r) = lim.process(s[0], s[1]);
+            assert_eq!((l, r), (s[0], s[1]));
+        }
+        assert_eq!(lim.gain(), 1.0);
     }
 
     #[test]
