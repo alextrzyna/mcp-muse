@@ -1588,7 +1588,6 @@ impl EffectConfig {
     }
 
     /// Seconds of silence to render after the last note so this effect can ring out.
-    #[allow(dead_code)] // wired into render_patch's tail calculation in Task 2
     pub fn tail_seconds(&self, tempo: u32) -> f32 {
         if !self.enabled {
             return 0.0;

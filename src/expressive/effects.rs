@@ -802,6 +802,10 @@ pub struct EffectsChain {
 
 impl EffectsChain {
     /// Build a chain at [`DEFAULT_TEMPO`], for callers with no sequence tempo.
+    /// Every production call site now threads a real tempo through
+    /// [`Self::with_tempo`]; this is kept for API completeness and the
+    /// static-delay-is-tempo-independent test below.
+    #[allow(dead_code)]
     pub fn new(sample_rate: f32, configs: &[EffectConfig]) -> Self {
         Self::with_tempo(sample_rate, DEFAULT_TEMPO, configs)
     }

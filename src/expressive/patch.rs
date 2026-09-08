@@ -161,7 +161,7 @@ mod tests {
                 frequency: if p.has_pitched_engine() { 261.63 } else { 60.0 },
                 velocity: 100.0 / 127.0,
             };
-            let buf = render_patch(p, &[note], 44100.0);
+            let buf = render_patch(p, &[note], 44100.0, 120);
             let peak = buf
                 .iter()
                 .flat_map(|s| s.iter())

@@ -163,6 +163,7 @@ impl Translator {
             return Ok(Translation {
                 command: PlayCommand {
                     mode,
+                    tempo: sequence.tempo,
                     ..Default::default()
                 },
                 duration: Duration::ZERO,
@@ -285,10 +286,15 @@ impl Translator {
                     params.duration,
                     &params.pitch_contour,
                 );
+                let effects = note.effects.as_deref().unwrap_or(&[]);
                 let mut chain =
-                    EffectsChain::new(SAMPLE_RATE as f32, note.effects.as_deref().unwrap_or(&[]));
+                    EffectsChain::with_tempo(SAMPLE_RATE as f32, sequence.tempo, effects);
                 if !chain.is_empty() {
-                    samples.resize(samples.len() + SAMPLE_RATE as usize, 0.0);
+                    let tail = effects
+                        .iter()
+                        .map(|e| e.tail_seconds(sequence.tempo))
+                        .fold(0.0f32, f32::max);
+                    samples.resize(samples.len() + (tail * SAMPLE_RATE as f32) as usize, 0.0);
                     chain.process_buffer(&mut samples);
                 }
                 note_end = note_end.max(start + Duration::from_secs_f32(expression.duration));
@@ -331,14 +337,14 @@ impl Translator {
                     ..*event
                 })
                 .collect();
-            let mut samples = render_patch(&patch, &events, SAMPLE_RATE as f32);
+            let mut samples = render_patch(&patch, &events, SAMPLE_RATE as f32, sequence.tempo);
             for frame in &mut samples {
                 frame[0] *= SYNTH_BUS_GAIN;
                 frame[1] *= SYNTH_BUS_GAIN;
             }
             buffers.push((seconds_to_frames(Duration::from_secs_f64(first)), samples));
             note_end = note_end.max(Duration::from_secs_f64(
-                first + render_length_seconds(&patch, &events) as f64,
+                first + render_length_seconds(&patch, &events, sequence.tempo) as f64,
             ));
         }
 
@@ -367,6 +373,7 @@ impl Translator {
                 buffers,
                 midi_effects,
                 mode,
+                tempo: sequence.tempo,
             },
             duration,
         })
@@ -608,6 +615,27 @@ mod tests {
             synth: Some(serde_json::from_value(synth).unwrap()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_sequence_tempo_reaches_patch_effects_and_the_midi_bus() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let mut s = seq(vec![patch_note(
+            json!({"name": "d", "subtractive": {"env": {"release": 0.01}},
+            "effects": [{"type": "delay", "random_beats": [1.0, 1.0], "intensity": 0.5}]}),
+            60,
+            0.0,
+            0.1,
+        )]);
+        s.tempo = 60;
+        let slow = t
+            .translate(s.clone(), PlayMode::Replace, &no_session())
+            .unwrap();
+        s.tempo = 120;
+        let fast = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        assert!(slow.duration > fast.duration, "longer beats, longer tail");
+        assert_eq!(fast.command.tempo, 120);
+        assert_eq!(slow.command.tempo, 60);
     }
 
     #[test]

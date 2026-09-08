@@ -6,7 +6,7 @@
 //! engine drains them at chunk boundaries and applies events at their exact
 //! sample.
 
-use crate::expressive::EffectsChain;
+use crate::expressive::{DEFAULT_TEMPO, EffectsChain};
 use crate::midi::EffectConfig;
 use oxisynth::{MidiEvent, SoundFont, Synth};
 use serde::{Deserialize, Serialize};
@@ -85,7 +85,7 @@ pub enum EventKind {
 
 /// Everything one play call schedules. Offsets are frames after the
 /// command's start; the engine picks the start as `clock + LEAD_FRAMES`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PlayCommand {
     /// MIDI events in time order (stable: setup before note-on at equal offsets).
     pub events: Vec<(u64, EventKind)>,
@@ -94,6 +94,20 @@ pub struct PlayCommand {
     /// MIDI bus effects chain for this call, if any note specified one.
     pub midi_effects: Option<Vec<EffectConfig>>,
     pub mode: PlayMode,
+    /// The sequence's tempo, reaching the MIDI bus chain's tempo-synced effects.
+    pub tempo: u32,
+}
+
+impl Default for PlayCommand {
+    fn default() -> Self {
+        Self {
+            events: Vec::new(),
+            buffers: Vec::new(),
+            midi_effects: None,
+            mode: PlayMode::default(),
+            tempo: DEFAULT_TEMPO,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -291,11 +305,11 @@ impl MidiEngine {
         match play.mode {
             PlayMode::Replace => {
                 self.silence();
-                self.set_bus_effects(play.midi_effects.as_deref().unwrap_or(&[]));
+                self.set_bus_effects(play.tempo, play.midi_effects.as_deref().unwrap_or(&[]));
             }
             PlayMode::Layer => {
                 if let Some(effects) = &play.midi_effects {
-                    self.set_bus_effects(effects);
+                    self.set_bus_effects(play.tempo, effects);
                 }
             }
         }
@@ -325,9 +339,9 @@ impl MidiEngine {
         self.events.push(ScheduledEvent { at, seq, kind });
     }
 
-    fn set_bus_effects(&mut self, effects: &[EffectConfig]) {
-        self.bus_left = EffectsChain::new(SAMPLE_RATE as f32, effects);
-        self.bus_right = EffectsChain::new(SAMPLE_RATE as f32, effects);
+    fn set_bus_effects(&mut self, tempo: u32, effects: &[EffectConfig]) {
+        self.bus_left = EffectsChain::with_tempo(SAMPLE_RATE as f32, tempo, effects);
+        self.bus_right = EffectsChain::with_tempo(SAMPLE_RATE as f32, tempo, effects);
     }
 
     /// Fade the current output over `FADE_FRAMES`, then reset everything:
@@ -365,7 +379,7 @@ impl MidiEngine {
         }
         self.events.clear();
         self.buffers.clear();
-        self.set_bus_effects(&[]);
+        self.set_bus_effects(DEFAULT_TEMPO, &[]);
     }
 
     fn apply_event(&mut self, kind: EventKind) {
@@ -634,6 +648,11 @@ pub(crate) mod tests {
             l[FADE_FRAMES..].iter().all(|s| *s == 0.0),
             "silence once the fade is over"
         );
+    }
+
+    #[test]
+    fn a_default_play_command_carries_the_default_tempo() {
+        assert_eq!(PlayCommand::default().tempo, DEFAULT_TEMPO);
     }
 
     #[test]
