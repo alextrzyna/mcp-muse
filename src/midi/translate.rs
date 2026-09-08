@@ -9,7 +9,7 @@ use crate::midi::engine::{
     EventKind, PlayCommand, PlayMode, SAMPLE_RATE, SYNTH_BUS_GAIN, seconds_to_frames,
 };
 use crate::midi::parser::MidiNote;
-use crate::midi::{EffectConfig, SimpleSequence};
+use crate::midi::{EffectConfig, SimpleSequence, effects_tail_seconds};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -289,15 +289,17 @@ impl Translator {
                 let effects = note.effects.as_deref().unwrap_or(&[]);
                 let mut chain =
                     EffectsChain::with_tempo(SAMPLE_RATE as f32, sequence.tempo, effects);
+                let mut tail = 0.0f32;
                 if !chain.is_empty() {
-                    let tail = effects
-                        .iter()
-                        .map(|e| e.tail_seconds(sequence.tempo))
-                        .fold(0.0f32, f32::max);
+                    tail = effects_tail_seconds(effects, sequence.tempo);
                     samples.resize(samples.len() + (tail * SAMPLE_RATE as f32) as usize, 0.0);
                     chain.process_buffer(&mut samples);
                 }
-                note_end = note_end.max(start + Duration::from_secs_f32(expression.duration));
+                note_end = note_end.max(
+                    start
+                        + Duration::from_secs_f32(expression.duration)
+                        + Duration::from_secs_f32(tail),
+                );
                 buffers.push((
                     seconds_to_frames(start),
                     samples.into_iter().map(|s| [s, s]).collect(),
@@ -1016,6 +1018,49 @@ mod tests {
         assert!(
             (without as f64) < tail,
             "a dry R2D2 note must not be padded, got {without} samples"
+        );
+    }
+
+    #[test]
+    fn an_r2d2_notes_reported_duration_follows_the_tempo_scaled_tail() {
+        let delay: EffectConfig = serde_json::from_value(serde_json::json!({
+            "type": "delay", "random_beats": [1.0, 1.0], "intensity": 0.5
+        }))
+        .unwrap();
+        let r2d2_note = |effects| SimpleNote {
+            note_type: "r2d2".to_string(),
+            r2d2_emotion: Some("Happy".to_string()),
+            r2d2_intensity: Some(0.7),
+            r2d2_complexity: Some(2),
+            duration: Some(0.2),
+            effects: Some(vec![effects]),
+            ..Default::default()
+        };
+        let t = Translator::new(Ok(()));
+        let mut s = seq(vec![r2d2_note(delay.clone())]);
+        s.tempo = 60;
+        let slow = t
+            .translate(s.clone(), PlayMode::Replace, &no_session())
+            .unwrap();
+        s.tempo = 120;
+        let fast = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        assert!(
+            slow.duration > fast.duration,
+            "slower tempo means longer beat-synced repeats, so a longer reported duration: {:?} vs {:?}",
+            slow.duration,
+            fast.duration
+        );
+        // 1 beat at 60 BPM is 1 s -> tail 4.5 s; note duration 0.2 s.
+        assert!(
+            slow.duration.as_secs_f64() >= 0.2 + 4.5 - 1e-6,
+            "duration must cover the note plus its tempo-scaled tail: {:?}",
+            slow.duration
+        );
+        // 1 beat at 120 BPM is 0.5 s -> tail 2.5 s; note duration 0.2 s.
+        assert!(
+            fast.duration.as_secs_f64() >= 0.2 + 2.5 - 1e-6,
+            "duration must cover the note plus its tempo-scaled tail: {:?}",
+            fast.duration
         );
     }
 

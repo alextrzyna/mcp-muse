@@ -10,6 +10,7 @@ use crate::expressive::engines::{
     WavetableVoice,
 };
 use crate::expressive::{EffectsChain, Lfo, Patch};
+use crate::midi::effects_tail_seconds;
 
 /// Hard ceiling on how much audio one `render_patch` call may produce.
 /// `SimpleNote::validate_timing` already rejects absurd note lengths at the
@@ -48,11 +49,7 @@ pub fn render_length_seconds(patch: &Patch, notes: &[NoteEvent], tempo: u32) -> 
         .iter()
         .map(|n| n.start.max(0.0) + n.duration.max(0.0).max(min_gate))
         .fold(0.0f32, f32::max);
-    let effect_tail = patch
-        .effects
-        .iter()
-        .map(|e| e.tail_seconds(tempo))
-        .fold(0.0f32, f32::max);
+    let effect_tail = effects_tail_seconds(&patch.effects, tempo);
     (last_gate + patch.release_seconds() + effect_tail).min(MAX_RENDER_SECONDS)
 }
 

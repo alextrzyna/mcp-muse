@@ -1613,6 +1613,17 @@ impl EffectConfig {
     }
 }
 
+/// Seconds of silence to render after the last note so any of `effects` can
+/// ring out at `tempo`: the max of each effect's own `tail_seconds` (0 when
+/// `effects` is empty). Shared by every caller that renders a chain's tail
+/// into a buffer or reports it as part of a note's duration.
+pub fn effects_tail_seconds(effects: &[EffectConfig], tempo: u32) -> f32 {
+    effects
+        .iter()
+        .map(|e| e.tail_seconds(tempo))
+        .fold(0.0f32, f32::max)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
