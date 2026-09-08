@@ -11,6 +11,22 @@ pub const MIN_HIT_SECONDS: f32 = 0.05;
 /// at the gate, so without it a still-ringing cymbal stops dead and clicks.
 pub const HIT_FADE_SECONDS: f32 = 0.005;
 
+/// Every hit is normalised to this peak before `level` applies, so `level`
+/// means the same loudness for a kick as for a cymbal.
+pub const PERCUSSION_PEAK: f32 = 0.9;
+
+/// Scales `samples` in place so its absolute peak becomes `target`. A silent
+/// buffer (peak near zero) is left untouched.
+fn normalise_peak(samples: &mut [f32], target: f32) {
+    let peak = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+    if peak > 1e-6 {
+        let g = target / peak;
+        for s in samples.iter_mut() {
+            *s *= g;
+        }
+    }
+}
+
 pub struct PercussionVoice {
     samples: Vec<f32>,
     pos: usize,
@@ -22,7 +38,13 @@ impl PercussionVoice {
     pub fn new(cfg: &Percussion, gate_seconds: f32, sample_rate: f32) -> Self {
         let count = ((gate_seconds.max(MIN_HIT_SECONDS)) * sample_rate) as usize;
         let mut samples = percussion::render(sample_rate, cfg, count);
+        // Fade first, then normalise the faded buffer: some kinds (e.g. a
+        // rising `swoosh`) peak in the last few milliseconds, which is
+        // exactly the region the fade attenuates. Normalising afterwards
+        // guarantees the *played* peak lands on PERCUSSION_PEAK regardless
+        // of where in the envelope the loudest sample falls.
         fade_out(&mut samples, (HIT_FADE_SECONDS * sample_rate) as usize);
+        normalise_peak(&mut samples, PERCUSSION_PEAK);
         Self {
             samples,
             pos: 0,
@@ -77,7 +99,30 @@ mod tests {
             peak = peak.max(v.tick(&mods).0.abs());
         }
         assert!(!v.is_active());
-        assert!(peak > 0.1 && peak <= 0.5 * 1.5, "level applied: {peak}");
+        assert!(
+            peak > 0.1 && peak <= 0.5 * PERCUSSION_PEAK + 1e-4,
+            "level applied: {peak}"
+        );
+    }
+
+    #[test]
+    fn every_kind_is_normalised_to_the_same_peak() {
+        for kind in [
+            "kick", "snare", "hihat", "cymbal", "zap", "swoosh", "chime", "burst",
+        ] {
+            let cfg: Percussion =
+                serde_json::from_str(&format!(r#"{{"kind": "{kind}", "level": 1.0}}"#)).unwrap();
+            let mut v = PercussionVoice::new(&cfg, 0.5, 44100.0);
+            let mods = Modulation::default();
+            let mut peak = 0.0f32;
+            while v.is_active() {
+                peak = peak.max(v.tick(&mods).0.abs());
+            }
+            assert!(
+                (peak - PERCUSSION_PEAK).abs() < 0.02,
+                "{kind} peaks at {peak}"
+            );
+        }
     }
 
     #[test]

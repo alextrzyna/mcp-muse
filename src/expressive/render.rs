@@ -375,8 +375,13 @@ mod tests {
         let sub_only =
             patch(json!({"name": "s", "subtractive": {"level": 0.5, "env": {"release": 0.01}}}));
         let b = left(&render_patch(&sub_only, &[note(0.0, 0.5, 110.0)], SR, 120));
+        // Margin is 1.1, not the pre-normalisation 1.2: PercussionVoice now
+        // caps a kick's own peak at PERCUSSION_PEAK (0.9) before `level`
+        // applies (see engines/percussion.rs), which is quieter than this
+        // kick's old unnormalised raw peak (~1.36). The kick still audibly
+        // adds energy at the note's onset, just by a smaller margin.
         assert!(
-            rms(&a[..2205]) > rms(&b[..2205]) * 1.2,
+            rms(&a[..2205]) > rms(&b[..2205]) * 1.1,
             "kick adds energy at the start"
         );
     }
