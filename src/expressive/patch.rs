@@ -174,19 +174,30 @@ mod tests {
     /// Below `PATCH_LIMITER_CEILING` on purpose: a built-in must not lean on the limiter.
     const HEADROOM_CEILING: f32 = 1.4;
 
-    /// True when every enabled pitched engine is a raw noise source: a
-    /// subtractive voice whose `osc1` is `Wave::Noise` with no contributing
-    /// `osc2` (`mix <= 0`), or a granular voice with `GrainSource::Noise`.
-    /// Filtered noise's peak swings widely render to render regardless of
-    /// `level`, so it is not a stable loudness measure and is floored like fx.
-    fn is_noise_source(p: &Patch) -> bool {
+    /// True when a patch's peak is a distribution rather than a number, so
+    /// measuring it against a floor tests the draw and not the patch's level.
+    /// Two engines do this, both because they are driven by an unseeded RNG:
+    ///
+    /// - a raw noise source -- every enabled pitched engine is a subtractive
+    ///   voice whose `osc1` is `Wave::Noise` with no contributing `osc2`
+    ///   (`mix <= 0`). Filtered noise's peak swings widely render to render
+    ///   regardless of `level`.
+    /// - any enabled granular engine, whatever its `source`: the grains are
+    ///   scattered randomly across the source cycle, so the peak varies the
+    ///   same way even when the cycle itself is deterministic (`formant_texture`
+    ///   at `level` 1.0 ran 0.713 to 1.03 over 1500 renders).
+    ///
+    /// Either way the peak is not a stable loudness measure, so the patch is
+    /// floored like fx.
+    fn has_random_peak(p: &Patch) -> bool {
+        if p.granular.as_ref().is_some_and(|g| g.level > 0.0) {
+            return true;
+        }
         let sub = p.subtractive.as_ref().filter(|s| s.level > 0.0);
-        let granular = p.granular.as_ref().filter(|g| g.level > 0.0);
         let fm = p.fm.as_ref().filter(|f| f.level > 0.0);
         let wavetable = p.wavetable.as_ref().filter(|w| w.level > 0.0);
         let checks: Vec<bool> = [
             sub.map(|s| s.osc1.wave == Wave::Noise && s.osc2.as_ref().is_none_or(|o| o.mix <= 0.0)),
-            granular.map(|g| g.source == GrainSource::Noise),
             fm.map(|_| false),
             wavetable.map(|_| false),
         ]
@@ -199,8 +210,9 @@ mod tests {
     /// Lower bound per category so a patch is not lost in a mix (pre-bus peak).
     /// Fx is lower than the general 0.3: sound effects (sweeps, zaps, noise
     /// beds) are legitimately quieter than a sustained instrument voice. A
-    /// noise-source patch (see `is_noise_source`) is floored like fx no
-    /// matter its category, for the same reason.
+    /// patch whose peak is a random draw (see `has_random_peak`) is floored
+    /// like fx no matter its category: a tight floor on a number that moves
+    /// every render tests the draw, not the patch.
     ///
     /// Why a drum patch can fail this floor no matter its `level`: the peak
     /// measured here is taken *after* the patch's effects chain, while
@@ -212,19 +224,17 @@ mod tests {
     /// 0.5 floor). The fix is to retune the filter to a corner that leaves
     /// the hit intact, or to delete it -- not to chase the floor with `level`.
     fn headroom_floor(p: &Patch, category: PatchCategory) -> f32 {
-        if is_noise_source(p) {
+        if has_random_peak(p) {
             return 0.2;
         }
         match category {
-            // The pad floor is the tightest one in the table. `formant_texture`
-            // sets it: its grain scatter is unseeded, so its phrase peak is a
-            // distribution, not a number -- over 1500 renders it ran min 0.713
-            // / p1 0.73 / median 0.82 / max 1.03. It is already at `level` 1.0,
-            // the maximum, so the worst case clears 0.7 by under 2% and no
-            // level edit can widen that. Raising this floor means finding
-            // another way to make that patch louder (or measuring something
-            // steadier than a peak), not editing the number; lowering it costs
-            // every other pad its guarantee.
+            // 0.7 is the tightest floor in the table, and it applies to the
+            // pads whose peak is a fixed number. The granular pads are not
+            // among them: `formant_texture` at `level` 1.0 -- the maximum, so
+            // there is nothing left to raise -- ran 0.713 to 1.03 over 1500
+            // renders, which would have cleared this floor by under 2% on a
+            // bad draw. That is why `has_random_peak` relaxes them to 0.2
+            // rather than this floor being lowered for every pad.
             PatchCategory::Pad => 0.7,
             PatchCategory::Drums => 0.5,
             PatchCategory::Fx => 0.2,
@@ -430,15 +440,28 @@ mod tests {
         }
     }
 
+    /// Pins the exact set: the relaxed floor is an escape hatch, so a patch
+    /// must not drift into it by accident. `formant_texture` and `grain_cloud`
+    /// are here for their grain scatter, `noise_texture` for both reasons, and
+    /// `wind_pad` for its noise oscillator.
     #[test]
-    fn is_noise_source_matches_only_the_pure_noise_engines() {
+    fn has_random_peak_matches_only_the_noise_and_granular_engines() {
         let lib = PatchLibrary::new();
         let matches: Vec<&str> = lib
             .names()
             .into_iter()
-            .filter(|name| is_noise_source(lib.get(name).unwrap()))
+            .filter(|name| has_random_peak(lib.get(name).unwrap()))
             .collect();
-        assert_eq!(matches, vec!["noise_texture", "wind_pad"], "{matches:?}");
+        assert_eq!(
+            matches,
+            vec![
+                "formant_texture",
+                "grain_cloud",
+                "noise_texture",
+                "wind_pad"
+            ],
+            "{matches:?}"
+        );
     }
 
     /// `cargo test print_builtin_headroom_survey -- --ignored --nocapture`
