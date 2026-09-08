@@ -29,6 +29,12 @@ impl PeakLimiter {
     /// Limits a stereo frame with one shared gain so the image is preserved.
     #[inline]
     pub fn process(&mut self, l: f32, r: f32) -> (f32, f32) {
+        // A non-finite sample would give `target = ceiling / inf = 0` and then
+        // `inf * 0 = NaN`, which would travel on to the engine's soft clipper
+        // and poison the mix. Drop it to silence instead; a branch, no
+        // allocation, so this stays safe in the per-sample loop.
+        let l = if l.is_finite() { l } else { 0.0 };
+        let r = if r.is_finite() { r } else { 0.0 };
         let peak = l.abs().max(r.abs());
         let target = if peak > self.ceiling {
             self.ceiling / peak
@@ -90,6 +96,18 @@ mod tests {
         let late = &out[loud_end + (0.3 * SR) as usize..];
         let late_peak = late.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         assert!((late_peak - 0.3).abs() < 0.01, "recovered to {late_peak}");
+    }
+
+    #[test]
+    fn a_non_finite_sample_becomes_silence_instead_of_nan() {
+        for bad in [f32::INFINITY, f32::NEG_INFINITY, f32::NAN] {
+            let mut lim = PeakLimiter::new(1.5, 0.05, SR);
+            let (l, r) = lim.process(bad, 0.5);
+            assert!(l.is_finite() && r.is_finite(), "{bad} produced ({l}, {r})");
+            assert_eq!(l, 0.0, "the bad channel is silenced: {l}");
+            assert_eq!(r, 0.5, "the good channel passes through: {r}");
+            assert_eq!(lim.gain(), 1.0, "no phantom gain reduction");
+        }
     }
 
     #[test]
