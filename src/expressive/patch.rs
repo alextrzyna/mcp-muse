@@ -409,6 +409,21 @@ mod tests {
             "no-engines message lists granular"
         );
     }
+
+    #[test]
+    fn invalid_effect_on_a_patch_is_reported_with_its_index() {
+        let p = parse(json!({
+            "name": "fractured",
+            "subtractive": {},
+            "effects": [{"type": "delay", "random_rate": 50}],
+        }))
+        .unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(
+            err.contains("effects[0]") && err.contains("random_rate"),
+            "{err}"
+        );
+    }
 }
 
 fn one() -> f32 {
@@ -1342,6 +1357,10 @@ impl Patch {
         }
         if let Some(lfo) = &self.lfo {
             lfo.validate("lfo")?;
+        }
+        for (i, e) in self.effects.iter().enumerate() {
+            e.validate_effect_config()
+                .map_err(|err| format!("effects[{i}]: {err}"))?;
         }
         Ok(())
     }

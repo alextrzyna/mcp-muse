@@ -450,6 +450,10 @@ impl EffectNode {
                 feedback,
                 wet_level,
                 sync_tempo: _,
+                random_beats: _,
+                random_rate: _,
+                pitch_intervals: _,
+                pitch_mode: _,
             } => EffectNode::Delay(Delay::new(
                 sample_rate,
                 *delay_time,

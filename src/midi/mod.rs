@@ -313,7 +313,7 @@ fn default_effect_intensity() -> f32 {
 
 /// Effect types with their specific parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EffectType {
     /// High-quality reverb effect
     Reverb {
@@ -344,6 +344,19 @@ pub enum EffectType {
         /// Sync to tempo (if true, delay_time is in beats)
         #[serde(default)]
         sync_tempo: bool,
+        /// Time Fracture: random delay time between `[min, max]` beats of the
+        /// sequence tempo; replaces `delay_time` when present.
+        #[serde(default)]
+        random_beats: Option<[f32; 2]>,
+        /// How fast the random delay time moves, in Hz (0 = fixed at `min`).
+        #[serde(default)]
+        random_rate: f32,
+        /// Semitone shifts applied to successive repeats (up to 12 values).
+        #[serde(default)]
+        pitch_intervals: Vec<f32>,
+        /// Order the intervals are visited in.
+        #[serde(default)]
+        pitch_mode: PitchMode,
     },
     /// Chorus effect
     Chorus {
@@ -415,6 +428,37 @@ pub enum FilterType {
     Peak,
     LowShelf,
     HighShelf,
+}
+
+/// Order in which Time Fracture picks the next pitch interval for a repeat.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PitchMode {
+    #[default]
+    Random,
+    Up,
+    Down,
+    UpDown,
+}
+
+impl PitchMode {
+    #[allow(dead_code)] // used by the Time Fracture DSP (Task 2) and list_sounds
+    pub const ALL: [PitchMode; 4] = [
+        PitchMode::Random,
+        PitchMode::Up,
+        PitchMode::Down,
+        PitchMode::UpDown,
+    ];
+
+    #[allow(dead_code)] // used by the Time Fracture DSP (Task 2) and list_sounds
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PitchMode::Random => "random",
+            PitchMode::Up => "up",
+            PitchMode::Down => "down",
+            PitchMode::UpDown => "up_down",
+        }
+    }
 }
 
 // Default value functions for effects
@@ -1321,16 +1365,23 @@ impl SimpleNote {
 
     /// Validate a single effect configuration
     fn validate_single_effect(&self, effect: &EffectConfig) -> Result<(), String> {
+        effect.validate_effect_config()
+    }
+}
+
+impl EffectConfig {
+    /// Validate this effect's intensity and effect-specific parameters.
+    pub fn validate_effect_config(&self) -> Result<(), String> {
         // Validate intensity
-        if !(0.0..=1.0).contains(&effect.intensity) {
+        if !(0.0..=1.0).contains(&self.intensity) {
             return Err(format!(
                 "Effect intensity {} is out of range (0.0-1.0)",
-                effect.intensity
+                self.intensity
             ));
         }
 
         // Validate effect-specific parameters
-        match &effect.effect {
+        match &self.effect {
             EffectType::Reverb {
                 room_size,
                 dampening,
@@ -1367,6 +1418,10 @@ impl SimpleNote {
                 feedback,
                 wet_level,
                 sync_tempo: _,
+                random_beats,
+                random_rate,
+                pitch_intervals,
+                pitch_mode: _,
             } => {
                 if !(0.001..=3.0).contains(delay_time) {
                     return Err(format!(
@@ -1385,6 +1440,38 @@ impl SimpleNote {
                         "Delay wet_level {} is out of range (0.0-1.0)",
                         wet_level
                     ));
+                }
+                if let Some([min, max]) = random_beats {
+                    for (i, v) in [min, max].into_iter().enumerate() {
+                        if !(0.0..=4.0).contains(v) {
+                            return Err(format!(
+                                "Delay random_beats[{i}] {v} is out of range (0-4 beats)"
+                            ));
+                        }
+                    }
+                    if min > max {
+                        return Err(format!(
+                            "Delay random_beats min {min} must not exceed max {max}"
+                        ));
+                    }
+                }
+                if !(0.0..=10.0).contains(random_rate) {
+                    return Err(format!(
+                        "Delay random_rate {random_rate} is out of range (0-10 Hz)"
+                    ));
+                }
+                if pitch_intervals.len() > 12 {
+                    return Err(format!(
+                        "Delay pitch_intervals has {} values; at most 12",
+                        pitch_intervals.len()
+                    ));
+                }
+                for (i, s) in pitch_intervals.iter().enumerate() {
+                    if !(-12.0..=12.0).contains(s) {
+                        return Err(format!(
+                            "Delay pitch_intervals[{i}] {s} is out of range (-12 to 12 semitones)"
+                        ));
+                    }
                 }
             }
             EffectType::Chorus {
@@ -1499,6 +1586,32 @@ impl SimpleNote {
 
         Ok(())
     }
+
+    /// Seconds of silence to render after the last note so this effect can ring out.
+    #[allow(dead_code)] // wired into render_patch's tail calculation in Task 2
+    pub fn tail_seconds(&self, tempo: u32) -> f32 {
+        if !self.enabled {
+            return 0.0;
+        }
+        let seconds_per_beat = 60.0 / tempo.max(1) as f32;
+        match &self.effect {
+            EffectType::Reverb { .. } => 1.0,
+            EffectType::Delay {
+                delay_time,
+                sync_tempo,
+                random_beats,
+                ..
+            } => {
+                let longest = match random_beats {
+                    Some([_, max]) => max * seconds_per_beat,
+                    None if *sync_tempo => delay_time * seconds_per_beat,
+                    None => *delay_time,
+                };
+                (4.0 * longest + 0.5).max(1.0)
+            }
+            _ => 0.5,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1602,6 +1715,117 @@ mod tests {
         assert!(matches!(e.effect, EffectType::Reverb { room_size, .. } if room_size == 0.7));
         assert_eq!(e.intensity, 0.6);
         assert!(e.enabled);
+    }
+
+    #[test]
+    fn delay_accepts_time_fracture_fields_with_defaults() {
+        let e: EffectConfig = serde_json::from_str(r#"{"type": "delay"}"#).unwrap();
+        match &e.effect {
+            EffectType::Delay {
+                random_beats,
+                random_rate,
+                pitch_intervals,
+                pitch_mode,
+                ..
+            } => {
+                assert!(random_beats.is_none());
+                assert_eq!(*random_rate, 0.0);
+                assert!(pitch_intervals.is_empty());
+                assert_eq!(*pitch_mode, PitchMode::Random);
+            }
+            other => panic!("not a delay: {other:?}"),
+        }
+        let e: EffectConfig = serde_json::from_str(
+            r#"{"type": "delay", "random_beats": [0.25, 1.0], "random_rate": 2.0,
+                "pitch_intervals": [7, 12], "pitch_mode": "up_down", "feedback": 0.5}"#,
+        )
+        .unwrap();
+        assert!(e.validate_effect_config().is_ok());
+        match &e.effect {
+            EffectType::Delay {
+                random_beats,
+                pitch_intervals,
+                pitch_mode,
+                ..
+            } => {
+                assert_eq!(*random_beats, Some([0.25, 1.0]));
+                assert_eq!(pitch_intervals, &vec![7.0, 12.0]);
+                assert_eq!(*pitch_mode, PitchMode::UpDown);
+            }
+            other => panic!("not a delay: {other:?}"),
+        }
+        assert!(
+            serde_json::from_str::<EffectConfig>(r#"{"type": "delay", "pitch_mode": "spiral"}"#)
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<EffectConfig>(r#"{"type": "delay", "min_beats": 1}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn time_fracture_validation_names_the_field_and_range() {
+        let cases = [
+            (
+                r#"{"type": "delay", "random_beats": [1.0, 5.0]}"#,
+                "random_beats",
+                "4",
+            ),
+            (
+                r#"{"type": "delay", "random_beats": [2.0, 1.0]}"#,
+                "random_beats",
+                "min",
+            ),
+            (
+                r#"{"type": "delay", "random_rate": 50}"#,
+                "random_rate",
+                "10",
+            ),
+            (
+                r#"{"type": "delay", "pitch_intervals": [30]}"#,
+                "pitch_intervals",
+                "12",
+            ),
+            (
+                r#"{"type": "delay", "pitch_intervals": [1,2,3,4,5,6,7,8,9,10,11,12,13]}"#,
+                "pitch_intervals",
+                "12",
+            ),
+        ];
+        for (json, field, needle) in cases {
+            let e: EffectConfig = serde_json::from_str(json).unwrap();
+            let err = e.validate_effect_config().unwrap_err();
+            assert!(err.contains(field) && err.contains(needle), "{json}: {err}");
+        }
+    }
+
+    #[test]
+    fn effect_tail_seconds_follows_the_longest_delay() {
+        let parse = |s: &str| serde_json::from_str::<EffectConfig>(s).unwrap();
+        assert_eq!(parse(r#"{"type": "reverb"}"#).tail_seconds(120), 1.0);
+        assert_eq!(parse(r#"{"type": "chorus"}"#).tail_seconds(120), 0.5);
+        // 0.25 s static delay: 4 x 0.25 + 0.5 = 1.5
+        assert!(
+            (parse(r#"{"type": "delay", "delay_time": 0.25}"#).tail_seconds(120) - 1.5).abs()
+                < 1e-6
+        );
+        // 2 beats at 60 BPM = 2 s: 4 x 2 + 0.5 = 8.5
+        assert!(
+            (parse(r#"{"type": "delay", "random_beats": [0.5, 2.0]}"#).tail_seconds(60) - 8.5)
+                .abs()
+                < 1e-6
+        );
+        // sync_tempo: delay_time is in beats: 1 beat at 120 = 0.5 s -> 2.5
+        assert!(
+            (parse(r#"{"type": "delay", "delay_time": 1.0, "sync_tempo": true}"#)
+                .tail_seconds(120)
+                - 2.5)
+                .abs()
+                < 1e-6
+        );
+        let mut off = parse(r#"{"type": "reverb"}"#);
+        off.enabled = false;
+        assert_eq!(off.tail_seconds(120), 0.0);
     }
 
     #[test]
