@@ -6,6 +6,7 @@ use crate::expressive::{
 };
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
+    validate_tempo,
 };
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -582,8 +583,8 @@ Example: Define a 4-bar house beat once, then play it with variations throughout
                     "tempo": {
                         "type": "integer",
                         "description": "🎵 Default tempo for this pattern (can be overridden when referenced)",
-                        "minimum": 60,
-                        "maximum": 200,
+                        "minimum": 20,
+                        "maximum": 300,
                         "default": 120
                     },
                     "pattern_bars": {
@@ -726,8 +727,8 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                     "tempo": {
                         "type": "integer",
                         "description": "🎵 Tempo in BPM for the entire sequence",
-                        "minimum": 60,
-                        "maximum": 200,
+                        "minimum": 20,
+                        "maximum": 300,
                         "default": 120
                     },
                     "beats_per_bar": {
@@ -807,8 +808,8 @@ Pass \"mode\": \"layer\" to play over what is already sounding; the default repl
                     "tempo": {
                         "type": "integer",
                         "description": "Tempo in BPM (optional, defaults to 120)",
-                        "minimum": 60,
-                        "maximum": 200
+                        "minimum": 20,
+                        "maximum": 300
                     },
                     "beats_per_bar": {
                         "type": "integer",
@@ -1077,6 +1078,9 @@ fn handle_play_notes(
     if sequence.notes.is_empty() {
         return JsonRpcResponse::error(id, INVALID_PARAMS, "Note sequence cannot be empty");
     }
+    if let Err(e) = validate_tempo(sequence.tempo) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
+    }
     if let Err(e) = validate_notes(&sequence.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
@@ -1106,6 +1110,9 @@ fn handle_define_pattern(
     };
     if pattern.notes.is_empty() {
         return JsonRpcResponse::error(id, INVALID_PARAMS, "Pattern notes cannot be empty");
+    }
+    if let Err(e) = validate_tempo(pattern.tempo) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
     if let Err(e) = validate_notes(&pattern.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
@@ -1165,6 +1172,9 @@ fn handle_play_sequence(
             INVALID_PARAMS,
             "Sequence must contain either notes or pattern references",
         );
+    }
+    if let Err(e) = validate_tempo(extended.tempo) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
     if let Err(e) = validate_notes(&extended.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
@@ -1552,6 +1562,57 @@ mod tests {
         );
         assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
         assert!(r.error.as_ref().unwrap().message.contains("random_beats"));
+    }
+
+    #[test]
+    fn a_tempo_outside_the_supported_range_is_a_parameter_error() {
+        let notes = json!([{"note": 60, "duration": 0.1}]);
+        let mut state = ServerState::new();
+        for tempo in [10, 400] {
+            for (tool, args) in [
+                ("play_notes", json!({"notes": notes, "tempo": tempo})),
+                ("play_sequence", json!({"notes": notes, "tempo": tempo})),
+                (
+                    "define_sequence_pattern",
+                    json!({"name": "p", "notes": notes, "tempo": tempo}),
+                ),
+            ] {
+                let r = call(&mut state, tool, args);
+                let e = r
+                    .error
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{tool} accepted tempo {tempo}"));
+                assert_eq!(e.code, INVALID_PARAMS, "{tool}: {}", e.message);
+                assert!(
+                    e.message.contains("tempo")
+                        && e.message.contains("20")
+                        && e.message.contains("300"),
+                    "{tool}: {}",
+                    e.message
+                );
+            }
+        }
+        // The bounds themselves are accepted. `define_sequence_pattern` is the
+        // one tool that validates the tempo without opening an audio device.
+        for tempo in [20, 300] {
+            let r = call(
+                &mut state,
+                "define_sequence_pattern",
+                json!({"name": "ok", "notes": notes, "tempo": tempo}),
+            );
+            assert!(r.error.is_none(), "tempo {tempo}: {:?}", r.error);
+        }
+        // Every schema that advertises a tempo advertises the same range.
+        let tools = handle_tools_list(Some(json!(1))).result.unwrap()["tools"].clone();
+        let mut seen = 0;
+        for tool in tools.as_array().unwrap() {
+            if let Some(schema) = tool["inputSchema"]["properties"]["tempo"].as_object() {
+                assert_eq!(schema["minimum"], json!(20), "{}", tool["name"]);
+                assert_eq!(schema["maximum"], json!(300), "{}", tool["name"]);
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 3, "play_notes, play_sequence and the pattern tool");
     }
 
     #[test]

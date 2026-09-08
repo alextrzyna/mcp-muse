@@ -2,8 +2,9 @@
 //! R2D2/patch buffers and a time-ordered MIDI event list.
 
 use crate::expressive::{
-    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, NoteEvent, Patch, PatchLibrary,
-    R2D2Emotion, R2D2Expression, R2D2Voice, SynthRef, render_length_seconds, render_patch,
+    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, MAX_RENDER_SECONDS, NoteEvent, Patch,
+    PatchLibrary, R2D2Emotion, R2D2Expression, R2D2Voice, SynthRef, render_length_seconds,
+    render_patch,
 };
 use crate::midi::engine::{
     EventKind, PlayCommand, PlayMode, SAMPLE_RATE, SYNTH_BUS_GAIN, seconds_to_frames,
@@ -291,7 +292,7 @@ impl Translator {
                     EffectsChain::with_tempo(SAMPLE_RATE as f32, sequence.tempo, effects);
                 let mut tail = 0.0f32;
                 if !chain.is_empty() {
-                    tail = effects_tail_seconds(effects, sequence.tempo);
+                    tail = r2d2_tail_seconds(effects, sequence.tempo);
                     samples.resize(samples.len() + (tail * SAMPLE_RATE as f32) as usize, 0.0);
                     chain.process_buffer(&mut samples);
                 }
@@ -359,7 +360,13 @@ impl Translator {
         let duration = if midi_notes.is_empty() && buffers.is_empty() {
             Duration::ZERO
         } else {
-            note_end + calculate_tail_time(&midi_notes)
+            // The bus chain rings out too: a beat-synced delay outlasts the
+            // CC-based estimate by far, and the caller sleeps this duration.
+            let bus_tail = Duration::from_secs_f32(effects_tail_seconds(
+                midi_effects.as_deref().unwrap_or(&[]),
+                sequence.tempo,
+            ));
+            note_end + calculate_tail_time(&midi_notes).max(bus_tail)
         };
         tracing::info!(
             "Translated {} MIDI notes and {} buffers ({} mode), {:.2}s including tail",
@@ -411,6 +418,13 @@ fn parse_emotion(name: &str) -> Result<R2D2Emotion, String> {
         "Thoughtful" => R2D2Emotion::Thoughtful,
         _ => return Err(format!("Unknown R2D2 emotion: {}", name)),
     })
+}
+
+/// Seconds of silence appended to an R2D2 note so its effects can ring out.
+/// Capped like a patch render: `tempo` is bounded at the tool layer, but this
+/// buffer is sized here, so it carries the same ceiling `render_patch` does.
+fn r2d2_tail_seconds(effects: &[EffectConfig], tempo: u32) -> f32 {
+    effects_tail_seconds(effects, tempo).min(MAX_RENDER_SECONDS)
 }
 
 /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
@@ -1018,6 +1032,77 @@ mod tests {
         assert!(
             (without as f64) < tail,
             "a dry R2D2 note must not be padded, got {without} samples"
+        );
+    }
+
+    #[test]
+    fn an_r2d2_tail_is_capped_like_a_patch_render() {
+        // The tool layer keeps `tempo` inside 20-300, but nothing downstream
+        // re-checks it, so the tail itself carries `render_patch`'s ceiling.
+        let delay: Vec<EffectConfig> = vec![
+            serde_json::from_value(
+                serde_json::json!({"type": "delay", "random_beats": [4.0, 4.0]}),
+            )
+            .unwrap(),
+        ];
+        assert_eq!(r2d2_tail_seconds(&delay, 1), MAX_RENDER_SECONDS);
+        // 4 beats at 20 BPM is 12 s, so the uncapped tail is 48.5 s.
+        assert!((r2d2_tail_seconds(&delay, 20) - 48.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_slowest_supported_tempo_still_bounds_the_r2d2_buffer() {
+        // Built directly, bypassing the tool-level tempo check.
+        let t = Translator::new(Ok(()));
+        let mut s = seq(vec![SimpleNote {
+            note_type: "r2d2".to_string(),
+            r2d2_emotion: Some("Happy".to_string()),
+            r2d2_intensity: Some(0.7),
+            r2d2_complexity: Some(2),
+            duration: Some(0.2),
+            effects: Some(vec![
+                serde_json::from_value(
+                    serde_json::json!({"type": "delay", "random_beats": [4.0, 4.0]}),
+                )
+                .unwrap(),
+            ]),
+            ..Default::default()
+        }]);
+        s.tempo = 20;
+        let tr = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        let frames = tr.command.buffers[0].1.len() as f32;
+        let ceiling =
+            (crate::midi::MAX_NOTE_SECONDS as f32 + MAX_RENDER_SECONDS) * SAMPLE_RATE as f32;
+        assert!(frames <= ceiling, "{frames} frames");
+        assert!(
+            tr.duration.as_secs_f32() <= crate::midi::MAX_NOTE_SECONDS as f32 + MAX_RENDER_SECONDS,
+            "{:?}",
+            tr.duration
+        );
+    }
+
+    #[test]
+    fn the_midi_bus_duration_covers_its_delay_tail() {
+        let t = Translator::new(Ok(()));
+        let mut s = seq(vec![SimpleNote {
+            note: Some(60),
+            start_time: Some(0.0),
+            duration: Some(0.5),
+            effects: Some(vec![
+                serde_json::from_value(
+                    serde_json::json!({"type": "delay", "random_beats": [1.0, 1.0]}),
+                )
+                .unwrap(),
+            ]),
+            ..Default::default()
+        }]);
+        s.tempo = 60;
+        let tr = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        // 1 beat at 60 BPM is 1 s, so the delay rings for 4 x 1 + 0.5 s.
+        assert!(
+            tr.duration.as_secs_f64() >= 0.5 + 4.5 - 1e-6,
+            "the bus tail must follow the delay, not just the CC-based estimate: {:?}",
+            tr.duration
         );
     }
 

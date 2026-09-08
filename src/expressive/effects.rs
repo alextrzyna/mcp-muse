@@ -393,8 +393,11 @@ impl Delay {
         intensity: f32,
     ) -> Self {
         let wet = (wet_level * intensity).clamp(0.0, 1.0);
+        // A validated `delay_time` is at most 2 s, well inside the ceiling; the
+        // clamp is here so no caller can size an unbounded line.
+        let delay_time = delay_time.clamp(0.001, MAX_DELAY_SECONDS);
         Self {
-            line: DelayLine::new((delay_time.max(0.001) * sample_rate) as usize),
+            line: DelayLine::new((delay_time * sample_rate) as usize),
             feedback: (feedback * intensity).clamp(0.0, 0.95),
             lp: 0.0,
             wet,
@@ -726,7 +729,9 @@ impl EffectNode {
                     ))
                 } else {
                     let seconds = if *sync_tempo {
-                        delay_time * seconds_per_beat
+                        // Beats at an out-of-range tempo could be arbitrarily
+                        // long; the line is allocated on the audio thread.
+                        (delay_time * seconds_per_beat).min(MAX_DELAY_SECONDS)
                     } else {
                         *delay_time
                     };
@@ -920,6 +925,32 @@ mod tests {
         assert!(
             (first_echo_index(&out) as i64 - 44100).abs() <= 2,
             "1 beat at 60 BPM is one second"
+        );
+    }
+
+    #[test]
+    fn no_delay_configuration_can_size_an_unbounded_line() {
+        // The chain is built on the audio thread from a tempo the tool layer has
+        // already bounded, but the DSP keeps its own ceiling: `sync_tempo` beats
+        // at an absurd tempo, and `Delay::new` called directly, both clamp.
+        let cfg: EffectConfig = serde_json::from_str(
+            r#"{"type": "delay", "delay_time": 3.0, "sync_tempo": true, "feedback": 0.0, "wet_level": 1.0, "intensity": 1.0}"#,
+        )
+        .unwrap();
+        let EffectNode::Delay(synced) = EffectNode::from_config(SR, 1, &cfg) else {
+            panic!("a delay config builds a delay");
+        };
+        let ceiling = MAX_DELAY_SECONDS * SR + 1.0;
+        assert!(
+            synced.current_delay_samples() <= ceiling,
+            "3 beats at 1 BPM must clamp, got {} samples",
+            synced.current_delay_samples()
+        );
+        let direct = Delay::new(SR, 1000.0, 0.0, 1.0, 1.0);
+        assert!(
+            direct.current_delay_samples() <= ceiling,
+            "a static delay must clamp too, got {} samples",
+            direct.current_delay_samples()
         );
     }
 

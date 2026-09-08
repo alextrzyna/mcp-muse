@@ -667,6 +667,24 @@ fn default_tempo() -> u32 {
     120
 }
 
+/// Slowest and fastest sequence tempo the tools accept. Beat-synced effects and
+/// their render tails scale with `60 / tempo`, so a tempo near zero would size
+/// enormous buffers; the JSON schemas advertise the same range.
+pub const MIN_TEMPO: u32 = 20;
+pub const MAX_TEMPO: u32 = 300;
+
+/// Parameter check shared by every tool that accepts a `tempo`: `play_notes`,
+/// `play_sequence` and `define_sequence_pattern`.
+pub fn validate_tempo(tempo: u32) -> Result<(), String> {
+    if !(MIN_TEMPO..=MAX_TEMPO).contains(&tempo) {
+        return Err(format!(
+            "tempo {} is out of range ({}-{} BPM)",
+            tempo, MIN_TEMPO, MAX_TEMPO
+        ));
+    }
+    Ok(())
+}
+
 impl SimpleSequence {
     #[allow(dead_code)]
     pub fn new() -> Self {
