@@ -61,7 +61,7 @@ per side). `MidiPlayer::play(sequence, mode, &session_patches)` translates and s
 `EffectConfig::tail_seconds`.
 
 1. `Translator` resolves `synth` references (session patches, then built-ins, then inline; an unknown name is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
-2. Synthesis notes are grouped by patch, rendered on the tool thread by `render_patch` into one stereo buffer per patch (voices summed, the patch's optional LFO read once per sample and mapped onto `Modulation`, the patch's effects chain applied once, `SYNTH_BUS_GAIN` applied) and scheduled as buffers.
+2. Synthesis notes are grouped by patch, rendered on the tool thread by `render_patch` into one stereo buffer per patch (voices summed, the patch's optional LFO read once per sample and mapped onto `Modulation`, the patch's effects chain applied once, a per-patch peak limiter (`PATCH_LIMITER_CEILING` 1.5, so chords stay under the 0.8 soft-clip knee after `SYNTH_BUS_GAIN`), `SYNTH_BUS_GAIN` applied) and scheduled as buffers.
 3. MIDI notes become time-ordered events: per call, the first note on a channel sends a program change (its instrument, or 0), controllers only when specified. Channel 9 is OxiSynth's drum channel; no bank select is needed.
 4. The engine drains commands per 1024-frame chunk and applies events at their exact frame (`LEAD_FRAMES` = 2048 after the command). It sums the buses, soft-clips, and emits stereo.
 5. `mode: replace` (default) fades 6 ms, sends SystemReset, clears the queue and installs the call's bus chain; `layer` mixes on top. `stop_playback` is the same reset with nothing scheduled.
@@ -74,7 +74,7 @@ engine API is the next step if the callback still glitches.
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: the R2D2 ring-modulation voice only. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`).
 - `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `wavetables.rs` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive, fm, wavetable, granular and percussion engines plus an optional per-patch `lfo` and an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
-- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh, chime, burst; these carry their own envelopes so the ADSR is skipped.
+- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh, chime, burst; these carry their own envelopes so the ADSR is skipped. Hits are peak-normalised to `PERCUSSION_PEAK` at note-on so `level` is comparable across kinds.
 - `wavetables.rs` - builds eight procedural tables once (`OnceLock`) as ten per-octave band-limited levels; `WavetableVoice` picks the level from the note's pitch.
 - `engines/granular.rs` - `GranularVoice`: at note-on builds one peak-normalised source cycle (`harmonics|noise|formant|inharmonic`; `noise` is a fresh random cycle each time) and scatters up to 32 overlapping grains across it, summed with 1/sqrt(active) normalisation and panned for true stereo width.
 - `lfo.rs` - five-shape LFO; `render_patch` runs one per patch and maps it onto `Modulation` (`engines/mod.rs`) each sample: cutoff, pitch, amplitude, wavetable morph, grain density.
@@ -103,3 +103,4 @@ Cursor MCP config, stores an optional custom SoundFont path.
 - **Effects are stateful**: one instance per synth patch render (shared across every note of that patch in the call), one per R2D2 note, and one per MIDI bus. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
 - **Stereo throughout** the mixer; mono sources are centered.
 - **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call.
+- **Headroom is measured, not assumed**: the library test renders each category's demo phrase (a chord for pads) and a held full-velocity note and asserts a 1.4 pre-bus ceiling below the limiter's 1.5; set levels with `cargo test print_builtin_headroom_survey -- --ignored --nocapture`.
