@@ -282,7 +282,15 @@ mod tests {
                 "{name} peaks at {phrase_peak} over its demo phrase; lower its level"
             );
             let floor_notes = floor_phrase(p, category);
-            let floor_peak = if floor_notes.as_slice() == demo_phrase(category) {
+            let uses_demo_phrase = floor_notes.as_slice() == demo_phrase(category);
+            // Name the stimulus the floor number actually came from: most
+            // patches are measured on the demo phrase, slow pads on the chord.
+            let floor_stimulus = if uses_demo_phrase {
+                "its demo phrase"
+            } else {
+                "its 6 s floor chord"
+            };
+            let floor_peak = if uses_demo_phrase {
                 phrase_peak
             } else {
                 let floor_buf = render_patch(
@@ -294,13 +302,13 @@ mod tests {
                 let fp = peak(&floor_buf);
                 assert!(
                     fp <= HEADROOM_CEILING,
-                    "{name} peaks at {fp} over its floor chord; lower its level"
+                    "{name} peaks at {fp} over {floor_stimulus}; lower its level"
                 );
                 fp
             };
             assert!(
                 floor_peak >= headroom_floor(p, category),
-                "{name} peaks at only {floor_peak} over its floor chord; raise its level"
+                "{name} peaks at only {floor_peak} over {floor_stimulus}; raise its level"
             );
 
             // A long note at full velocity catches slow pads measured mid-attack by the phrase.
@@ -309,6 +317,72 @@ mod tests {
             assert!(
                 held_peak <= HEADROOM_CEILING,
                 "{name} peaks at {held_peak} on a held full-velocity note; lower its level"
+            );
+        }
+    }
+
+    /// The kick's and the crash's filter cutoffs were retuned during the level
+    /// pass so percussion normalisation reaches the bus; nothing else measures
+    /// the tone those filters leave behind, so a later cutoff edit that still
+    /// clears the headroom bands could quietly turn either patch into a
+    /// different sound. The bounds below come from measurement, not theory.
+    #[test]
+    fn drum_patches_keep_their_character_through_their_filters() {
+        use crate::expressive::render::render_patch;
+        use crate::expressive::test_util::goertzel_power;
+
+        const SAMPLE_RATE: f32 = 44100.0;
+        let lib = PatchLibrary::new();
+        // One hit, exactly as the demo phrase plays these unpitched patches.
+        let hit = |p: &Patch| -> Vec<f32> {
+            let buf = render_patch(
+                p,
+                &phrase_events(p, &[(36, 0.0, 0.5)], 100.0 / 127.0),
+                SAMPLE_RATE,
+                120,
+            );
+            buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect()
+        };
+
+        // The kick keeps its body: the 800 Hz click its low-pass exists to tame
+        // must not swamp the 60 Hz fundamental. The ratio is below 1 because the
+        // body sweeps down from 240 Hz and leaves only part of its power in the
+        // 60 Hz bin; what this pins is the click's share, which grows as the
+        // low-pass opens (measured 0.22 at the shipped 3 kHz, 0.16 at 4 kHz,
+        // 0.12 at 6 kHz, 0.09 wide open; 4.3 at 500 Hz).
+        const KICK_BODY_OVER_CLICK: f32 = 0.15;
+        let kick = lib.get("tr_808_kick").unwrap();
+        // The kick path has no randomness; the repeats confirm that.
+        for _ in 0..10 {
+            let mono = hit(kick);
+            let body = goertzel_power(&mono, 60.0, SAMPLE_RATE);
+            let click = goertzel_power(&mono, 800.0, SAMPLE_RATE);
+            assert!(
+                body >= KICK_BODY_OVER_CLICK * click,
+                "tr_808_kick lost its body: 60 Hz power {body:e} is only {:.3}x the 800 Hz click {click:e}; its low-pass is too far open",
+                body / click
+            );
+        }
+
+        // The crash stays bright: every partial of the cymbal sits at or above
+        // 2.5 kHz, so its high-pass corner has to leave those alone. The hiss is
+        // unseeded, so the 200 Hz bin swings hard render to render: over 2000
+        // renders the ratio ran 14.9 (min) / 37.6 (1st pct) / 440 (median), so
+        // the bound sits well under that tail. A filter that really did dull the
+        // crash lands below 1.
+        const CRASH_BRIGHT_OVER_LOW: f32 = 6.0;
+        let crash = lib.get("crash_cymbal").unwrap();
+        for _ in 0..20 {
+            let mono = hit(crash);
+            let bright: f32 = [2500.0, 3500.0, 5000.0]
+                .iter()
+                .map(|&f| goertzel_power(&mono, f, SAMPLE_RATE))
+                .sum();
+            let low = goertzel_power(&mono, 200.0, SAMPLE_RATE);
+            assert!(
+                bright >= CRASH_BRIGHT_OVER_LOW * low,
+                "crash_cymbal lost its sparkle: 2.5-5 kHz power {bright:e} is only {:.1}x the 200 Hz power {low:e}",
+                bright / low
             );
         }
     }
