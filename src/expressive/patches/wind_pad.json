@@ -9,8 +9,8 @@
     "env": {"attack": 3.0, "decay": 2.0, "sustain": 0.6, "release": 4.0}
   },
   "effects": [
-    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.8},
-    {"type": "reverb", "room_size": 0.7, "dampening": 0.3, "wet_level": 0.4, "pre_delay": 0.04, "intensity": 0.6},
-    {"type": "chorus", "rate": 0.8, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.8, "intensity": 0.5}
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.05},
+    {"type": "reverb", "room_size": 0.7, "dampening": 0.3, "wet_level": 0.4, "pre_delay": 0.04, "intensity": 0.05},
+    {"type": "chorus", "rate": 0.8, "depth": 0.4, "feedback": 0.2, "stereo_width": 0.8, "intensity": 0.1}
   ]
 }
