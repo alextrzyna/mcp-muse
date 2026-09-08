@@ -106,10 +106,15 @@ pub fn test_effects() -> Result<(), Box<dyn std::error::Error>> {
     let delay = serde_json::from_value(serde_json::json!([
         {"type": "delay", "delay_time": 0.375, "feedback": 0.5, "intensity": 0.6}
     ]))?;
+    let shimmer = serde_json::from_value(serde_json::json!([
+        {"type": "delay", "random_beats": [0.5, 1.0], "random_rate": 0.5,
+         "pitch_intervals": [7, 12], "pitch_mode": "up_down", "feedback": 0.5, "intensity": 0.6}
+    ]))?;
     for (label, fx) in [
         ("dry", None),
         ("reverb", Some(reverb)),
         ("delay", Some(delay)),
+        ("time fracture shimmer", Some(shimmer)),
     ] {
         println!("🎹 piano chord: {label}");
         let duration = player.play(chord(fx), PlayMode::Replace, &none)?;

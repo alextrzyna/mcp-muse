@@ -1,7 +1,7 @@
 # Agent-defined synths and effects
 
 Date: 2026-09-06
-Status: PRs 1-3 implemented; PR 4 pending
+Status: All four PRs implemented (2026-09-07); follow-up: issue #109 headroom
 
 ## Goal
 
@@ -156,7 +156,11 @@ and `sustain` 0 to 1. Defaults: 0.01, 0.1, 0.8, 0.3.
   (0 to 4 beats, replaces `delay_time` when present), `random_rate` Hz
   (0 = static), `pitch_intervals` (up to 12 semitone values, -12 to 12),
   `pitch_mode`: `random | up | down | up_down`. Beat values use the
-  sequence tempo.
+  sequence tempo. `random_rate` 0 fixes the delay at `min`; with pitch
+  intervals and rate 0 a new repeat (and the next interval) starts every
+  delay period. Intervals are rounded to whole semitones. Tails:
+  `EffectConfig::tail_seconds` = 4 × the longest delay + 0.5 s (min 1 s),
+  1 s for reverb, 0.5 s otherwise.
 
 **Pitch and dynamics.** Pitch comes from the note's MIDI number. Velocity
 scales amplitude linearly (velocity 127 = patch `level`). The note's
@@ -205,8 +209,10 @@ of each enabled engine, the LFO and the patch's `EffectsChain`, and
 renders one **stereo** buffer:
 
 1. Span: from the earliest note-on to the latest note-off plus the longest
-   release across enabled engines plus `EFFECT_TAIL_SECONDS` when the
-   chain is non-empty.
+   release across enabled engines plus the chain's tail
+   (`EffectConfig::tail_seconds(tempo)`, per-effect: 1 s for reverb, 4 ×
+   the longest delay time + 0.5 s (min 1 s) for delay, 0.5 s otherwise;
+   0 when the chain is empty).
 2. Each note spawns one voice per enabled engine with a gate of the note's
    duration. Envelopes are gate-driven: attack, decay and sustain while
    the gate is open, release once it closes. This replaces
@@ -321,17 +327,19 @@ zero-crossing rate), never by ear:
 Four PRs, each leaving `main` working, each with its own implementation
 plan:
 
-1. **Foundation.** Patch model and `PatchLibrary`, gate envelopes, stereo
+1. **Foundation** (done). Patch model and `PatchLibrary`, gate envelopes, stereo
    buffers, subtractive and percussion engines, `PatchRenderer`,
    `define_synth`, `synth` on notes, removal of the old fields and Rust
    presets, built-in patches for the subtractive basses, the lead, drums,
    sound effects and subtractive approximations of the pads, `list_sounds`
    changes, minimal demo rewrite, README section.
-2. **FM and wavetable** engines and their built-in patches: the three FM
+2. **FM and wavetable** (done) engines and their built-in patches: the three FM
    presets (DX7 E.Piano, DX7 Slap Bass, TX81Z Lately), bells, organs.
-3. **Granular and LFO**, then the full pad, texture and drone patches.
-4. **Time Fracture** delay fields, `demos.rs` rewritten around patches,
+3. **Granular and LFO** (done), then the full pad, texture and drone patches.
+4. **Time Fracture** (done) delay fields, `demos.rs` rewritten around patches,
    docs pass.
+
+Follow-up: issue #109 (chord headroom, sustained-note guard, drum levels).
 
 ## Out of scope
 

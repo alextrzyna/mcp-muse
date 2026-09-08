@@ -56,6 +56,9 @@ min-heap of MIDI events keyed to the engine's 44.1 kHz sample clock, the
 pre-rendered R2D2/synthesis buffers, and the MIDI bus `EffectsChain` (one
 per side). `MidiPlayer::play(sequence, mode, &session_patches)` translates and sends a
 `PlayCommand`; it returns the duration including effect tails.
+`PlayCommand.tempo` carries the sequence tempo to the MIDI bus chain;
+`render_patch` and the R2D2 chain take it directly; render tails come from
+`EffectConfig::tail_seconds`.
 
 1. `Translator` resolves `synth` references (session patches, then built-ins, then inline; an unknown name is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
 2. Synthesis notes are grouped by patch, rendered on the tool thread by `render_patch` into one stereo buffer per patch (voices summed, the patch's optional LFO read once per sample and mapped onto `Modulation`, the patch's effects chain applied once, `SYNTH_BUS_GAIN` applied) and scheduled as buffers.
@@ -75,9 +78,9 @@ engine API is the next step if the callback still glitches.
 - `wavetables.rs` - builds eight procedural tables once (`OnceLock`) as ten per-octave band-limited levels; `WavetableVoice` picks the level from the note's pitch.
 - `engines/granular.rs` - `GranularVoice`: at note-on builds one peak-normalised source cycle (`harmonics|noise|formant|inharmonic`; `noise` is a fresh random cycle each time) and scatters up to 32 overlapping grains across it, summed with 1/sqrt(active) normalisation and panned for true stereo width.
 - `lfo.rs` - five-shape LFO; `render_patch` runs one per patch and maps it onto `Modulation` (`engines/mod.rs`) each sample: cutoff, pitch, amplitude, wavetable morph, grain density.
-- `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::new(sample_rate, &[EffectConfig])` then `process` per sample or `process_buffer`.
+- `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay with Time Fracture (beat-synced random time, pitch-shifted repeats), 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::with_tempo(sample_rate, tempo, &[EffectConfig])` (or `new` for 120 BPM) then `process` per sample or `process_buffer`.
 - `effects_presets.rs` - named chains ("studio", "concert_hall", ...).
-- `patches/` - 43 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
+- `patches/` - 44 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
 - `r2d2.rs` - emotion parameter tables (pitch contours, ranges).
 
 ### Data model (`src/midi/mod.rs`)
@@ -97,6 +100,6 @@ Cursor MCP config, stores an optional custom SoundFont path.
 
 ## Important Architectural Decisions
 - **Unified playback**: every audio type goes through `MidiPlayer::play` and the one `MidiEngine`.
-- **Effects are stateful and per note** for synthesis/R2D2, per bus for MIDI. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
+- **Effects are stateful**: one instance per synth patch render (shared across every note of that patch in the call), one per R2D2 note, and one per MIDI bus. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
 - **Stereo throughout** the mixer; mono sources are centered.
 - **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call.

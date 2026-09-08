@@ -1436,3 +1436,43 @@ fn lfo_and_granular_errors_name_the_field() {
             .contains("grain_size")
     );
 }
+
+#[test]
+fn time_fracture_delay_plays_by_name_and_inline_and_is_validated() {
+    let mut server = TestServer::start();
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 50, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"tempo": 90, "notes": [
+            {"synth": "shimmer_keys", "note": 72, "start_time": 0.0, "duration": 0.3}]}}
+    }));
+    assert!(r["error"].is_null(), "{r}");
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 51, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"note": 60, "instrument": 0, "start_time": 0.0, "duration": 0.3,
+             "effects": [{"type": "delay", "delay_time": 0.5, "sync_tempo": true, "feedback": 0.4, "intensity": 0.5}]}]}}
+    }));
+    assert!(r["error"].is_null(), "{r}");
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 52, "method": "tools/call",
+        "params": {"name": "play_notes", "arguments": {"notes": [
+            {"synth": {"name": "x", "subtractive": {}, "effects": [{"type": "delay", "pitch_intervals": [40]}]},
+             "note": 60, "duration": 0.2}]}}
+    }));
+    assert_eq!(r["error"]["code"], -32602);
+    assert!(
+        r["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("pitch_intervals")
+    );
+    let r = server.call(json!({
+        "jsonrpc": "2.0", "id": 53, "method": "tools/call",
+        "params": {"name": "list_sounds", "arguments": {"section": "effects"}}
+    }));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.contains("random_beats") && text.contains("pitch_intervals"),
+        "{text}"
+    );
+}

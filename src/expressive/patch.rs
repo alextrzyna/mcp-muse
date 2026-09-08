@@ -161,7 +161,7 @@ mod tests {
                 frequency: if p.has_pitched_engine() { 261.63 } else { 60.0 },
                 velocity: 100.0 / 127.0,
             };
-            let buf = render_patch(p, &[note], 44100.0);
+            let buf = render_patch(p, &[note], 44100.0, 120);
             let peak = buf
                 .iter()
                 .flat_map(|s| s.iter())
@@ -196,7 +196,8 @@ mod tests {
         assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
         assert!(lib.get("wt_organ").is_some());
         assert!(lib.get("grain_cloud").is_some() && lib.get("drone").is_some());
-        assert!(lib.count() >= 43);
+        assert!(lib.get("shimmer_keys").is_some());
+        assert!(lib.count() >= 44);
     }
 
     #[test]
@@ -407,6 +408,21 @@ mod tests {
         assert!(
             p.validate().unwrap_err().contains("granular"),
             "no-engines message lists granular"
+        );
+    }
+
+    #[test]
+    fn invalid_effect_on_a_patch_is_reported_with_its_index() {
+        let p = parse(json!({
+            "name": "fractured",
+            "subtractive": {},
+            "effects": [{"type": "delay", "random_rate": 50}],
+        }))
+        .unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(
+            err.contains("effects[0]") && err.contains("random_rate"),
+            "{err}"
         );
     }
 }
@@ -1343,6 +1359,10 @@ impl Patch {
         if let Some(lfo) = &self.lfo {
             lfo.validate("lfo")?;
         }
+        for (i, e) in self.effects.iter().enumerate() {
+            e.validate_effect_config()
+                .map_err(|err| format!("effects[{i}]: {err}"))?;
+        }
         Ok(())
     }
 }
@@ -1400,6 +1420,8 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/formant_texture.json"),
     include_str!("patches/noise_texture.json"),
     include_str!("patches/drone.json"),
+    // time fracture
+    include_str!("patches/shimmer_keys.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.

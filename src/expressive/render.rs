@@ -10,9 +10,7 @@ use crate::expressive::engines::{
     WavetableVoice,
 };
 use crate::expressive::{EffectsChain, Lfo, Patch};
-
-/// Extra silence rendered after the last release so reverbs and delays can ring out.
-pub const EFFECT_TAIL_SECONDS: f32 = 1.0;
+use crate::midi::effects_tail_seconds;
 
 /// Hard ceiling on how much audio one `render_patch` call may produce.
 /// `SimpleNote::validate_timing` already rejects absurd note lengths at the
@@ -38,7 +36,7 @@ struct ActiveVoice {
 }
 
 /// Seconds of audio `render_patch` produces for these notes.
-pub fn render_length_seconds(patch: &Patch, notes: &[NoteEvent]) -> f32 {
+pub fn render_length_seconds(patch: &Patch, notes: &[NoteEvent], tempo: u32) -> f32 {
     if notes.is_empty() {
         return 0.0;
     }
@@ -51,17 +49,18 @@ pub fn render_length_seconds(patch: &Patch, notes: &[NoteEvent]) -> f32 {
         .iter()
         .map(|n| n.start.max(0.0) + n.duration.max(0.0).max(min_gate))
         .fold(0.0f32, f32::max);
-    let effect_tail = if patch.effects.iter().any(|e| e.enabled) {
-        EFFECT_TAIL_SECONDS
-    } else {
-        0.0
-    };
+    let effect_tail = effects_tail_seconds(&patch.effects, tempo);
     (last_gate + patch.release_seconds() + effect_tail).min(MAX_RENDER_SECONDS)
 }
 
 /// Render all `notes` through `patch` into one stereo buffer.
-pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec<[f32; 2]> {
-    let total = (render_length_seconds(patch, notes) * sample_rate) as usize;
+pub fn render_patch(
+    patch: &Patch,
+    notes: &[NoteEvent],
+    sample_rate: f32,
+    tempo: u32,
+) -> Vec<[f32; 2]> {
+    let total = (render_length_seconds(patch, notes, tempo) * sample_rate) as usize;
     if total == 0 {
         return Vec::new();
     }
@@ -129,8 +128,8 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
         .as_ref()
         .filter(|l| l.is_active())
         .map(|l| (Lfo::new(l.rate, l.wave, sample_rate), l.target, l.depth));
-    let mut chain_l = EffectsChain::new(sample_rate, &patch.effects);
-    let mut chain_r = EffectsChain::new(sample_rate, &patch.effects);
+    let mut chain_l = EffectsChain::with_tempo(sample_rate, tempo, &patch.effects);
+    let mut chain_r = EffectsChain::with_tempo(sample_rate, tempo, &patch.effects);
     let mut out = vec![[0.0f32; 2]; total];
 
     for (i, frame) in out.iter_mut().enumerate() {
@@ -204,20 +203,23 @@ mod tests {
     fn length_covers_the_last_note_its_release_and_the_effect_tail() {
         let dry = patch(json!({"name": "d", "subtractive": {"env": {"release": 0.5}}}));
         let notes = [note(0.0, 1.0, 220.0), note(1.0, 1.0, 330.0)];
-        assert!((render_length_seconds(&dry, &notes) - 2.5).abs() < 1e-4);
+        assert!((render_length_seconds(&dry, &notes, 120) - 2.5).abs() < 1e-4);
         let wet = patch(
             json!({"name": "w", "subtractive": {"env": {"release": 0.5}},
             "effects": [{"type": "reverb"}]}),
         );
-        assert!((render_length_seconds(&wet, &notes) - 3.5).abs() < 1e-4);
-        assert_eq!(render_patch(&dry, &notes, SR).len(), (2.5 * SR) as usize);
+        assert!((render_length_seconds(&wet, &notes, 120) - 3.5).abs() < 1e-4);
+        assert_eq!(
+            render_patch(&dry, &notes, SR, 120).len(),
+            (2.5 * SR) as usize
+        );
     }
 
     #[test]
     fn a_note_starts_at_its_offset_and_rings_through_its_release() {
         let p =
             patch(json!({"name": "p", "subtractive": {"env": {"attack": 0.001, "release": 0.3}}}));
-        let buf = left(&render_patch(&p, &[note(0.5, 0.5, 220.0)], SR));
+        let buf = left(&render_patch(&p, &[note(0.5, 0.5, 220.0)], SR, 120));
         assert!(
             rms(&buf[..(0.45 * SR) as usize]) < 1e-6,
             "silent before start"
@@ -244,11 +246,12 @@ mod tests {
             json!({"name": "p", "subtractive": {"osc1": {"wave": "sine"},
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}}),
         );
-        let one = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR));
+        let one = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR, 120));
         let two = left(&render_patch(
             &p,
             &[note(0.0, 1.0, 220.0), note(0.0, 1.0, 220.0)],
             SR,
+            120,
         ));
         let r1 = rms(&one[4410..40000]);
         let r2 = rms(&two[4410..40000]);
@@ -264,7 +267,7 @@ mod tests {
             json!({"name": "p", "level": 0.5, "subtractive": {"osc1": {"wave": "sine"},
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}}),
         );
-        let full = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR));
+        let full = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR, 120));
         let soft = left(&render_patch(
             &p,
             &[NoteEvent {
@@ -272,6 +275,7 @@ mod tests {
                 ..note(0.0, 1.0, 220.0)
             }],
             SR,
+            120,
         ));
         let peak = |s: &[f32]| s.iter().fold(0.0f32, |m, x| m.max(x.abs()));
         assert!(
@@ -294,8 +298,8 @@ mod tests {
             "effects": [{"type": "reverb", "room_size": 0.9, "wet_level": 0.8, "intensity": 1.0}]}),
         );
         let n = [note(0.0, 0.5, 220.0)];
-        let d = left(&render_patch(&dry, &n, SR));
-        let w = left(&render_patch(&wet, &n, SR));
+        let d = left(&render_patch(&dry, &n, SR, 120));
+        let w = left(&render_patch(&wet, &n, SR, 120));
         let tail = (0.7 * SR) as usize..(1.2 * SR) as usize;
         // Dry has no effect tail at all: its buffer ends at the release, well
         // before `tail` starts (this is what makes the reverb's tail audible).
@@ -304,9 +308,42 @@ mod tests {
     }
 
     #[test]
+    fn a_long_delay_extends_the_tail_with_the_tempo() {
+        let p = patch(
+            json!({"name": "d", "subtractive": {"env": {"release": 0.1}},
+            "effects": [{"type": "delay", "random_beats": [1.0, 2.0], "feedback": 0.5, "intensity": 0.6}]}),
+        );
+        let n = [note(0.0, 0.5, 220.0)];
+        // 2 beats at 120 = 1 s -> tail 4.5; at 60 = 2 s -> tail 8.5.
+        assert!((render_length_seconds(&p, &n, 120) - (0.6 + 4.5)).abs() < 1e-4);
+        assert!((render_length_seconds(&p, &n, 60) - (0.6 + 8.5)).abs() < 1e-4);
+        let buf = left(&render_patch(&p, &n, SR, 60));
+        assert!(
+            rms(&buf[(3.0 * SR) as usize..(3.5 * SR) as usize]) > 1e-3,
+            "repeats still audible at 3 s"
+        );
+    }
+
+    #[test]
+    fn beat_synced_delay_follows_the_tempo() {
+        let p = patch(
+            json!({"name": "d", "subtractive": {"osc1": {"wave": "sine"},
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            "effects": [{"type": "delay", "random_beats": [1.0, 1.0], "feedback": 0.0, "wet_level": 1.0, "intensity": 1.0}]}),
+        );
+        let n = [note(0.0, 0.1, 220.0)];
+        let fast = left(&render_patch(&p, &n, SR, 120)); // repeat at 0.5 s
+        let slow = left(&render_patch(&p, &n, SR, 60)); // repeat at 1.0 s
+        let energy =
+            |s: &[f32], from: f32| rms(&s[(from * SR) as usize..((from + 0.1) * SR) as usize]);
+        assert!(energy(&fast, 0.5) > 0.05 && energy(&fast, 1.0) < 1e-3);
+        assert!(energy(&slow, 1.0) > 0.05 && energy(&slow, 0.5) < 1e-3);
+    }
+
+    #[test]
     fn mono_engines_are_centered_and_percussion_ignores_pitch() {
         let p = patch(json!({"name": "k", "percussion": {"kind": "kick"}}));
-        let a = render_patch(&p, &[note(0.0, 0.5, 60.0)], SR);
+        let a = render_patch(&p, &[note(0.0, 0.5, 60.0)], SR, 120);
         assert!(a.iter().all(|s| s[0] == s[1]), "centered");
         assert!(rms(&left(&a)) > 0.01);
     }
@@ -317,10 +354,10 @@ mod tests {
             json!({"name": "both", "subtractive": {"level": 0.5, "env": {"release": 0.01}},
             "percussion": {"kind": "kick", "level": 0.5}}),
         );
-        let a = left(&render_patch(&p, &[note(0.0, 0.5, 110.0)], SR));
+        let a = left(&render_patch(&p, &[note(0.0, 0.5, 110.0)], SR, 120));
         let sub_only =
             patch(json!({"name": "s", "subtractive": {"level": 0.5, "env": {"release": 0.01}}}));
-        let b = left(&render_patch(&sub_only, &[note(0.0, 0.5, 110.0)], SR));
+        let b = left(&render_patch(&sub_only, &[note(0.0, 0.5, 110.0)], SR, 120));
         assert!(
             rms(&a[..2205]) > rms(&b[..2205]) * 1.2,
             "kick adds energy at the start"
@@ -333,8 +370,8 @@ mod tests {
         // that no note can size a buffer beyond MAX_RENDER_SECONDS.
         let p = patch(json!({"name": "p", "subtractive": {"env": {"release": 0.01}}}));
         let notes = [note(0.0, 100_000.0, 220.0)];
-        assert!(render_length_seconds(&p, &notes) <= MAX_RENDER_SECONDS);
-        let buf = render_patch(&p, &notes, 100.0);
+        assert!(render_length_seconds(&p, &notes, 120) <= MAX_RENDER_SECONDS);
+        let buf = render_patch(&p, &notes, 100.0, 120);
         assert!(
             buf.len() <= (MAX_RENDER_SECONDS * 100.0) as usize,
             "buffer of {} samples",
@@ -345,7 +382,7 @@ mod tests {
     #[test]
     fn empty_notes_render_nothing() {
         let p = patch(json!({"name": "p", "subtractive": {}}));
-        assert!(render_patch(&p, &[], SR).is_empty());
+        assert!(render_patch(&p, &[], SR, 120).is_empty());
     }
 
     #[test]
@@ -357,7 +394,7 @@ mod tests {
             frequency: 60.0,
             velocity: 1.0,
         }];
-        let buf = render_patch(&p, &n, SR);
+        let buf = render_patch(&p, &n, SR, 120);
         assert_eq!(buf.len(), (MIN_HIT_SECONDS * SR) as usize);
         assert!(rms(&left(&buf)) > 0.01);
     }
@@ -367,7 +404,7 @@ mod tests {
         let fm_only = patch(json!({"name": "f", "fm": {"operators": [
             {"ratio": 1.0, "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
             {"ratio": 2.0, "level": 0.5, "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}]}}));
-        let a = left(&render_patch(&fm_only, &[note(0.0, 0.5, 220.0)], SR));
+        let a = left(&render_patch(&fm_only, &[note(0.0, 0.5, 220.0)], SR, 120));
         assert!(rms(&a[441..22050]) > 0.3, "fm voice sounds");
         assert!(a.iter().all(|x| x.is_finite()));
 
@@ -382,8 +419,8 @@ mod tests {
             "fm": {"level": 0.5, "operators": [{"ratio": 1.0, "detune_cents": 7.0, "env": {"release": 0.01}}]}}));
         let sub_only = patch(json!({"name": "s", "level": 0.5,
             "subtractive": {"level": 0.5, "env": {"release": 0.01}}}));
-        let b = left(&render_patch(&both, &[note(0.0, 0.5, 220.0)], SR));
-        let s = left(&render_patch(&sub_only, &[note(0.0, 0.5, 220.0)], SR));
+        let b = left(&render_patch(&both, &[note(0.0, 0.5, 220.0)], SR, 120));
+        let s = left(&render_patch(&sub_only, &[note(0.0, 0.5, 220.0)], SR, 120));
         assert!(
             rms(&b[4410..22050]) > rms(&s[4410..22050]) * 1.2,
             "fm adds energy"
@@ -393,14 +430,14 @@ mod tests {
     #[test]
     fn fm_release_extends_the_buffer() {
         let p = patch(json!({"name": "f", "fm": {"operators": [{"env": {"release": 0.7}}]}}));
-        assert!((render_length_seconds(&p, &[note(0.0, 0.5, 220.0)]) - 1.2).abs() < 1e-4);
+        assert!((render_length_seconds(&p, &[note(0.0, 0.5, 220.0)], 120) - 1.2).abs() < 1e-4);
     }
 
     #[test]
     fn wavetable_engine_renders() {
         let p =
             patch(json!({"name": "w", "wavetable": {"table": "organ", "env": {"release": 0.2}}}));
-        let buf = left(&render_patch(&p, &[note(0.0, 0.5, 220.0)], SR));
+        let buf = left(&render_patch(&p, &[note(0.0, 0.5, 220.0)], SR, 120));
         assert!(rms(&buf[441..22050]) > 0.3);
         assert_eq!(buf.len(), (0.7 * SR) as usize, "gate + release");
     }
@@ -412,7 +449,7 @@ mod tests {
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
             "lfo": {"rate": 2.0, "depth": 1.0, "wave": "sine", "target": "pitch"}}),
         );
-        let s = left(&render_patch(&p, &[note(0.0, 2.0, 440.0)], SR));
+        let s = left(&render_patch(&p, &[note(0.0, 2.0, 440.0)], SR, 120));
         let z = zcr_windows(&s);
         let (lo, hi) = z
             .iter()
@@ -423,7 +460,12 @@ mod tests {
             json!({"name": "dry", "subtractive": {"osc1": {"wave": "sine"},
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}}),
         );
-        let zd = zcr_windows(&left(&render_patch(&dry, &[note(0.0, 2.0, 440.0)], SR)));
+        let zd = zcr_windows(&left(&render_patch(
+            &dry,
+            &[note(0.0, 2.0, 440.0)],
+            SR,
+            120,
+        )));
         let (lo, hi) = zd
             .iter()
             .fold((f32::MAX, 0.0f32), |(lo, hi), &x| (lo.min(x), hi.max(x)));
@@ -438,7 +480,7 @@ mod tests {
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
             "lfo": {"rate": 1.0, "depth": 1.0, "wave": "square", "target": "cutoff"}}),
         );
-        let s = left(&render_patch(&p, &[note(0.0, 1.0, 110.0)], SR));
+        let s = left(&render_patch(&p, &[note(0.0, 1.0, 110.0)], SR, 120));
         // Square LFO: first half cycle cutoff x4 (1600 Hz), second half /4 (100 Hz).
         let open = crate::expressive::test_util::goertzel_power(&s[2205..20000], 1100.0, SR);
         let closed = crate::expressive::test_util::goertzel_power(&s[24255..42000], 1100.0, SR);
@@ -455,7 +497,7 @@ mod tests {
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
             "lfo": {"rate": 4.0, "depth": 1.0, "wave": "sine", "target": "amplitude"}}),
         );
-        let s = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR));
+        let s = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR, 120));
         let env: Vec<f32> = s[2205..].chunks(441).map(rms).collect();
         let (lo, hi) = env
             .iter()
@@ -471,7 +513,7 @@ mod tests {
             "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
             "lfo": {"rate": 1.0, "depth": 1.0, "wave": "square", "target": "morph"}}),
         );
-        let s = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR));
+        let s = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR, 120));
         let h3 = |w: &[f32]| {
             crate::expressive::test_util::goertzel_power(w, 660.0, SR)
                 / crate::expressive::test_util::goertzel_power(w, 220.0, SR)
@@ -491,8 +533,8 @@ mod tests {
             "lfo": {"rate": 5.0, "depth": 0.0, "target": "pitch"}}),
         );
         let without = patch(json!({"name": "b", "subtractive": {"env": {"release": 0.01}}}));
-        let a = left(&render_patch(&with, &[note(0.0, 0.5, 220.0)], SR));
-        let b = left(&render_patch(&without, &[note(0.0, 0.5, 220.0)], SR));
+        let a = left(&render_patch(&with, &[note(0.0, 0.5, 220.0)], SR, 120));
+        let b = left(&render_patch(&without, &[note(0.0, 0.5, 220.0)], SR, 120));
         assert_eq!(a.len(), b.len());
         assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6));
     }
@@ -503,7 +545,7 @@ mod tests {
             json!({"name": "g", "granular": {"stereo_width": 1.0, "randomness": 0.5,
             "density": 30, "env": {"attack": 0.001, "release": 0.2}}}),
         );
-        let buf = render_patch(&p, &[note(0.0, 1.0, 220.0)], SR);
+        let buf = render_patch(&p, &[note(0.0, 1.0, 220.0)], SR, 120);
         let l: Vec<f32> = buf.iter().map(|s| s[0]).collect();
         let r: Vec<f32> = buf.iter().map(|s| s[1]).collect();
         assert!(rms(&l[4410..44100]) > 0.05);
@@ -523,8 +565,8 @@ mod tests {
         let steady = mk(json!({"target": "off"}));
         let pumped =
             mk(json!({"rate": 0.5, "depth": 1.0, "wave": "square", "target": "grain_density"}));
-        let a = left(&render_patch(&steady, &[note(0.0, 2.0, 220.0)], SR));
-        let b = left(&render_patch(&pumped, &[note(0.0, 2.0, 220.0)], SR));
+        let a = left(&render_patch(&steady, &[note(0.0, 2.0, 220.0)], SR, 120));
+        let b = left(&render_patch(&pumped, &[note(0.0, 2.0, 220.0)], SR, 120));
         // Square LFO at 0.5 Hz: first second at 2x density, second second at 0.5x.
         let first = rms(&b[..44100]);
         let second = rms(&b[44100..88200]);
