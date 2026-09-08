@@ -5,7 +5,11 @@
 //! [`EffectsChain`] once per channel from the user's [`EffectConfig`] list and
 //! call [`EffectsChain::process`] for each sample.
 
-use crate::midi::{EffectConfig, EffectType, FilterType};
+use crate::midi::{EffectConfig, EffectType, FilterType, PitchMode};
+use rand::RngExt;
+
+/// Tempo assumed by [`EffectsChain::new`] when the caller has no sequence tempo.
+pub const DEFAULT_TEMPO: u32 = 120;
 
 /// Filter response selected on an [`Svf`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -222,7 +226,132 @@ impl Reverb {
     }
 }
 
-/// Feedback delay with one-pole damping in the loop.
+/// Longest delay line Time Fracture can address: 4 beats at 30 BPM.
+const MAX_DELAY_SECONDS: f32 = 8.0;
+
+/// Time Fracture state: a random delay time gliding between two bounds,
+/// and a pitch accumulator that drifts the read position so each repeat
+/// plays back transposed.
+#[derive(Debug, Clone)]
+struct Fracture {
+    min_samples: f32,
+    max_samples: f32,
+    /// Cycles per sample of the random-walk phase (0 = never moves).
+    phase_inc: f32,
+    phase: f32,
+    last_random: f32,
+    next_random: f32,
+    intervals: Vec<f32>,
+    mode: PitchMode,
+    index: usize,
+    going_up: bool,
+    pitch_ratio: f32,
+    pitch_accumulator: f32,
+    /// xorshift32 state, seeded once from `rand::rng()`; keeps `Delay`
+    /// `Clone + Debug` (a `ThreadRng` field would not) and allocation-free.
+    rng: u32,
+}
+
+impl Fracture {
+    /// Uniform in [0, 1). xorshift32; the state is never zero because the
+    /// seed is or-ed with 1.
+    #[inline]
+    fn next_unit(&mut self) -> f32 {
+        let mut x = self.rng;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.rng = x;
+        (x >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    /// Delay in samples for the current random-walk phase, before pitch drift.
+    fn current_delay(&self) -> f32 {
+        let alpha = 0.5 - 0.5 * (std::f32::consts::PI * self.phase).cos();
+        let r = self.last_random * (1.0 - alpha) + self.next_random * alpha;
+        self.min_samples + (self.max_samples - self.min_samples) * r
+    }
+
+    /// One sample of motion; returns the effective read delay in samples.
+    #[inline]
+    fn advance(&mut self) -> f32 {
+        self.phase += self.phase_inc;
+        if self.phase >= 1.0 {
+            self.phase -= 1.0;
+            self.last_random = self.next_random;
+            self.next_random = if self.phase_inc > 0.0 && self.max_samples > self.min_samples {
+                self.next_unit()
+            } else {
+                0.0
+            };
+            if !self.intervals.is_empty() {
+                self.pitch_ratio = 2f32.powf(self.next_semitones() / 12.0);
+                self.pitch_accumulator = 0.0;
+            }
+        }
+        if !self.intervals.is_empty() {
+            self.pitch_accumulator += self.pitch_ratio - 1.0;
+        }
+        let mut delay = self.current_delay() - self.pitch_accumulator;
+        // A transposed repeat that has run out of buffer starts over.
+        if !self.intervals.is_empty() && (delay < 1.0 || delay >= self.max_samples * 2.0) {
+            self.pitch_accumulator = 0.0;
+            self.phase = 0.0;
+            self.pitch_ratio = 2f32.powf(self.next_semitones() / 12.0);
+            delay = self.current_delay();
+        }
+        delay.max(1.0)
+    }
+
+    /// The next repeat's transposition, following [`PitchMode`].
+    fn next_semitones(&mut self) -> f32 {
+        let n = self.intervals.len();
+        if n == 0 {
+            return 0.0;
+        }
+        match self.mode {
+            PitchMode::Random => {
+                let i = ((self.next_unit() * n as f32) as usize).min(n - 1);
+                self.intervals[i]
+            }
+            PitchMode::Up => {
+                let s = self.intervals[self.index];
+                self.index = (self.index + 1) % n;
+                s
+            }
+            PitchMode::Down => {
+                let s = self.intervals[self.index];
+                self.index = if self.index == 0 {
+                    n - 1
+                } else {
+                    self.index - 1
+                };
+                s
+            }
+            PitchMode::UpDown => {
+                let s = self.intervals[self.index];
+                if self.going_up {
+                    if self.index + 1 >= n {
+                        self.index = n.saturating_sub(2);
+                        self.going_up = false;
+                    } else {
+                        self.index += 1;
+                    }
+                } else if self.index == 0 {
+                    self.index = 1.min(n - 1);
+                    self.going_up = true;
+                } else {
+                    self.index -= 1;
+                }
+                s
+            }
+        }
+    }
+}
+
+/// Feedback delay with one-pole damping in the loop; optionally a Time
+/// Fracture delay, whose time wanders between two tempo-synced bounds and
+/// whose repeats are transposed.
 #[derive(Debug, Clone)]
 pub struct Delay {
     line: DelayLine,
@@ -230,9 +359,12 @@ pub struct Delay {
     lp: f32,
     wet: f32,
     dry: f32,
+    /// `None` for the static path, whose delay is the whole line.
+    fracture: Option<Fracture>,
 }
 
 impl Delay {
+    /// Static delay: identical to the pre-Time-Fracture behaviour.
     pub fn new(
         sample_rate: f32,
         delay_time: f32,
@@ -247,15 +379,102 @@ impl Delay {
             lp: 0.0,
             wet,
             dry: 1.0 - wet * 0.5,
+            fracture: None,
+        }
+    }
+
+    /// Time Fracture: the delay time glides randomly between `min_beats` and
+    /// `max_beats` of `tempo` at `random_rate` Hz, and each new repeat is
+    /// transposed by the next of `pitch_intervals` (empty = no transposition).
+    #[allow(clippy::too_many_arguments)]
+    pub fn time_fracture(
+        sample_rate: f32,
+        tempo: u32,
+        min_beats: f32,
+        max_beats: f32,
+        random_rate: f32,
+        pitch_intervals: &[f32],
+        pitch_mode: PitchMode,
+        feedback: f32,
+        wet_level: f32,
+        intensity: f32,
+    ) -> Self {
+        let seconds_per_beat = 60.0 / tempo.max(1) as f32;
+        let to_samples = |beats: f32| (beats * seconds_per_beat * sample_rate).max(1.0);
+        let min_samples = to_samples(min_beats);
+        let max_samples = to_samples(max_beats).max(min_samples);
+        let wet = (wet_level * intensity).clamp(0.0, 1.0);
+        // With no random motion the delay sits at `min`; with pitch shifting and
+        // no random motion, a new repeat (and interval) starts every delay period.
+        let phase_inc = if random_rate > 0.0 {
+            random_rate / sample_rate
+        } else if !pitch_intervals.is_empty() {
+            1.0 / min_samples
+        } else {
+            0.0
+        };
+        let mut fracture = Fracture {
+            min_samples,
+            max_samples,
+            phase_inc,
+            phase: 0.0,
+            last_random: 0.0,
+            next_random: 0.0,
+            intervals: pitch_intervals.iter().map(|s| s.round()).collect(),
+            mode: pitch_mode,
+            index: 0,
+            going_up: true,
+            // The first repeat plays untransposed; the first interval is taken
+            // when the first grain wraps, so the sequence starts at its head.
+            pitch_ratio: 1.0,
+            pitch_accumulator: 0.0,
+            rng: rand::rng().random::<u32>() | 1,
+        };
+        if random_rate > 0.0 {
+            fracture.last_random = fracture.next_unit();
+            fracture.next_random = fracture.next_unit();
+        }
+        Self {
+            // One sample over the maximum: `read_fractional` clamps to `len - 1`,
+            // so the longest delay must still be shorter than the line.
+            line: DelayLine::new((MAX_DELAY_SECONDS * sample_rate) as usize + 1),
+            feedback: (feedback * intensity).clamp(0.0, 0.95),
+            lp: 0.0,
+            wet,
+            dry: 1.0 - wet * 0.5,
+            fracture: Some(fracture),
         }
     }
 
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
-        let delayed = self.line.read();
+        let delayed = match &mut self.fracture {
+            None => self.line.read(),
+            Some(f) => {
+                let delay = f.advance();
+                self.line.read_fractional(delay)
+            }
+        };
         self.lp += 0.5 * (delayed - self.lp);
         self.line.write(x + self.lp * self.feedback);
         (x * self.dry + self.lp * self.wet).clamp(-1.0, 1.0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn current_delay_samples(&self) -> f32 {
+        match &self.fracture {
+            // The static path reads the oldest sample, one whole line back.
+            None => self.line.len() as f32,
+            Some(f) => f.current_delay(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn next_pitch_semitones(&mut self) -> f32 {
+        self.fracture
+            .as_mut()
+            .map(|f| f.next_semitones())
+            .unwrap_or(0.0)
     }
 }
 
@@ -429,8 +648,9 @@ pub enum EffectNode {
 }
 
 impl EffectNode {
-    pub fn from_config(sample_rate: f32, config: &EffectConfig) -> Self {
+    pub fn from_config(sample_rate: f32, tempo: u32, config: &EffectConfig) -> Self {
         let intensity = config.intensity.clamp(0.0, 1.0);
+        let seconds_per_beat = 60.0 / tempo.max(1) as f32;
         match &config.effect {
             EffectType::Reverb {
                 room_size,
@@ -449,18 +669,48 @@ impl EffectNode {
                 delay_time,
                 feedback,
                 wet_level,
-                sync_tempo: _,
-                random_beats: _,
-                random_rate: _,
-                pitch_intervals: _,
-                pitch_mode: _,
-            } => EffectNode::Delay(Delay::new(
-                sample_rate,
-                *delay_time,
-                *feedback,
-                *wet_level,
-                intensity,
-            )),
+                sync_tempo,
+                random_beats,
+                random_rate,
+                pitch_intervals,
+                pitch_mode,
+            } => {
+                if random_beats.is_some() || !pitch_intervals.is_empty() {
+                    let [min, max] = random_beats.unwrap_or_else(|| {
+                        let beats = if *sync_tempo {
+                            *delay_time
+                        } else {
+                            delay_time / seconds_per_beat
+                        };
+                        [beats, beats]
+                    });
+                    EffectNode::Delay(Delay::time_fracture(
+                        sample_rate,
+                        tempo,
+                        min,
+                        max,
+                        *random_rate,
+                        pitch_intervals,
+                        *pitch_mode,
+                        *feedback,
+                        *wet_level,
+                        intensity,
+                    ))
+                } else {
+                    let seconds = if *sync_tempo {
+                        delay_time * seconds_per_beat
+                    } else {
+                        *delay_time
+                    };
+                    EffectNode::Delay(Delay::new(
+                        sample_rate,
+                        seconds,
+                        *feedback,
+                        *wet_level,
+                        intensity,
+                    ))
+                }
+            }
             EffectType::Chorus {
                 rate,
                 depth,
@@ -523,12 +773,18 @@ pub struct EffectsChain {
 }
 
 impl EffectsChain {
+    /// Build a chain at [`DEFAULT_TEMPO`], for callers with no sequence tempo.
     pub fn new(sample_rate: f32, configs: &[EffectConfig]) -> Self {
+        Self::with_tempo(sample_rate, DEFAULT_TEMPO, configs)
+    }
+
+    /// Build a chain whose tempo-synced effects follow the sequence tempo.
+    pub fn with_tempo(sample_rate: f32, tempo: u32, configs: &[EffectConfig]) -> Self {
         Self {
             nodes: configs
                 .iter()
                 .filter(|c| c.enabled)
-                .map(|c| EffectNode::from_config(sample_rate, c))
+                .map(|c| EffectNode::from_config(sample_rate, tempo, c))
                 .collect(),
         }
     }
@@ -564,9 +820,255 @@ impl EffectsChain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::expressive::test_util::{db, db_amp, goertzel_power, sine, white_noise};
+    use crate::expressive::test_util::{
+        db, db_amp, goertzel_power, rms, sine, white_noise, zero_crossing_rate,
+    };
 
     const SR: f32 = 44100.0;
+
+    fn impulse_response(d: &mut Delay, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| d.process(if i == 0 { 1.0 } else { 0.0 }))
+            .collect()
+    }
+
+    fn first_echo_index(out: &[f32]) -> usize {
+        out.iter()
+            .enumerate()
+            .skip(1)
+            .find(|&(_, &x)| x.abs() > 0.05)
+            .map(|(i, _)| i)
+            .unwrap()
+    }
+
+    #[test]
+    fn time_fracture_with_zero_rate_is_a_fixed_delay_at_min_beats() {
+        // 0.5 beats at 120 BPM = 0.25 s = 11025 samples.
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            0.5,
+            2.0,
+            0.0,
+            &[],
+            PitchMode::Random,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let out = impulse_response(&mut d, 30000);
+        let echo = first_echo_index(&out);
+        assert!((echo as i64 - 11025).abs() <= 2, "echo at {echo}");
+        assert!(
+            out[12000..].iter().all(|x| x.abs() < 1e-3),
+            "no second echo without feedback"
+        );
+    }
+
+    #[test]
+    fn the_longest_supported_delay_fits_the_line() {
+        // 4 beats (the validated maximum) at 30 BPM is 8 s, the line's length.
+        let mut d =
+            Delay::time_fracture(SR, 30, 4.0, 4.0, 0.0, &[], PitchMode::Random, 0.0, 1.0, 1.0);
+        let out = impulse_response(&mut d, (8.5 * SR) as usize);
+        let echo = first_echo_index(&out);
+        assert!((echo as i64 - 352800).abs() <= 2, "echo at {echo}");
+    }
+
+    #[test]
+    fn sync_tempo_puts_delay_time_in_beats() {
+        let cfg: EffectConfig = serde_json::from_str(
+            r#"{"type": "delay", "delay_time": 1.0, "sync_tempo": true, "feedback": 0.0, "wet_level": 1.0, "intensity": 1.0}"#,
+        )
+        .unwrap();
+        let mut chain = EffectsChain::with_tempo(SR, 60, std::slice::from_ref(&cfg));
+        let out: Vec<f32> = (0..60000)
+            .map(|i| chain.process(if i == 0 { 1.0 } else { 0.0 }))
+            .collect();
+        assert!(
+            (first_echo_index(&out) as i64 - 44100).abs() <= 2,
+            "1 beat at 60 BPM is one second"
+        );
+    }
+
+    #[test]
+    fn static_delay_output_is_unchanged_by_the_tempo_plumbing() {
+        let cfg: EffectConfig = serde_json::from_str(
+            r#"{"type": "delay", "delay_time": 0.1, "feedback": 0.3, "intensity": 0.6}"#,
+        )
+        .unwrap();
+        let mut a = EffectsChain::new(SR, std::slice::from_ref(&cfg));
+        let mut b = EffectsChain::with_tempo(SR, 97, std::slice::from_ref(&cfg));
+        let mut reference = Delay::new(SR, 0.1, 0.3, 0.3, 0.6);
+        for i in 0..10000 {
+            let x = if i % 500 == 0 { 0.8 } else { 0.0 };
+            let (ya, yb, yr) = (a.process(x), b.process(x), reference.process(x));
+            assert_eq!(ya, yb);
+            assert_eq!(ya, yr);
+        }
+    }
+
+    #[test]
+    fn random_rate_moves_the_delay_time_within_the_beat_range() {
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            0.25,
+            1.0,
+            3.0,
+            &[],
+            PitchMode::Random,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let (min_s, max_s) = (0.125 * SR, 0.5 * SR);
+        let mut seen_min = f32::MAX;
+        let mut seen_max = 0.0f32;
+        for _ in 0..(2.0 * SR) as usize {
+            d.process(0.0);
+            let cur = d.current_delay_samples();
+            assert!(
+                cur >= min_s - 1.0 && cur <= max_s + 1.0,
+                "{cur} outside [{min_s}, {max_s}]"
+            );
+            seen_min = seen_min.min(cur);
+            seen_max = seen_max.max(cur);
+        }
+        assert!(
+            seen_max - seen_min > 0.1 * (max_s - min_s),
+            "delay time actually moves"
+        );
+    }
+
+    #[test]
+    fn pitch_interval_of_twelve_repeats_one_octave_up() {
+        // No feedback: after the 0.3 s input burst ends, the output is the
+        // pitch-shifted repeat alone.
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            1.0,
+            1.0,
+            0.0,
+            &[12.0],
+            PitchMode::Up,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let burst = sine(220.0, 0.3, SR, 0.8);
+        let total = (1.2 * SR) as usize;
+        let out: Vec<f32> = (0..total)
+            .map(|i| d.process(if i < burst.len() { burst[i] } else { 0.0 }))
+            .collect();
+        // Delay is 0.5 s (1 beat at 120); the shifted repeat plays the 0.3 s burst
+        // at double speed, so it occupies roughly 0.5..0.65 s.
+        let window = &out[(0.52 * SR) as usize..(0.62 * SR) as usize];
+        assert!(rms(window) > 0.05, "repeat is audible");
+        let zcr = zero_crossing_rate(window, SR);
+        assert!(
+            (zcr - 880.0).abs() < 60.0,
+            "an octave up: {zcr} crossings/s"
+        );
+        // Nothing wet has arrived yet while the input plays, so the output
+        // there is exactly the dry input at the mix law's `1 - wet * 0.5`.
+        let (from, to) = ((0.05 * SR) as usize, (0.25 * SR) as usize);
+        let dry_rms = rms(&out[from..to]);
+        assert!(
+            (dry_rms - 0.5 * rms(&burst[from..to])).abs() < 1e-4,
+            "dry only before the delay: {dry_rms}"
+        );
+    }
+
+    #[test]
+    fn pitch_modes_visit_intervals_in_order() {
+        let mut up = Delay::time_fracture(
+            SR,
+            120,
+            1.0,
+            1.0,
+            0.0,
+            &[0.0, 12.0, -12.0],
+            PitchMode::Up,
+            0.0,
+            1.0,
+            1.0,
+        );
+        assert_eq!(up.next_pitch_semitones(), 0.0);
+        assert_eq!(up.next_pitch_semitones(), 12.0);
+        assert_eq!(up.next_pitch_semitones(), -12.0);
+        assert_eq!(up.next_pitch_semitones(), 0.0);
+        let mut down = Delay::time_fracture(
+            SR,
+            120,
+            1.0,
+            1.0,
+            0.0,
+            &[0.0, 12.0, -12.0],
+            PitchMode::Down,
+            0.0,
+            1.0,
+            1.0,
+        );
+        assert_eq!(down.next_pitch_semitones(), 0.0);
+        assert_eq!(down.next_pitch_semitones(), -12.0);
+        assert_eq!(down.next_pitch_semitones(), 12.0);
+        let mut ud = Delay::time_fracture(
+            SR,
+            120,
+            1.0,
+            1.0,
+            0.0,
+            &[0.0, 5.0, 12.0],
+            PitchMode::UpDown,
+            0.0,
+            1.0,
+            1.0,
+        );
+        let seq: Vec<f32> = (0..6).map(|_| ud.next_pitch_semitones()).collect();
+        assert_eq!(seq, vec![0.0, 5.0, 12.0, 5.0, 0.0, 5.0]);
+        let mut random = Delay::time_fracture(
+            SR,
+            120,
+            1.0,
+            1.0,
+            0.0,
+            &[3.0, 7.0],
+            PitchMode::Random,
+            0.0,
+            1.0,
+            1.0,
+        );
+        for _ in 0..20 {
+            let s = random.next_pitch_semitones();
+            assert!(s == 3.0 || s == 7.0);
+        }
+    }
+
+    #[test]
+    fn time_fracture_with_feedback_stays_bounded() {
+        let mut d = Delay::time_fracture(
+            SR,
+            120,
+            0.25,
+            1.0,
+            4.0,
+            &[7.0, 12.0],
+            PitchMode::UpDown,
+            0.9,
+            1.0,
+            1.0,
+        );
+        let noise = white_noise((3.0 * SR) as usize, 7);
+        let mut peak = 0.0f32;
+        for x in noise {
+            let y = d.process(x * 0.5);
+            assert!(y.is_finite());
+            peak = peak.max(y.abs());
+        }
+        assert!(peak <= 1.0, "output is clamped: {peak}");
+    }
 
     #[test]
     fn delay_produces_echo_at_configured_time() {
