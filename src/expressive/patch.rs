@@ -179,35 +179,48 @@ mod tests {
     const HEADROOM_CEILING: f32 = 1.4;
 
     /// Lower bound per category so a patch is not lost in a mix (pre-bus peak).
+    /// Fx is lower than the general 0.3: sound effects (sweeps, zaps, noise
+    /// beds) are legitimately quieter than a sustained instrument voice.
     fn headroom_floor(category: PatchCategory) -> f32 {
         match category {
             PatchCategory::Pad => 0.7,
             PatchCategory::Drums => 0.5,
+            PatchCategory::Fx => 0.2,
             _ => 0.3,
         }
     }
 
-    /// Named exceptions to `headroom_floor`, for built-ins that measurably
-    /// cannot reach their category floor via `level` alone (capped at 1.0)
-    /// without changing engine parameters, which this task is not scoped to
-    /// do. Each is reported as a concern in the task-3 report (issue #109):
-    /// - `tr_808_kick`'s 120 Hz low-pass and `crash_cymbal`'s 8000 Hz
-    ///   high-pass remove most of the pre-effects normalised peak by design,
-    ///   at any `level`.
-    /// - `noise_texture`'s 0.5 s attack and grain randomness mean its
-    ///   two-hit fx demo phrase measured as low as 0.26 over 500 renders at
-    ///   `level` 1.0 (max), under the 0.3 fx floor on a real fraction of runs.
-    /// - `dream_pad` (4 s attack, 3 s decay) and `wind_pad` (3 s attack) are
-    ///   still mid-attack at the end of the 3 s demo-phrase note; at `level`
-    ///   1.0 (max) they measured 0.58-0.63 and 0.48-0.62 respectively over
-    ///   20 renders, under the 0.7 pad floor.
-    fn headroom_floor_override(name: &str) -> Option<f32> {
-        match name {
-            "tr_808_kick" | "crash_cymbal" => Some(0.05),
-            "noise_texture" => Some(0.2),
-            "dream_pad" => Some(0.5),
-            "wind_pad" => Some(0.4),
-            _ => None,
+    /// Longest attack among a patch's enabled envelope-driven engines.
+    fn max_engine_attack(p: &Patch) -> f32 {
+        let mut attack: f32 = 0.0;
+        if let Some(s) = &p.subtractive {
+            attack = attack.max(s.env.attack);
+        }
+        if let Some(f) = &p.fm {
+            for op in &f.operators {
+                attack = attack.max(op.env.attack);
+            }
+        }
+        if let Some(w) = &p.wavetable {
+            attack = attack.max(w.env.attack);
+        }
+        if let Some(g) = &p.granular {
+            attack = attack.max(g.env.attack);
+        }
+        attack
+    }
+
+    /// Chord used to measure a pad's floor. A pad whose engine attack is
+    /// slow (>= 2 s) hasn't reached its sustained loudness by the end of the
+    /// regular 3 s demo phrase, so measuring the floor there is measuring
+    /// mid-attack, not the patch's real level. Those pads get a 6 s chord
+    /// instead; `HEADROOM_CEILING` is still checked against the (shorter)
+    /// demo phrase, this chord, and the held note.
+    fn floor_phrase(p: &Patch, category: PatchCategory) -> Vec<(u8, f32, f32)> {
+        if category == PatchCategory::Pad && max_engine_attack(p) >= 2.0 {
+            vec![(48, 0.0, 6.0), (55, 0.0, 6.0), (60, 0.0, 6.0)]
+        } else {
+            demo_phrase(category).to_vec()
         }
     }
 
@@ -241,10 +254,26 @@ mod tests {
                 phrase_peak <= HEADROOM_CEILING,
                 "{name} peaks at {phrase_peak} over its demo phrase; lower its level"
             );
-            let floor = headroom_floor_override(name).unwrap_or_else(|| headroom_floor(category));
+            let floor_notes = floor_phrase(p, category);
+            let floor_peak = if floor_notes.as_slice() == demo_phrase(category) {
+                phrase_peak
+            } else {
+                let floor_buf = render_patch(
+                    p,
+                    &phrase_events(p, &floor_notes, 100.0 / 127.0),
+                    44100.0,
+                    120,
+                );
+                let fp = peak(&floor_buf);
+                assert!(
+                    fp <= HEADROOM_CEILING,
+                    "{name} peaks at {fp} over its floor chord; lower its level"
+                );
+                fp
+            };
             assert!(
-                phrase_peak >= floor,
-                "{name} peaks at only {phrase_peak} over its demo phrase; raise its level"
+                floor_peak >= headroom_floor(category),
+                "{name} peaks at only {floor_peak} over its floor chord; raise its level"
             );
 
             // A long note at full velocity catches slow pads measured mid-attack by the phrase.

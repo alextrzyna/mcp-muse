@@ -5,6 +5,6 @@
   "level": 1.0,
   "percussion": {"kind": "kick", "frequency": 60, "punch": 0.8, "sustain": 0.6, "click_freq": 800},
   "effects": [
-    {"type": "filter", "filter_type": "low_pass", "cutoff": 120, "resonance": 0.2, "intensity": 1.0}
+    {"type": "filter", "filter_type": "low_pass", "cutoff": 3000, "resonance": 0.2, "intensity": 1.0}
   ]
 }
