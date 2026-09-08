@@ -205,6 +205,16 @@ mod tests {
     /// beds) are legitimately quieter than a sustained instrument voice. A
     /// noise-source patch (see `is_noise_source`) is floored like fx no
     /// matter its category, for the same reason.
+    ///
+    /// Why a drum patch can fail this floor no matter its `level`: the peak
+    /// measured here is taken *after* the patch's effects chain, while
+    /// percussion normalisation (`PERCUSSION_PEAK`) happens at note-on,
+    /// *before* it. A filter in that chain that removes most of the hit's
+    /// energy therefore takes the patch below the floor and `level` cannot
+    /// put it back -- it is already capped at 1.0. That is what the 808
+    /// kick's original 120 Hz low-pass did (it left a 0.10 peak against a
+    /// 0.5 floor). The fix is to retune the filter to a corner that leaves
+    /// the hit intact, or to delete it -- not to chase the floor with `level`.
     fn headroom_floor(p: &Patch, category: PatchCategory) -> f32 {
         if is_noise_source(p) {
             return 0.2;
@@ -348,29 +358,30 @@ mod tests {
         // must not swamp the 60 Hz fundamental. The ratio is below 1 because the
         // body sweeps down from 240 Hz and leaves only part of its power in the
         // 60 Hz bin; what this pins is the click's share, which grows as the
-        // low-pass opens (measured 0.22 at the shipped 3 kHz, 0.16 at 4 kHz,
-        // 0.12 at 6 kHz, 0.09 wide open; 4.3 at 500 Hz).
-        const KICK_BODY_OVER_CLICK: f32 = 0.15;
+        // low-pass opens. Measured at resonance 0.7: 0.97 at 450 Hz, 0.67 at
+        // 500 Hz, 0.37 at the shipped 600 Hz, 0.29 at 650 Hz, 0.12 at 1 kHz,
+        // and 0.09 with no filter at all. The kick path has no randomness, so
+        // one render is the measurement.
+        const KICK_BODY_OVER_CLICK: f32 = 0.30;
         let kick = lib.get("tr_808_kick").unwrap();
-        // The kick path has no randomness; the repeats confirm that.
-        for _ in 0..10 {
-            let mono = hit(kick);
-            let body = goertzel_power(&mono, 60.0, SAMPLE_RATE);
-            let click = goertzel_power(&mono, 800.0, SAMPLE_RATE);
-            assert!(
-                body >= KICK_BODY_OVER_CLICK * click,
-                "tr_808_kick lost its body: 60 Hz power {body:e} is only {:.3}x the 800 Hz click {click:e}; its low-pass is too far open",
-                body / click
-            );
-        }
+        let mono = hit(kick);
+        let body = goertzel_power(&mono, 60.0, SAMPLE_RATE);
+        let click = goertzel_power(&mono, 800.0, SAMPLE_RATE);
+        assert!(
+            body >= KICK_BODY_OVER_CLICK * click,
+            "tr_808_kick lost its body: 60 Hz power {body:e} is only {:.3}x the 800 Hz click {click:e}; its low-pass is too far open",
+            body / click
+        );
 
         // The crash stays bright: every partial of the cymbal sits at or above
-        // 2.5 kHz, so its high-pass corner has to leave those alone. The hiss is
-        // unseeded, so the 200 Hz bin swings hard render to render: over 2000
-        // renders the ratio ran 14.9 (min) / 37.6 (1st pct) / 440 (median), so
-        // the bound sits well under that tail. A filter that really did dull the
+        // 2.55 kHz, so its high-pass corner has to leave those alone while
+        // still clearing the noise bed underneath them. The hiss is unseeded,
+        // so the 200 Hz bin swings hard render to render; over 300 renders of
+        // the shipped 1.5 kHz corner the ratio bottomed out at 645, and the
+        // bound sits well under that tail. For scale: the no-op 200 Hz corner
+        // this replaced measured 37, and a filter that really did dull the
         // crash lands below 1.
-        const CRASH_BRIGHT_OVER_LOW: f32 = 6.0;
+        const CRASH_BRIGHT_OVER_LOW: f32 = 100.0;
         let crash = lib.get("crash_cymbal").unwrap();
         for _ in 0..20 {
             let mono = hit(crash);
