@@ -442,7 +442,8 @@ pub enum PitchMode {
 }
 
 impl PitchMode {
-    #[allow(dead_code)] // used by the Time Fracture DSP (Task 2) and list_sounds
+    /// Every mode, in schema order; drives the `pitch_mode` enum in the tool
+    /// schema and the delay line of the `list_sounds` effects catalog.
     pub const ALL: [PitchMode; 4] = [
         PitchMode::Random,
         PitchMode::Up,
@@ -450,7 +451,8 @@ impl PitchMode {
         PitchMode::UpDown,
     ];
 
-    #[allow(dead_code)] // used by the Time Fracture DSP (Task 2) and list_sounds
+    /// The wire name serde parses, so the schema cannot advertise a value the
+    /// parser would reject.
     pub fn as_str(&self) -> &'static str {
         match self {
             PitchMode::Random => "random",

@@ -5,7 +5,7 @@ use crate::expressive::{
     FmAlgorithm, GrainSource, LfoTarget, LfoWave, Patch, PatchLibrary, PercussionKind, TableName,
 };
 use crate::midi::{
-    ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
+    ExtendedSequence, MidiPlayer, PitchMode, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
     validate_tempo,
 };
 use std::collections::HashMap;
@@ -174,12 +174,18 @@ fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcRespon
     )
 }
 
+/// The accepted `pitch_mode` values, taken from the enum itself so the schema
+/// and the `list_sounds` catalog cannot drift from what serde will parse.
+fn pitch_modes() -> Vec<&'static str> {
+    PitchMode::ALL.iter().map(PitchMode::as_str).collect()
+}
+
 /// JSON schema for the `effects` chain, shared by `note_schema` and
 /// `patch_schema` so the two cannot drift apart.
 fn effects_schema() -> Value {
     json!({
         "type": "array",
-        "description": "🎛️ Effects chain applied in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]. Time Fracture (a pitch-shifting, tempo-wandering delay): [{\"type\": \"delay\", \"random_beats\": [0.5, 1.0], \"random_rate\": 0.5, \"pitch_intervals\": [7, 12], \"pitch_mode\": \"up_down\", \"feedback\": 0.5, \"intensity\": 0.6}]",
+        "description": "🎛️ Effects chain applied in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]. Time Fracture (a pitch-shifting, tempo-wandering delay): [{\"type\": \"delay\", \"random_beats\": [0.5, 1.0], \"random_rate\": 0.5, \"pitch_intervals\": [7, 12], \"pitch_mode\": \"up_down\", \"feedback\": 0.5, \"intensity\": 0.6}]. The parameters below are listed together for readability, but only the ones belonging to the entry's own \"type\" are accepted: any other key is rejected with a -32602 naming it.",
         "items": {
             "type": "object",
             "properties": {
@@ -190,7 +196,7 @@ fn effects_schema() -> Value {
                 "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: high-frequency damping 0=bright, 1=dark (default 0.3)"},
                 "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb/delay: wet amount (default 0.3)"},
                 "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "reverb: seconds before the reverb starts (default 0.02)"},
-                "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds (or beats when sync_tempo); 0.25 = quarter note at 120 BPM (default 0.25)"},
+                "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds, or beats of the sequence tempo when sync_tempo is true; 0.25 = quarter note at 120 BPM (default 0.25). The resulting delay is capped at 8 s"},
                 "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "delay/chorus: repeat amount (delay default 0.4, chorus default 0.2)"},
                 "sync_tempo": {"type": "boolean", "description": "delay: when true, delay_time is in beats of the sequence tempo"},
                 "random_beats": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 4}, "minItems": 2, "maxItems": 2,
@@ -199,7 +205,7 @@ fn effects_schema() -> Value {
                     "description": "delay (Time Fracture): how fast the delay time wanders between min and max, in Hz (0 = fixed at min)"},
                 "pitch_intervals": {"type": "array", "items": {"type": "number", "minimum": -12, "maximum": 12}, "maxItems": 12,
                     "description": "delay (Time Fracture): semitone shifts for successive repeats, e.g. [7, 12] for a fifth-and-octave shimmer; rounded to whole semitones"},
-                "pitch_mode": {"type": "string", "enum": ["random", "up", "down", "up_down"], "default": "random",
+                "pitch_mode": {"type": "string", "enum": pitch_modes(), "default": "random",
                     "description": "delay (Time Fracture): order the pitch_intervals are visited in"},
                 "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "chorus: LFO Hz (default 1.5)"},
                 "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: modulation depth (default 0.3)"},
@@ -1367,7 +1373,11 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
         let mut names: Vec<&String> = library.get_preset_names();
         names.sort();
         out.push_str("# Effects\n\n## Effect types for the `effects` chain\n");
-        out.push_str("- reverb: room_size, dampening, wet_level, pre_delay\n- delay: delay_time, feedback, wet_level, sync_tempo; Time Fracture: random_beats [min, max], random_rate, pitch_intervals, pitch_mode (random/up/down/up_down)\n- chorus: rate, depth, feedback\n- filter: filter_type (LowPass/HighPass/BandPass/Notch/Peak/LowShelf/HighShelf), cutoff, resonance\n- compressor: threshold (dB), ratio, attack, release\n- distortion: drive, tone, output_level\n");
+        out.push_str(&format!(
+            "- reverb: room_size, dampening, wet_level, pre_delay\n- delay: delay_time, feedback, wet_level, sync_tempo; Time Fracture: random_beats [min, max], random_rate, pitch_intervals, pitch_mode ({})\n",
+            pitch_modes().join("/")
+        ));
+        out.push_str("- chorus: rate, depth, feedback\n- filter: filter_type (LowPass/HighPass/BandPass/Notch/Peak/LowShelf/HighShelf), cutoff, resonance\n- compressor: threshold (dB), ratio, attack, release\n- distortion: drive, tone, output_level\n");
         out.push_str(&format!("\n## effects_preset names ({})\n", names.len()));
         for name in names {
             out.push_str(&format!("- {}\n", name));
@@ -1535,6 +1545,32 @@ mod tests {
         assert_eq!(
             props["pitch_mode"]["enum"],
             json!(["random", "up", "down", "up_down"])
+        );
+        // Both the schema enum and the catalog come from `PitchMode::ALL`, so
+        // adding a mode cannot leave either behind.
+        assert_eq!(props["pitch_mode"]["enum"], json!(pitch_modes()));
+        let catalog = text(&handle_list_sounds(
+            &ServerState::new(),
+            json!({"section": "effects"}),
+            Some(json!(1)),
+        ));
+        assert!(
+            catalog.contains(&pitch_modes().join("/")),
+            "the effects catalog lists the pitch modes: {catalog}"
+        );
+        assert!(
+            props["delay_time"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("8 s"),
+            "delay_time documents the cap"
+        );
+        assert!(
+            effects_schema()["description"]
+                .as_str()
+                .unwrap()
+                .contains("-32602"),
+            "the flat property list says other keys are rejected"
         );
         assert_eq!(props["pitch_intervals"]["maxItems"], 12);
         assert!(props["random_rate"].is_object());

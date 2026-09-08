@@ -47,7 +47,7 @@ Top-level arguments:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `notes` | array | required | One object per note (see below) |
-| `tempo` | integer | 120 | BPM used for `musical_time` / `musical_duration` |
+| `tempo` | integer | 120 | BPM (20-300) used for `musical_time` / `musical_duration` and every beat-synced effect |
 | `beats_per_bar` | integer | 4 | Time signature numerator |
 
 Note fields (all optional unless noted):
@@ -71,16 +71,22 @@ Every entry in `effects` (note-level or in a patch) takes `type`, an
 |--------|--------|
 | `reverb` | `room_size`, `dampening`, `wet_level`, `pre_delay` |
 | `delay` | `delay_time` (seconds, or beats when `sync_tempo: true`), `feedback`, `wet_level`, `sync_tempo`. Time Fracture: `random_beats: [min, max]` (0-4 beats of the sequence tempo, replaces `delay_time` when present), `random_rate` Hz (0-10; 0 = fixed at `min`), `pitch_intervals` (up to 12 values, -12..12 semitones, rounded to whole semitones), `pitch_mode` (`random\|up\|down\|up_down`) |
-| `chorus` | `rate`, `depth`, `stereo_width` |
+| `chorus` | `rate`, `depth`, `feedback`, `stereo_width` |
 | `filter` | `filter_type`, `cutoff`, `resonance`, `envelope_amount` |
 | `compressor` | `threshold`, `ratio`, `attack`, `release` |
 | `distortion` | `drive`, `tone`, `output_level` |
 
+Only the fields of an entry's own `type` are accepted; any other key is a
+`-32602` naming it, even though the schema lists them all in one flat
+object.
+
 `sync_tempo: true` puts `delay_time` itself in beats instead of seconds;
-it has no effect once `random_beats` is set (beats are implied). Render
-tails follow `EffectConfig::tail_seconds(tempo)`: 1 s for `reverb`, 4x the
-longest delay time plus 0.5 s (minimum 1 s) for `delay`, 0.5 s for
-everything else.
+it has no effect once `random_beats` is set (beats are implied). Whatever
+the tempo, the delay line is capped at 8 s. Render tails follow
+`EffectConfig::tail_seconds(tempo)`: 1 s for `reverb`, 4x the longest
+delay time plus 0.5 s (minimum 1 s) for `delay`, 0.5 s for everything
+else; a MIDI note's bus chain, a patch render and an R2D2 note all report
+that tail in the playback duration.
 
 Success text includes the total playback time, effect tails included:
 

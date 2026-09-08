@@ -81,7 +81,7 @@
 - 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 44 built-in synth patches + your own
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
 - 🔌 **Seven Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`
-- 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per patch (shared tails) and per MIDI bus, stereo output
+- 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per patch (shared tails), per R2D2 note and per MIDI bus, stereo output
 - ⚙️ **Zero Setup**: Automatic SoundFont download and multi-engine configuration
 - 🧪 **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
 
