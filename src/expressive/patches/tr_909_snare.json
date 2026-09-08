@@ -2,7 +2,7 @@
   "name": "tr_909_snare",
   "description": "Punchy TR-909 snare with characteristic snap and buzz (Roland TR-909)",
   "category": "drums",
-  "level": 0.8,
+  "level": 0.9,
   "percussion": {"kind": "snare", "frequency": 200, "snap": 0.7, "buzz": 0.6, "noise_amount": 0.8},
   "effects": [
     {"type": "filter", "filter_type": "high_pass", "cutoff": 2000, "resonance": 0.3, "intensity": 1.0},

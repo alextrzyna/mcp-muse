@@ -2,7 +2,7 @@
   "name": "dream_pad",
   "description": "Surreal, dream-like pad with floating, otherworldly character (Ambient and New Age Music)",
   "category": "pad",
-  "level": 0.7,
+  "level": 1.0,
   "subtractive": {
     "osc1": {"wave": "triangle"},
     "osc2": {"wave": "noise", "mix": 0.15},

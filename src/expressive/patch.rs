@@ -9,6 +9,7 @@ use std::collections::HashMap;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expressive::render::NoteEvent;
     use serde_json::json;
 
     fn parse(v: serde_json::Value) -> Result<Patch, String> {
@@ -141,38 +142,149 @@ mod tests {
         assert!(!p.has_pitched_engine());
     }
 
+    /// The phrases `cargo run -- test-synths` plays, so the test hears what the user hears.
+    fn demo_phrase(category: PatchCategory) -> &'static [(u8, f32, f32)] {
+        match category {
+            PatchCategory::Drums | PatchCategory::Fx => &[(36, 0.0, 0.5), (36, 0.5, 0.5)],
+            PatchCategory::Pad => &[(48, 0.0, 3.0), (55, 0.0, 3.0), (60, 0.0, 3.0)],
+            PatchCategory::Keys => &[(60, 0.0, 0.6), (64, 0.7, 0.6), (67, 1.4, 1.2)],
+            _ => &[(36, 0.0, 0.4), (43, 0.5, 0.4), (48, 1.0, 0.8)],
+        }
+    }
+
+    fn phrase_events(p: &Patch, phrase: &[(u8, f32, f32)], velocity: f32) -> Vec<NoteEvent> {
+        phrase
+            .iter()
+            .map(|&(n, start, duration)| NoteEvent {
+                start,
+                duration,
+                frequency: if p.has_pitched_engine() {
+                    440.0 * 2f32.powf((n as f32 - 69.0) / 12.0)
+                } else {
+                    60.0
+                },
+                velocity,
+            })
+            .collect()
+    }
+
+    fn peak(buf: &[[f32; 2]]) -> f32 {
+        buf.iter()
+            .flat_map(|s| s.iter())
+            .fold(0.0f32, |m, x| m.max(x.abs()))
+    }
+
+    /// Ceiling for built-ins over their demo phrase, before `SYNTH_BUS_GAIN`.
+    /// Below `PATCH_LIMITER_CEILING` on purpose: a built-in must not lean on the limiter.
+    const HEADROOM_CEILING: f32 = 1.4;
+
+    /// Lower bound per category so a patch is not lost in a mix (pre-bus peak).
+    fn headroom_floor(category: PatchCategory) -> f32 {
+        match category {
+            PatchCategory::Pad => 0.7,
+            PatchCategory::Drums => 0.5,
+            _ => 0.3,
+        }
+    }
+
+    /// Named exceptions to `headroom_floor`, for built-ins that measurably
+    /// cannot reach their category floor via `level` alone (capped at 1.0)
+    /// without changing engine parameters, which this task is not scoped to
+    /// do. Each is reported as a concern in the task-3 report (issue #109):
+    /// - `tr_808_kick`'s 120 Hz low-pass and `crash_cymbal`'s 8000 Hz
+    ///   high-pass remove most of the pre-effects normalised peak by design,
+    ///   at any `level`.
+    /// - `noise_texture`'s 0.5 s attack and grain randomness mean its
+    ///   two-hit fx demo phrase measured as low as 0.26 over 500 renders at
+    ///   `level` 1.0 (max), under the 0.3 fx floor on a real fraction of runs.
+    /// - `dream_pad` (4 s attack, 3 s decay) and `wind_pad` (3 s attack) are
+    ///   still mid-attack at the end of the 3 s demo-phrase note; at `level`
+    ///   1.0 (max) they measured 0.58-0.63 and 0.48-0.62 respectively over
+    ///   20 renders, under the 0.7 pad floor.
+    fn headroom_floor_override(name: &str) -> Option<f32> {
+        match name {
+            "tr_808_kick" | "crash_cymbal" => Some(0.05),
+            "noise_texture" => Some(0.2),
+            "dream_pad" => Some(0.5),
+            "wind_pad" => Some(0.4),
+            _ => None,
+        }
+    }
+
     #[test]
     fn every_builtin_patch_parses_validates_and_renders_cleanly() {
-        use crate::expressive::render::{NoteEvent, render_patch};
+        use crate::expressive::render::{PATCH_LIMITER_CEILING, render_patch};
+        const { assert!(HEADROOM_CEILING < PATCH_LIMITER_CEILING) };
         let lib = PatchLibrary::new();
         assert!(
-            lib.count() >= 28,
-            "expected the migrated presets, got {}",
+            lib.count() >= 44,
+            "expected the built-ins, got {}",
             lib.count()
         );
         for name in lib.names() {
             let p = lib.get(name).unwrap();
             p.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(p.category.is_some(), "{name} needs a category");
+            let category = p
+                .category
+                .unwrap_or_else(|| panic!("{name} needs a category"));
             assert!(!p.description.is_empty(), "{name} needs a description");
-            let note = NoteEvent {
-                start: 0.0,
-                duration: 0.5,
-                frequency: if p.has_pitched_engine() { 261.63 } else { 60.0 },
-                velocity: 100.0 / 127.0,
-            };
-            let buf = render_patch(p, &[note], 44100.0, 120);
-            let peak = buf
-                .iter()
-                .flat_map(|s| s.iter())
-                .fold(0.0f32, |m, x| m.max(x.abs()));
-            assert!(peak.is_finite(), "{name} produced NaN/inf");
-            // SYNTH_BUS_GAIN (0.5) is applied later; stay under the 0.8 clipper knee after it.
-            assert!(
-                peak * 0.5 <= 0.8,
-                "{name} peaks at {peak}, too hot for the bus"
+
+            let phrase = render_patch(
+                p,
+                &phrase_events(p, demo_phrase(category), 100.0 / 127.0),
+                44100.0,
+                120,
             );
-            assert!(peak > 0.02, "{name} is nearly silent (peak {peak})");
+            let phrase_peak = peak(&phrase);
+            assert!(phrase_peak.is_finite(), "{name} produced NaN/inf");
+            assert!(
+                phrase_peak <= HEADROOM_CEILING,
+                "{name} peaks at {phrase_peak} over its demo phrase; lower its level"
+            );
+            let floor = headroom_floor_override(name).unwrap_or_else(|| headroom_floor(category));
+            assert!(
+                phrase_peak >= floor,
+                "{name} peaks at only {phrase_peak} over its demo phrase; raise its level"
+            );
+
+            // A long note at full velocity catches slow pads measured mid-attack by the phrase.
+            let held = render_patch(p, &phrase_events(p, &[(60, 0.0, 3.0)], 1.0), 44100.0, 120);
+            let held_peak = peak(&held);
+            assert!(
+                held_peak <= HEADROOM_CEILING,
+                "{name} peaks at {held_peak} on a held full-velocity note; lower its level"
+            );
+        }
+    }
+
+    /// `cargo test print_builtin_headroom_survey -- --ignored --nocapture`
+    /// prints pre-bus peak and RMS per patch; use it to set levels.
+    #[test]
+    #[ignore]
+    fn print_builtin_headroom_survey() {
+        use crate::expressive::render::render_patch;
+        use crate::expressive::test_util::{db, rms};
+        let lib = PatchLibrary::new();
+        for (category, patches) in lib.catalog() {
+            println!("## {}", category.as_str());
+            for p in patches {
+                let buf = render_patch(
+                    p,
+                    &phrase_events(p, demo_phrase(category), 100.0 / 127.0),
+                    44100.0,
+                    120,
+                );
+                let mono: Vec<f32> = buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect();
+                let held = render_patch(p, &phrase_events(p, &[(60, 0.0, 3.0)], 1.0), 44100.0, 120);
+                println!(
+                    "{:<22} level {:<5} phrase peak {:.2} rms {:>6.1} dB   held peak {:.2}",
+                    p.name,
+                    p.level,
+                    peak(&buf),
+                    db(rms(&mono)),
+                    peak(&held)
+                );
+            }
         }
     }
 

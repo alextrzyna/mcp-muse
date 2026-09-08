@@ -2,6 +2,6 @@
   "name": "tr_808_hihat",
   "description": "Classic TR-808 hi-hat with distinctive tone (Roland TR-808)",
   "category": "drums",
-  "level": 0.5,
+  "level": 0.9,
   "percussion": {"kind": "hihat", "frequency": 20000, "metallic": 0.6, "decay": 0.05, "brightness": 1.0}
 }
