@@ -1,0 +1,13 @@
+{
+  "name": "formant_texture",
+  "description": "Vowel-like formant grains washed with chorus and reverb, slowly swelling",
+  "category": "pad",
+  "level": 1.0,
+  "granular": {"source": "formant", "grain_ms": 80, "density": 25, "randomness": 0.4, "stereo_width": 0.7,
+               "env": {"attack": 0.8, "decay": 0.5, "sustain": 0.8, "release": 2.0}},
+  "lfo": {"rate": 0.15, "depth": 0.5, "wave": "triangle", "target": "amplitude"},
+  "effects": [
+    {"type": "chorus", "rate": 0.3, "depth": 0.5, "intensity": 0.3},
+    {"type": "reverb", "room_size": 0.8, "dampening": 0.4, "wet_level": 0.4, "intensity": 0.4}
+  ]
+}

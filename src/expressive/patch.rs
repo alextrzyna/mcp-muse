@@ -195,7 +195,8 @@ mod tests {
         assert!(lib.get("dx7_e_piano").is_some());
         assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
         assert!(lib.get("wt_organ").is_some());
-        assert!(lib.count() >= 39);
+        assert!(lib.get("grain_cloud").is_some() && lib.get("drone").is_some());
+        assert!(lib.count() >= 43);
     }
 
     #[test]
@@ -321,6 +322,93 @@ mod tests {
         // operator 2 is a modulator in `stack`, so its 9 s release does not count.
         assert_eq!(p.release_seconds(), 1.5);
     }
+
+    #[test]
+    fn lfo_config_parses_with_defaults_validates_and_reports_activity() {
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {}})).unwrap();
+        let lfo = p.lfo.as_ref().unwrap();
+        assert_eq!((lfo.rate, lfo.depth), (1.0, 0.0));
+        assert_eq!(lfo.wave, LfoWave::Sine);
+        assert_eq!(lfo.target, LfoTarget::Off);
+        assert!(!lfo.is_active());
+        assert!(p.validate().is_ok());
+
+        let p = parse(json!({"name": "x", "subtractive": {},
+            "lfo": {"rate": 0.3, "depth": 0.2, "wave": "sample_hold", "target": "cutoff"}}))
+        .unwrap();
+        assert!(p.lfo.as_ref().unwrap().is_active());
+        assert_eq!(serde_json::to_value(&p).unwrap()["lfo"]["target"], "cutoff");
+
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {"rate": 50}})).unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("lfo.rate") && err.contains("20"), "{err}");
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {"depth": 2}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("lfo.depth"));
+        assert!(
+            parse(json!({"name": "x", "subtractive": {}, "lfo": {"target": "filter"}})).is_err()
+        );
+        assert!(
+            parse(json!({"name": "x", "subtractive": {}, "lfo": {"speed": 1}}))
+                .unwrap_err()
+                .contains("speed")
+        );
+        assert_eq!(LfoTarget::ALL.len(), 6);
+        assert_eq!(LfoTarget::GrainDensity.as_str(), "grain_density");
+        assert_eq!(LfoWave::SampleHold.as_str(), "sample_hold");
+    }
+
+    #[test]
+    fn granular_patch_parses_validates_and_names_fields() {
+        let p = parse(json!({"name": "g", "granular": {}})).unwrap();
+        let g = p.granular.as_ref().unwrap();
+        assert_eq!(g.source, GrainSource::Harmonics);
+        assert_eq!(
+            (
+                g.grain_ms,
+                g.density,
+                g.pitch_semitones,
+                g.randomness,
+                g.stereo_width
+            ),
+            (50.0, 10.0, 0.0, 0.2, 0.5)
+        );
+        assert!(p.validate().is_ok() && p.has_pitched_engine());
+        let p = parse(
+            json!({"name": "g", "granular": {"source": "formant", "grain_ms": 120,
+            "density": 15, "pitch_semitones": 7, "randomness": 0.7, "stereo_width": 0.9,
+            "env": {"release": 3.0}}}),
+        )
+        .unwrap();
+        assert!(p.validate().is_ok());
+        assert_eq!(p.release_seconds(), 3.0);
+        assert_eq!(
+            serde_json::to_value(&p).unwrap()["granular"]["source"],
+            "formant"
+        );
+        for (field, value) in [
+            ("grain_ms", 1000.0),
+            ("density", 0.5),
+            ("pitch_semitones", 30.0),
+            ("randomness", 1.5),
+            ("stereo_width", -0.1),
+            ("level", 2.0),
+        ] {
+            let p = parse(json!({"name": "g", "granular": {field: value}})).unwrap();
+            let err = p.validate().unwrap_err();
+            assert!(err.contains(&format!("granular.{field}")), "{field}: {err}");
+        }
+        assert!(parse(json!({"name": "g", "granular": {"source": "sample"}})).is_err());
+        assert!(
+            parse(json!({"name": "g", "granular": {"grain_size": 0.1}}))
+                .unwrap_err()
+                .contains("grain_size")
+        );
+        let p = parse(json!({"name": "silent"})).unwrap();
+        assert!(
+            p.validate().unwrap_err().contains("granular"),
+            "no-engines message lists granular"
+        );
+    }
 }
 
 fn one() -> f32 {
@@ -387,7 +475,11 @@ pub struct Patch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wavetable: Option<Wavetable>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granular: Option<Granular>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percussion: Option<Percussion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lfo: Option<LfoConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectConfig>,
 }
@@ -924,6 +1016,181 @@ impl Wavetable {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrainSource {
+    #[default]
+    Harmonics,
+    Noise,
+    Formant,
+    Inharmonic,
+}
+
+impl GrainSource {
+    pub const ALL: [GrainSource; 4] = [
+        GrainSource::Harmonics,
+        GrainSource::Noise,
+        GrainSource::Formant,
+        GrainSource::Inharmonic,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GrainSource::Harmonics => "harmonics",
+            GrainSource::Noise => "noise",
+            GrainSource::Formant => "formant",
+            GrainSource::Inharmonic => "inharmonic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Granular {
+    pub level: f32,
+    pub source: GrainSource,
+    /// Grain length in milliseconds (5 to 500).
+    pub grain_ms: f32,
+    /// Grains started per second (1 to 50).
+    pub density: f32,
+    pub pitch_semitones: f32,
+    /// Random start position inside the source cycle (0 = always the start).
+    pub randomness: f32,
+    /// Random stereo placement of each grain (0 = centre, 1 = full width).
+    pub stereo_width: f32,
+    pub env: Adsr,
+}
+
+impl Default for Granular {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            source: GrainSource::Harmonics,
+            grain_ms: 50.0,
+            density: 10.0,
+            pitch_semitones: 0.0,
+            randomness: 0.2,
+            stereo_width: 0.5,
+            env: Adsr::default(),
+        }
+    }
+}
+
+impl Granular {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.grain_ms"), self.grain_ms, 5.0, 500.0)?;
+        check_range(&format!("{path}.density"), self.density, 1.0, 50.0)?;
+        check_range(
+            &format!("{path}.pitch_semitones"),
+            self.pitch_semitones,
+            -24.0,
+            24.0,
+        )?;
+        check_range(&format!("{path}.randomness"), self.randomness, 0.0, 1.0)?;
+        check_range(&format!("{path}.stereo_width"), self.stereo_width, 0.0, 1.0)?;
+        self.env.validate(&format!("{path}.env"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfoWave {
+    #[default]
+    Sine,
+    Triangle,
+    Saw,
+    Square,
+    SampleHold,
+}
+
+impl LfoWave {
+    pub const ALL: [LfoWave; 5] = [
+        LfoWave::Sine,
+        LfoWave::Triangle,
+        LfoWave::Saw,
+        LfoWave::Square,
+        LfoWave::SampleHold,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LfoWave::Sine => "sine",
+            LfoWave::Triangle => "triangle",
+            LfoWave::Saw => "saw",
+            LfoWave::Square => "square",
+            LfoWave::SampleHold => "sample_hold",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfoTarget {
+    #[default]
+    Off,
+    Cutoff,
+    Pitch,
+    Amplitude,
+    Morph,
+    GrainDensity,
+}
+
+impl LfoTarget {
+    pub const ALL: [LfoTarget; 6] = [
+        LfoTarget::Off,
+        LfoTarget::Cutoff,
+        LfoTarget::Pitch,
+        LfoTarget::Amplitude,
+        LfoTarget::Morph,
+        LfoTarget::GrainDensity,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LfoTarget::Off => "off",
+            LfoTarget::Cutoff => "cutoff",
+            LfoTarget::Pitch => "pitch",
+            LfoTarget::Amplitude => "amplitude",
+            LfoTarget::Morph => "morph",
+            LfoTarget::GrainDensity => "grain_density",
+        }
+    }
+}
+
+/// One low-frequency oscillator per patch, free-running from the start of
+/// the rendered buffer, routed to a single target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LfoConfig {
+    pub rate: f32,
+    pub depth: f32,
+    pub wave: LfoWave,
+    pub target: LfoTarget,
+}
+
+impl Default for LfoConfig {
+    fn default() -> Self {
+        Self {
+            rate: 1.0,
+            depth: 0.0,
+            wave: LfoWave::Sine,
+            target: LfoTarget::Off,
+        }
+    }
+}
+
+impl LfoConfig {
+    pub fn is_active(&self) -> bool {
+        self.target != LfoTarget::Off && self.depth > 0.0
+    }
+
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.rate"), self.rate, 0.1, 20.0)?;
+        check_range(&format!("{path}.depth"), self.depth, 0.0, 1.0)
+    }
+}
+
 /// A patch reference on a note: a stored name or a one-off inline patch.
 ///
 /// Serialized untagged (a bare string or a patch object). Deserialization is
@@ -990,7 +1257,13 @@ impl Patch {
             .filter(|w| w.level > 0.0)
             .map(|w| w.env.release)
             .unwrap_or(0.0);
-        sub.max(fm).max(wavetable)
+        let granular = self
+            .granular
+            .as_ref()
+            .filter(|g| g.level > 0.0)
+            .map(|g| g.env.release)
+            .unwrap_or(0.0);
+        sub.max(fm).max(wavetable).max(granular)
     }
 
     /// True when at least one enabled engine takes its pitch from the note.
@@ -998,6 +1271,7 @@ impl Patch {
         self.subtractive.as_ref().is_some_and(|s| s.level > 0.0)
             || self.fm.as_ref().is_some_and(|f| f.level > 0.0)
             || self.wavetable.as_ref().is_some_and(|w| w.level > 0.0)
+            || self.granular.as_ref().is_some_and(|g| g.level > 0.0)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -1009,9 +1283,10 @@ impl Patch {
             && self.percussion.is_none()
             && self.fm.is_none()
             && self.wavetable.is_none()
+            && self.granular.is_none()
         {
             return Err(format!(
-                "patch '{}' has no engines: add \"subtractive\", \"fm\", \"wavetable\" or \"percussion\"",
+                "patch '{}' has no engines: add \"subtractive\", \"fm\", \"wavetable\", \"granular\" or \"percussion\"",
                 self.name
             ));
         }
@@ -1059,8 +1334,14 @@ impl Patch {
         if let Some(wt) = &self.wavetable {
             wt.validate("wavetable")?;
         }
+        if let Some(g) = &self.granular {
+            g.validate("granular")?;
+        }
         if let Some(perc) = &self.percussion {
             perc.validate("percussion")?;
+        }
+        if let Some(lfo) = &self.lfo {
+            lfo.validate("lfo")?;
         }
         Ok(())
     }
@@ -1114,6 +1395,11 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/wt_vocal_pad.json"),
     include_str!("patches/wt_pwm_lead.json"),
     include_str!("patches/wt_glass_keys.json"),
+    // granular / lfo
+    include_str!("patches/grain_cloud.json"),
+    include_str!("patches/formant_texture.json"),
+    include_str!("patches/noise_texture.json"),
+    include_str!("patches/drone.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.

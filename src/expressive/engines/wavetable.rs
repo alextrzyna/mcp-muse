@@ -46,10 +46,11 @@ impl Voice for WavetableVoice {
     #[inline]
     fn tick(&mut self, mods: &Modulation) -> (f32, f32) {
         let p = self.phase.next_unit(self.frequency * mods.pitch_ratio);
+        let morph = (self.morph + mods.morph_offset).clamp(0.0, 1.0);
         let a = sample(self.table, self.mip, p);
-        let s = if self.morph > 0.0 {
+        let s = if morph > 0.0 {
             let b = sample(self.next, self.mip, p);
-            a * (1.0 - self.morph) + b * self.morph
+            a * (1.0 - morph) + b * morph
         } else {
             a
         };
@@ -140,6 +141,7 @@ mod tests {
             pitch_ratio: 2.0,
             cutoff_ratio: 1.0,
             amplitude: 0.5,
+            ..Modulation::default()
         };
         let s: Vec<f32> = (0..22050).map(|_| v.tick(&mods).0).collect();
         // The organ table's extra harmonics push the zero-crossing rate to
@@ -160,5 +162,29 @@ mod tests {
             v.tick(&mods);
         }
         assert!(!v.is_active());
+    }
+
+    #[test]
+    fn morph_offset_modulation_shifts_toward_the_next_table_and_clamps() {
+        let base = cfg(TableName::Basic, 0.0);
+        let mut v0 = WavetableVoice::new(&base, 220.0, SR);
+        let mut v1 = WavetableVoice::new(&base, 220.0, SR);
+        let plain = Modulation::default();
+        let pushed = Modulation {
+            morph_offset: 0.5,
+            ..Modulation::default()
+        };
+        let a: Vec<f32> = (0..SR as usize).map(|_| v0.tick(&plain).0).collect();
+        let b: Vec<f32> = (0..SR as usize).map(|_| v1.tick(&pushed).0).collect();
+        let h3 = |s: &[f32]| goertzel_power(s, 660.0, SR) / goertzel_power(s, 220.0, SR);
+        assert!(db(h3(&b) / h3(&a)) > 6.0, "offset moves toward warm");
+        // Negative offset from morph 0 clamps to 0: identical to plain.
+        let mut v2 = WavetableVoice::new(&base, 220.0, SR);
+        let neg = Modulation {
+            morph_offset: -0.5,
+            ..Modulation::default()
+        };
+        let c: Vec<f32> = (0..SR as usize).map(|_| v2.tick(&neg).0).collect();
+        assert!(a.iter().zip(&c).all(|(x, y)| (x - y).abs() < 1e-6));
     }
 }

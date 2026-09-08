@@ -1,11 +1,15 @@
 //! Renders every note of one patch into a single stereo buffer: voices are
 //! summed per sample, then the patch's effects chain runs once over the sum.
+//! The patch's optional LFO free-runs from the start of the buffer, read
+//! once per frame, before the voices tick, and is mapped to a `Modulation`
+//! each sample (identity when the LFO is absent or inactive).
 #![allow(dead_code)]
 
 use crate::expressive::engines::{
-    FmVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice, WavetableVoice,
+    FmVoice, GranularVoice, MIN_HIT_SECONDS, Modulation, PercussionVoice, SubtractiveVoice, Voice,
+    WavetableVoice,
 };
-use crate::expressive::{EffectsChain, Patch};
+use crate::expressive::{EffectsChain, Lfo, Patch};
 
 /// Extra silence rendered after the last release so reverbs and delays can ring out.
 pub const EFFECT_TAIL_SECONDS: f32 = 1.0;
@@ -98,6 +102,16 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
                 voice: Box::new(WavetableVoice::new(wt, note.frequency, sample_rate)),
             });
         }
+        if let Some(g) = &patch.granular
+            && g.level > 0.0
+        {
+            voices.push(ActiveVoice {
+                start,
+                gate_end,
+                gain,
+                voice: Box::new(GranularVoice::new(g, note.frequency, sample_rate)),
+            });
+        }
         if let Some(perc) = &patch.percussion
             && perc.level > 0.0
         {
@@ -110,12 +124,20 @@ pub fn render_patch(patch: &Patch, notes: &[NoteEvent], sample_rate: f32) -> Vec
         }
     }
 
-    let mods = Modulation::default();
+    let mut lfo = patch
+        .lfo
+        .as_ref()
+        .filter(|l| l.is_active())
+        .map(|l| (Lfo::new(l.rate, l.wave, sample_rate), l.target, l.depth));
     let mut chain_l = EffectsChain::new(sample_rate, &patch.effects);
     let mut chain_r = EffectsChain::new(sample_rate, &patch.effects);
     let mut out = vec![[0.0f32; 2]; total];
 
     for (i, frame) in out.iter_mut().enumerate() {
+        let mods = match &mut lfo {
+            Some((osc, target, depth)) => Modulation::from_lfo(*target, *depth, osc.next()),
+            None => Modulation::default(),
+        };
         let (mut l, mut r) = (0.0f32, 0.0f32);
         for v in &mut voices {
             if i < v.start || !v.voice.is_active() {
@@ -156,6 +178,26 @@ mod tests {
 
     fn left(buf: &[[f32; 2]]) -> Vec<f32> {
         buf.iter().map(|s| s[0]).collect()
+    }
+
+    /// Zero-crossing rate in successive 50 ms windows, skipping the first:
+    /// every note starts at phase 0 with the envelope at 0, so the very
+    /// first window always loses the crossing that would have landed at
+    /// sample 0, regardless of any LFO. A trailing partial window is also
+    /// dropped: over ~10 ms it quantizes to 100 Hz steps, swamping the
+    /// ±semitone swing this helper is meant to resolve.
+    fn zcr_windows(s: &[f32]) -> Vec<f32> {
+        if s.len() <= 2205 {
+            return Vec::new();
+        }
+        let z: Vec<f32> = s[2205..]
+            .as_chunks::<2205>()
+            .0
+            .iter()
+            .map(|w| crate::expressive::test_util::zero_crossing_rate(w, SR))
+            .collect();
+        assert!(!z.is_empty(), "buffer too short for a window");
+        z
     }
 
     #[test]
@@ -361,5 +403,140 @@ mod tests {
         let buf = left(&render_patch(&p, &[note(0.0, 0.5, 220.0)], SR));
         assert!(rms(&buf[441..22050]) > 0.3);
         assert_eq!(buf.len(), (0.7 * SR) as usize, "gate + release");
+    }
+
+    #[test]
+    fn pitch_lfo_moves_the_pitch_up_and_down_at_the_lfo_rate() {
+        let p = patch(
+            json!({"name": "vib", "subtractive": {"osc1": {"wave": "sine"},
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            "lfo": {"rate": 2.0, "depth": 1.0, "wave": "sine", "target": "pitch"}}),
+        );
+        let s = left(&render_patch(&p, &[note(0.0, 2.0, 440.0)], SR));
+        let z = zcr_windows(&s);
+        let (lo, hi) = z
+            .iter()
+            .fold((f32::MAX, 0.0f32), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+        // 440 Hz ± 2 semitones = 392..494 Hz, i.e. 784..988 crossings/s.
+        assert!(hi > 940.0 && lo < 830.0, "pitch swings: {lo}..{hi}");
+        let dry = patch(
+            json!({"name": "dry", "subtractive": {"osc1": {"wave": "sine"},
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}}),
+        );
+        let zd = zcr_windows(&left(&render_patch(&dry, &[note(0.0, 2.0, 440.0)], SR)));
+        let (lo, hi) = zd
+            .iter()
+            .fold((f32::MAX, 0.0f32), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+        assert!(hi - lo < 20.0, "no LFO, no swing: {lo}..{hi}");
+    }
+
+    #[test]
+    fn cutoff_lfo_varies_high_harmonic_energy() {
+        let p = patch(
+            json!({"name": "wah", "subtractive": {"osc1": {"wave": "saw"},
+            "filter": {"type": "low_pass", "cutoff": 400, "resonance": 0.2},
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            "lfo": {"rate": 1.0, "depth": 1.0, "wave": "square", "target": "cutoff"}}),
+        );
+        let s = left(&render_patch(&p, &[note(0.0, 1.0, 110.0)], SR));
+        // Square LFO: first half cycle cutoff x4 (1600 Hz), second half /4 (100 Hz).
+        let open = crate::expressive::test_util::goertzel_power(&s[2205..20000], 1100.0, SR);
+        let closed = crate::expressive::test_util::goertzel_power(&s[24255..42000], 1100.0, SR);
+        assert!(
+            crate::expressive::test_util::db(open / closed) > 20.0,
+            "10th harmonic follows the LFO"
+        );
+    }
+
+    #[test]
+    fn amplitude_lfo_is_a_tremolo() {
+        let p = patch(
+            json!({"name": "trem", "subtractive": {"osc1": {"wave": "sine"},
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            "lfo": {"rate": 4.0, "depth": 1.0, "wave": "sine", "target": "amplitude"}}),
+        );
+        let s = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR));
+        let env: Vec<f32> = s[2205..].chunks(441).map(rms).collect();
+        let (lo, hi) = env
+            .iter()
+            .fold((f32::MAX, 0.0f32), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+        assert!(lo < hi * 0.2, "amplitude dips near silence: {lo} vs {hi}");
+    }
+
+    #[test]
+    fn morph_lfo_moves_the_wavetable_between_tables() {
+        // basic -> warm: the 3rd harmonic grows with morph.
+        let p = patch(
+            json!({"name": "mw", "wavetable": {"table": "basic", "morph": 0.5,
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            "lfo": {"rate": 1.0, "depth": 1.0, "wave": "square", "target": "morph"}}),
+        );
+        let s = left(&render_patch(&p, &[note(0.0, 1.0, 220.0)], SR));
+        let h3 = |w: &[f32]| {
+            crate::expressive::test_util::goertzel_power(w, 660.0, SR)
+                / crate::expressive::test_util::goertzel_power(w, 220.0, SR)
+        };
+        let first = h3(&s[2205..20000]); // morph 1.0 (warm)
+        let second = h3(&s[24255..42000]); // morph 0.0 (basic)
+        assert!(
+            crate::expressive::test_util::db(first / second) > 10.0,
+            "{first} vs {second}"
+        );
+    }
+
+    #[test]
+    fn an_inactive_lfo_is_identity() {
+        let with = patch(
+            json!({"name": "a", "subtractive": {"env": {"release": 0.01}},
+            "lfo": {"rate": 5.0, "depth": 0.0, "target": "pitch"}}),
+        );
+        let without = patch(json!({"name": "b", "subtractive": {"env": {"release": 0.01}}}));
+        let a = left(&render_patch(&with, &[note(0.0, 0.5, 220.0)], SR));
+        let b = left(&render_patch(&without, &[note(0.0, 0.5, 220.0)], SR));
+        assert_eq!(a.len(), b.len());
+        assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6));
+    }
+
+    #[test]
+    fn granular_engine_renders_true_stereo() {
+        let p = patch(
+            json!({"name": "g", "granular": {"stereo_width": 1.0, "randomness": 0.5,
+            "density": 30, "env": {"attack": 0.001, "release": 0.2}}}),
+        );
+        let buf = render_patch(&p, &[note(0.0, 1.0, 220.0)], SR);
+        let l: Vec<f32> = buf.iter().map(|s| s[0]).collect();
+        let r: Vec<f32> = buf.iter().map(|s| s[1]).collect();
+        assert!(rms(&l[4410..44100]) > 0.05);
+        let diff: Vec<f32> = l.iter().zip(&r).map(|(a, b)| a - b).collect();
+        assert!(rms(&diff) > 0.02, "left and right differ");
+        assert_eq!(buf.len(), (1.2 * SR) as usize, "gate + release");
+    }
+
+    #[test]
+    fn grain_density_lfo_reaches_the_granular_voice() {
+        let mk = |lfo: serde_json::Value| {
+            patch(
+                json!({"name": "g", "granular": {"density": 4, "grain_ms": 20,
+            "randomness": 0.0, "stereo_width": 0.0, "env": {"attack": 0.001, "release": 0.01}}, "lfo": lfo}),
+            )
+        };
+        let steady = mk(json!({"target": "off"}));
+        let pumped =
+            mk(json!({"rate": 0.5, "depth": 1.0, "wave": "square", "target": "grain_density"}));
+        let a = left(&render_patch(&steady, &[note(0.0, 2.0, 220.0)], SR));
+        let b = left(&render_patch(&pumped, &[note(0.0, 2.0, 220.0)], SR));
+        // Square LFO at 0.5 Hz: first second at 2x density, second second at 0.5x.
+        let first = rms(&b[..44100]);
+        let second = rms(&b[44100..88200]);
+        assert!(
+            first > second * 1.3,
+            "denser first half: {first} vs {second}"
+        );
+        let sa = rms(&a[..44100]);
+        let sb = rms(&a[44100..88200]);
+        assert!(
+            (sa / sb - 1.0).abs() < 0.3,
+            "steady without the LFO: {sa} vs {sb}"
+        );
     }
 }

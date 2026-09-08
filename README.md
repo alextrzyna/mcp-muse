@@ -51,11 +51,11 @@
 - **🎮 Authentic SNES Gaming Sounds** - 128 GM instruments with FluidR3_GM for classic 16-bit console tone
 - **🤖 R2D2 Expressive Emotions** - 9 distinct robotic vocalizations (Happy, Excited, Curious, Worried, etc.)
 - **🎹 Built-in Synth Patches** - vintage-style recreations across bass, pad, lead and drums (Minimoog Bass, TB-303 Acid, Jupiter Pads, TR-808 Drums, etc.)
-- **🎛️ Agent-Defined Synth Patches** - `define_synth` builds a subtractive, fm, wavetable or percussion patch with its own effects chain, or pass one inline on a note
+- **🎛️ Agent-Defined Synth Patches** - `define_synth` builds a subtractive, fm, wavetable, granular or percussion patch with its own effects chain, or pass one inline on a note
 
 ### 🏆 **Comprehensive Audio Features**
 - **Mixed Mode Magic** - All 4 audio systems work together in perfect synchronization
-- **Huge Sound Vocabulary** - 128 GM instruments, 9 R2D2 emotions and 39 built-in synth patches, plus any patch you define
+- **Huge Sound Vocabulary** - 128 GM instruments, 9 R2D2 emotions and 43 built-in synth patches, plus any patch you define
 - **Real-Time Processing** - Instant musical reactions without conflicts or delays
 - **Professional Quality** - Research-driven algorithms for authentic sound reproduction
 
@@ -76,9 +76,9 @@
 - 🎮 **16-Bit SNES Sound**: Authentic retro gaming audio using FluidR3_GM SoundFont
 - 🤖 **R2D2 Expressions**: 9 distinct robotic emotions with ring modulation synthesis
 - 🎹 **Built-in Synth Patches**: vintage-style recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
-- 🎛️ **Agent-Defined Synth Patches**: `define_synth` stores a validated subtractive, fm, wavetable or percussion patch with its own effects chain; notes reference it by name via `synth`
+- 🎛️ **Agent-Defined Synth Patches**: `define_synth` stores a validated subtractive, fm, wavetable, granular or percussion patch with its own effects chain; notes reference it by name via `synth`
 - 🎭 **Universal Mixed Mode**: All audio systems work together in perfect synchronization
-- 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 39 built-in synth patches + your own
+- 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 43 built-in synth patches + your own
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
 - 🔌 **Seven Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`
 - 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per note, stereo output
@@ -283,10 +283,21 @@ An FM example:
 ```
 `list_sounds` now also lists `keys` patches, including `dx7_e_piano`, `fm_bell`, `wt_organ` and `wt_glass_keys`.
 
+A granular example, with an LFO breathing the grain density:
+```json
+{"name": "cloud", "category": "pad", "level": 0.6,
+ "granular": {"source": "formant", "grain_ms": 120, "density": 15, "pitch_semitones": 7,
+              "randomness": 0.7, "stereo_width": 0.9, "env": {"attack": 1.5, "release": 3}},
+ "lfo": {"rate": 0.2, "depth": 0.4, "target": "grain_density"},
+ "effects": [{"type": "reverb", "room_size": 0.9, "intensity": 0.5}]}
+```
+
 ### Engines
 - **subtractive**: `osc1`/`osc2` (`sine|saw|square|triangle|noise`, `pulse_width`, osc2 `mix`, `detune_cents`, `octave`), `filter` (`low_pass|high_pass|band_pass`, `cutoff`, `resonance` 0-1, `slope` 12|24, `env_amount` -1..1 with its own `env`), amplitude `env`.
 - **fm**: four operators (`ratio` 0.25-16, `level`, `detune_cents`, `env`) routed by `algorithm` `stack|pairs|fan_in|parallel`, plus `feedback`. Operator 1 is always a carrier; a modulator's level is its depth.
 - **wavetable**: `table` `basic|warm|bright|digital|vocal|pwm|organ|noise`, `morph` 0-1 toward the next table, `env`. Tables are band-limited per octave.
+- **granular**: `source` `harmonics|noise|formant|inharmonic`, `grain_ms` 5-500, `density` 1-50 grains/s, `pitch_semitones` ±24, `randomness`, `stereo_width`, `env`. True stereo.
+- **lfo** (not an engine, one per patch): `rate` 0.1-20 Hz, `depth` 0-1, `wave` `sine|triangle|saw|square|sample_hold`, `target` `off|cutoff|pitch|amplitude|morph|grain_density`.
 - **percussion**: `kind` `kick|snare|hihat|cymbal|zap|swoosh|chime|burst` with that kind's parameters (`punch`, `snap`, `metallic`, `sweep`, ...) and a `frequency`. Ignores the note's pitch.
 - **effects**: ordered chain of `reverb`, `delay`, `chorus`, `filter`, `compressor`, `distortion`, each with an `intensity` 0-1. A synth note takes its effects from here, so `effects`/`effects_preset` on the note itself is rejected.
 
@@ -467,12 +478,12 @@ effects. The 14 names (also listed by `list_sounds` section `effects`) are:
 - **🎮 OxiSynth Engine**: Pure Rust SoundFont synthesis for authentic SNES gaming sounds (✅ **Tested**)
 - **🤖 ExpressiveSynth Engine**: Ring modulation synthesis for R2D2-style vocalizations (✅ **Tested**)  
 - **🎹 Built-in Synth Patches**: vintage-style synthesizer recreations, embedded as JSON and loaded by `PatchLibrary` (✅ **Tested**)
-- **🎛️ Agent-Defined Synth Patches**: subtractive, fm, wavetable and percussion engines with band-limited oscillators, a state-variable filter and a stateful effects chain, rendered by `render_patch` (✅ **Tested**)
+- **🎛️ Agent-Defined Synth Patches**: subtractive, fm, wavetable, granular and percussion engines with band-limited oscillators, a state-variable filter, an optional per-patch LFO and a stateful effects chain, rendered by `render_patch` (✅ **Tested**)
 - **🔄 MidiEngine**: One long-lived stereo mixer with stateful effects chains and a soft clipper (✅ **Tested**)
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
-- **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 39 built-in synth patches, plus unlimited agent-defined patches
+- **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 43 built-in synth patches, plus unlimited agent-defined patches
 - **Mixed Mode Magic**: All audio systems work together in perfect synchronization  
 - **Professional Quality**: Research-driven algorithms for authentic sound reproduction
 - **Real-Time Performance**: Zero latency issues, instant musical reactions
