@@ -178,10 +178,37 @@ mod tests {
     /// Below `PATCH_LIMITER_CEILING` on purpose: a built-in must not lean on the limiter.
     const HEADROOM_CEILING: f32 = 1.4;
 
+    /// True when every enabled pitched engine is a raw noise source: a
+    /// subtractive voice whose `osc1` is `Wave::Noise` with no contributing
+    /// `osc2` (`mix <= 0`), or a granular voice with `GrainSource::Noise`.
+    /// Filtered noise's peak swings widely render to render regardless of
+    /// `level`, so it is not a stable loudness measure and is floored like fx.
+    fn is_noise_source(p: &Patch) -> bool {
+        let sub = p.subtractive.as_ref().filter(|s| s.level > 0.0);
+        let granular = p.granular.as_ref().filter(|g| g.level > 0.0);
+        let fm = p.fm.as_ref().filter(|f| f.level > 0.0);
+        let wavetable = p.wavetable.as_ref().filter(|w| w.level > 0.0);
+        let checks: Vec<bool> = [
+            sub.map(|s| s.osc1.wave == Wave::Noise && s.osc2.as_ref().is_none_or(|o| o.mix <= 0.0)),
+            granular.map(|g| g.source == GrainSource::Noise),
+            fm.map(|_| false),
+            wavetable.map(|_| false),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        !checks.is_empty() && checks.iter().all(|&ok| ok)
+    }
+
     /// Lower bound per category so a patch is not lost in a mix (pre-bus peak).
     /// Fx is lower than the general 0.3: sound effects (sweeps, zaps, noise
-    /// beds) are legitimately quieter than a sustained instrument voice.
-    fn headroom_floor(category: PatchCategory) -> f32 {
+    /// beds) are legitimately quieter than a sustained instrument voice. A
+    /// noise-source patch (see `is_noise_source`) is floored like fx no
+    /// matter its category, for the same reason.
+    fn headroom_floor(p: &Patch, category: PatchCategory) -> f32 {
+        if is_noise_source(p) {
+            return 0.2;
+        }
         match category {
             PatchCategory::Pad => 0.7,
             PatchCategory::Drums => 0.5,
@@ -272,7 +299,7 @@ mod tests {
                 fp
             };
             assert!(
-                floor_peak >= headroom_floor(category),
+                floor_peak >= headroom_floor(p, category),
                 "{name} peaks at only {floor_peak} over its floor chord; raise its level"
             );
 
@@ -284,6 +311,17 @@ mod tests {
                 "{name} peaks at {held_peak} on a held full-velocity note; lower its level"
             );
         }
+    }
+
+    #[test]
+    fn is_noise_source_matches_only_the_pure_noise_engines() {
+        let lib = PatchLibrary::new();
+        let matches: Vec<&str> = lib
+            .names()
+            .into_iter()
+            .filter(|name| is_noise_source(lib.get(name).unwrap()))
+            .collect();
+        assert_eq!(matches, vec!["noise_texture", "wind_pad"], "{matches:?}");
     }
 
     /// `cargo test print_builtin_headroom_survey -- --ignored --nocapture`
