@@ -142,14 +142,10 @@ mod tests {
         assert!(!p.has_pitched_engine());
     }
 
-    /// The phrases `cargo run -- test-synths` plays, so the test hears what the user hears.
+    /// The phrases `cargo run -- test-synths` plays, so the test hears what
+    /// the user hears; `demos.rs` reads the same table.
     fn demo_phrase(category: PatchCategory) -> &'static [(u8, f32, f32)] {
-        match category {
-            PatchCategory::Drums | PatchCategory::Fx => &[(36, 0.0, 0.5), (36, 0.5, 0.5)],
-            PatchCategory::Pad => &[(48, 0.0, 3.0), (55, 0.0, 3.0), (60, 0.0, 3.0)],
-            PatchCategory::Keys => &[(60, 0.0, 0.6), (64, 0.7, 0.6), (67, 1.4, 1.2)],
-            _ => &[(36, 0.0, 0.4), (43, 0.5, 0.4), (48, 1.0, 0.8)],
-        }
+        category.demo_phrase()
     }
 
     fn phrase_events(p: &Patch, phrase: &[(u8, f32, f32)], velocity: f32) -> Vec<NoteEvent> {
@@ -220,6 +216,15 @@ mod tests {
             return 0.2;
         }
         match category {
+            // The pad floor is the tightest one in the table. `formant_texture`
+            // sets it: its grain scatter is unseeded, so its phrase peak is a
+            // distribution, not a number -- over 1500 renders it ran min 0.713
+            // / p1 0.73 / median 0.82 / max 1.03. It is already at `level` 1.0,
+            // the maximum, so the worst case clears 0.7 by under 2% and no
+            // level edit can widen that. Raising this floor means finding
+            // another way to make that patch louder (or measuring something
+            // steadier than a peak), not editing the number; lowering it costs
+            // every other pad its guarantee.
             PatchCategory::Pad => 0.7,
             PatchCategory::Drums => 0.5,
             PatchCategory::Fx => 0.2,
@@ -227,24 +232,42 @@ mod tests {
         }
     }
 
-    /// Longest attack among a patch's enabled envelope-driven engines.
-    fn max_engine_attack(p: &Patch) -> f32 {
-        let mut attack: f32 = 0.0;
+    /// Every enabled envelope-driven engine's amplitude envelope. Percussion
+    /// carries its own envelope and is not one of them.
+    fn engine_envelopes(p: &Patch) -> Vec<&Adsr> {
+        let mut envs: Vec<&Adsr> = Vec::new();
         if let Some(s) = &p.subtractive {
-            attack = attack.max(s.env.attack);
+            envs.push(&s.env);
         }
         if let Some(f) = &p.fm {
-            for op in &f.operators {
-                attack = attack.max(op.env.attack);
-            }
+            envs.extend(f.operators.iter().map(|op| &op.env));
         }
         if let Some(w) = &p.wavetable {
-            attack = attack.max(w.env.attack);
+            envs.push(&w.env);
         }
         if let Some(g) = &p.granular {
-            attack = attack.max(g.env.attack);
+            envs.push(&g.env);
         }
-        attack
+        envs
+    }
+
+    /// Longest attack among a patch's enabled envelope-driven engines.
+    fn max_engine_attack(p: &Patch) -> f32 {
+        engine_envelopes(p)
+            .iter()
+            .fold(0.0f32, |m, e| m.max(e.attack))
+    }
+
+    /// How long a note has to be held before every engine has finished its
+    /// onset and settled on its sustain level: the slowest attack plus that
+    /// same envelope's decay. Taking the max of `attack + decay` picks the
+    /// slowest engine and its own decay in one pass, so the held-note guard
+    /// below measures a patch at its sustained loudness rather than
+    /// somewhere partway up a 4 s pad attack.
+    fn slowest_onset_seconds(p: &Patch) -> f32 {
+        engine_envelopes(p)
+            .iter()
+            .fold(0.0f32, |m, e| m.max(e.attack + e.decay))
     }
 
     /// Chord used to measure a pad's floor. A pad whose engine attack is
@@ -321,12 +344,21 @@ mod tests {
                 "{name} peaks at only {floor_peak} over {floor_stimulus}; raise its level"
             );
 
-            // A long note at full velocity catches slow pads measured mid-attack by the phrase.
-            let held = render_patch(p, &phrase_events(p, &[(60, 0.0, 3.0)], 1.0), 44100.0, 120);
+            // A long note at full velocity catches slow pads measured
+            // mid-attack by the phrase -- but only if it is held long enough
+            // for the slowest engine to get through its own attack and decay,
+            // which for `dream_pad` (4 s attack) a flat 3 s note is not.
+            let held_seconds = 3.0f32.max(slowest_onset_seconds(p));
+            let held = render_patch(
+                p,
+                &phrase_events(p, &[(60, 0.0, held_seconds)], 1.0),
+                44100.0,
+                120,
+            );
             let held_peak = peak(&held);
             assert!(
                 held_peak <= HEADROOM_CEILING,
-                "{name} peaks at {held_peak} on a held full-velocity note; lower its level"
+                "{name} peaks at {held_peak} on a {held_seconds} s held full-velocity note; lower its level"
             );
         }
     }
@@ -427,7 +459,15 @@ mod tests {
                     120,
                 );
                 let mono: Vec<f32> = buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect();
-                let held = render_patch(p, &phrase_events(p, &[(60, 0.0, 3.0)], 1.0), 44100.0, 120);
+                // The same held note the ceiling guard uses, so the survey
+                // rows are the numbers that test asserts on.
+                let held_seconds = 3.0f32.max(slowest_onset_seconds(p));
+                let held = render_patch(
+                    p,
+                    &phrase_events(p, &[(60, 0.0, held_seconds)], 1.0),
+                    44100.0,
+                    120,
+                );
                 println!(
                     "{:<22} level {:<5} phrase peak {:.2} rms {:>6.1} dB   held peak {:.2}",
                     p.name,
@@ -733,6 +773,24 @@ impl PatchCategory {
             PatchCategory::Keys => "keys",
             PatchCategory::Drums => "drums",
             PatchCategory::Fx => "fx",
+        }
+    }
+
+    /// A short phrase that shows this category off: `(midi_note, start_seconds,
+    /// duration_seconds)`. `cargo run -- test-synths` plays it and the headroom
+    /// test measures it, so the levels the test asserts are the levels a
+    /// listener hears. One definition, so the two cannot drift apart.
+    pub fn demo_phrase(&self) -> &'static [(u8, f32, f32)] {
+        match self {
+            // Unpitched one-shots: two hits, so a tail overlapping the next
+            // hit shows up in the peak.
+            PatchCategory::Drums | PatchCategory::Fx => &[(36, 0.0, 0.5), (36, 0.5, 0.5)],
+            // Pads are played as chords, which is where they stack up.
+            PatchCategory::Pad => &[(48, 0.0, 3.0), (55, 0.0, 3.0), (60, 0.0, 3.0)],
+            PatchCategory::Keys => &[(60, 0.0, 0.6), (64, 0.7, 0.6), (67, 1.4, 1.2)],
+            PatchCategory::Bass | PatchCategory::Lead => {
+                &[(36, 0.0, 0.4), (43, 0.5, 0.4), (48, 1.0, 0.8)]
+            }
         }
     }
 }

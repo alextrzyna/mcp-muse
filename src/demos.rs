@@ -34,14 +34,15 @@ pub fn test_synths() -> Result<(), Box<dyn std::error::Error>> {
         println!("\n## {}", category.as_str());
         for patch in patches {
             println!("- {}: {}", patch.name, patch.description);
-            let phrase: &[(u8, f64, f64)] = match category.as_str() {
-                "drums" | "fx" => &[(36, 0.0, 0.5), (36, 0.5, 0.5)],
-                "pad" => &[(48, 0.0, 3.0), (55, 0.0, 3.0), (60, 0.0, 3.0)],
-                "keys" => &[(60, 0.0, 0.6), (64, 0.7, 0.6), (67, 1.4, 1.2)],
-                _ => &[(36, 0.0, 0.4), (43, 0.5, 0.4), (48, 1.0, 0.8)],
-            };
+            // The same table the headroom test measures, so what this plays is
+            // what that test asserts on.
+            let phrase: Vec<(u8, f64, f64)> = category
+                .demo_phrase()
+                .iter()
+                .map(|&(n, start, duration)| (n, start as f64, duration as f64))
+                .collect();
             let duration =
-                player.play(patch_notes(&patch.name, phrase), PlayMode::Replace, &none)?;
+                player.play(patch_notes(&patch.name, &phrase), PlayMode::Replace, &none)?;
             sleep(duration.min(Duration::from_secs(4)));
         }
     }
