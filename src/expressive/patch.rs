@@ -196,7 +196,8 @@ mod tests {
         assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
         assert!(lib.get("wt_organ").is_some());
         assert!(lib.get("grain_cloud").is_some() && lib.get("drone").is_some());
-        assert!(lib.count() >= 43);
+        assert!(lib.get("shimmer_keys").is_some());
+        assert!(lib.count() >= 44);
     }
 
     #[test]
@@ -1419,6 +1420,8 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/formant_texture.json"),
     include_str!("patches/noise_texture.json"),
     include_str!("patches/drone.json"),
+    // time fracture
+    include_str!("patches/shimmer_keys.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.
