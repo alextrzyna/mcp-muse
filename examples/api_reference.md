@@ -62,6 +62,26 @@ Note fields (all optional unless noted):
 
 `start_time` and `duration` are capped at 300 seconds each.
 
+#### Effect types
+
+Every entry in `effects` (note-level or in a patch) takes `type`, an
+`intensity` 0-1 and `enabled` (default `true`), plus:
+
+| `type` | Fields |
+|--------|--------|
+| `reverb` | `room_size`, `dampening`, `wet_level`, `pre_delay` |
+| `delay` | `delay_time` (seconds, or beats when `sync_tempo: true`), `feedback`, `wet_level`, `sync_tempo`. Time Fracture: `random_beats: [min, max]` (0-4 beats of the sequence tempo, replaces `delay_time` when present), `random_rate` Hz (0-10; 0 = fixed at `min`), `pitch_intervals` (up to 12 values, -12..12 semitones, rounded to whole semitones), `pitch_mode` (`random\|up\|down\|up_down`) |
+| `chorus` | `rate`, `depth`, `stereo_width` |
+| `filter` | `filter_type`, `cutoff`, `resonance`, `envelope_amount` |
+| `compressor` | `threshold`, `ratio`, `attack`, `release` |
+| `distortion` | `drive`, `tone`, `output_level` |
+
+`sync_tempo: true` puts `delay_time` itself in beats instead of seconds;
+it has no effect once `random_beats` is set (beats are implied). Render
+tails follow `EffectConfig::tail_seconds(tempo)`: 1 s for `reverb`, 4x the
+longest delay time plus 0.5 s (minimum 1 s) for `delay`, 0.5 s for
+everything else.
+
 Success text includes the total playback time, effect tails included:
 
 ```json

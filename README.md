@@ -55,7 +55,7 @@
 
 ### 🏆 **Comprehensive Audio Features**
 - **Mixed Mode Magic** - All 4 audio systems work together in perfect synchronization
-- **Huge Sound Vocabulary** - 128 GM instruments, 9 R2D2 emotions and 43 built-in synth patches, plus any patch you define
+- **Huge Sound Vocabulary** - 128 GM instruments, 9 R2D2 emotions and 44 built-in synth patches, plus any patch you define
 - **Real-Time Processing** - Instant musical reactions without conflicts or delays
 - **Professional Quality** - Research-driven algorithms for authentic sound reproduction
 
@@ -78,10 +78,10 @@
 - 🎹 **Built-in Synth Patches**: vintage-style recreations (Minimoog, TB-303, Jupiter-8, TR-808, TR-909, etc.)
 - 🎛️ **Agent-Defined Synth Patches**: `define_synth` stores a validated subtractive, fm, wavetable, granular or percussion patch with its own effects chain; notes reference it by name via `synth`
 - 🎭 **Universal Mixed Mode**: All audio systems work together in perfect synchronization
-- 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 43 built-in synth patches + your own
+- 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 44 built-in synth patches + your own
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
 - 🔌 **Seven Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`
-- 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per note, stereo output
+- 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per patch (shared tails) and per MIDI bus, stereo output
 - ⚙️ **Zero Setup**: Automatic SoundFont download and multi-engine configuration
 - 🧪 **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
 
@@ -281,7 +281,7 @@ An FM example:
                        {"ratio": 3.5, "level": 0.55, "env": {"decay": 0.6, "sustain": 0}}]},
  "effects": [{"type": "reverb", "room_size": 0.7, "intensity": 0.35}]}
 ```
-`list_sounds` now also lists `keys` patches, including `dx7_e_piano`, `fm_bell`, `wt_organ` and `wt_glass_keys`.
+`list_sounds` now also lists `keys` patches, including `dx7_e_piano`, `fm_bell`, `wt_organ`, `wt_glass_keys` and `shimmer_keys`.
 
 A granular example, with an LFO breathing the grain density:
 ```json
@@ -292,6 +292,18 @@ A granular example, with an LFO breathing the grain density:
  "effects": [{"type": "reverb", "room_size": 0.9, "intensity": 0.5}]}
 ```
 
+A shimmer delay example, where each repeat climbs a fifth then an octave (Time Fracture):
+```json
+{"name": "shimmer", "category": "keys",
+ "fm": {"algorithm": "stack",
+        "operators": [{"ratio": 1, "env": {"decay": 1.5, "sustain": 0.2, "release": 2}},
+                       {"ratio": 3.5, "level": 0.5, "env": {"decay": 0.5, "sustain": 0}}]},
+ "effects": [{"type": "delay", "random_beats": [0.75, 0.75], "pitch_intervals": [7, 12], "pitch_mode": "up",
+              "feedback": 0.5, "intensity": 0.6},
+             {"type": "reverb", "room_size": 0.8, "intensity": 0.4}]}
+```
+The built-in `shimmer_keys` patch does the same thing without `define_synth`.
+
 ### Engines
 - **subtractive**: `osc1`/`osc2` (`sine|saw|square|triangle|noise`, `pulse_width`, osc2 `mix`, `detune_cents`, `octave`), `filter` (`low_pass|high_pass|band_pass`, `cutoff`, `resonance` 0-1, `slope` 12|24, `env_amount` -1..1 with its own `env`), amplitude `env`.
 - **fm**: four operators (`ratio` 0.25-16, `level`, `detune_cents`, `env`) routed by `algorithm` `stack|pairs|fan_in|parallel`, plus `feedback`. Operator 1 is always a carrier; a modulator's level is its depth.
@@ -299,7 +311,7 @@ A granular example, with an LFO breathing the grain density:
 - **granular**: `source` `harmonics|noise|formant|inharmonic`, `grain_ms` 5-500, `density` 1-50 grains/s, `pitch_semitones` ±24, `randomness`, `stereo_width`, `env`. True stereo.
 - **lfo** (not an engine, one per patch): `rate` 0.1-20 Hz, `depth` 0-1, `wave` `sine|triangle|saw|square|sample_hold`, `target` `off|cutoff|pitch|amplitude|morph|grain_density`.
 - **percussion**: `kind` `kick|snare|hihat|cymbal|zap|swoosh|chime|burst` with that kind's parameters (`punch`, `snap`, `metallic`, `sweep`, ...) and a `frequency`. Ignores the note's pitch.
-- **effects**: ordered chain of `reverb`, `delay`, `chorus`, `filter`, `compressor`, `distortion`, each with an `intensity` 0-1. A synth note takes its effects from here, so `effects`/`effects_preset` on the note itself is rejected.
+- **effects**: ordered chain of `reverb`, `delay`, `chorus`, `filter`, `compressor`, `distortion`, each with an `intensity` 0-1. A synth note takes its effects from here, so `effects`/`effects_preset` on the note itself is rejected. The `delay` also does Time Fracture: `random_beats: [min, max]` in beats of the sequence tempo, `random_rate` Hz, `pitch_intervals` in semitones with `pitch_mode` `random|up|down|up_down`; `sync_tempo: true` puts `delay_time` in beats.
 
 ### Migrating from presets and `synth_*` fields
 
@@ -416,7 +428,7 @@ Preset names map to the built-in patch of the same name in snake_case
 - **`chorus`**: 0=clean retro, 60=lush SNES sound, 100=dreamy (MIDI CC 93)
 
 ### **Professional Audio Effects System** 🎛️
-The system includes a comprehensive effects processor. Effects are stateful and run per note for synth and R2D2 sounds, and per bus for MIDI:
+The system includes a comprehensive effects processor. Effects are stateful: one instance per synth patch render (shared across every note of that patch in the call, so tails are real), one per R2D2 note, and one per MIDI bus for the call:
 
 #### **Available Effects**
 - **Reverb**: Professional Schroeder algorithm with room size, dampening, wet level, and pre-delay
@@ -457,7 +469,7 @@ effects. The 14 names (also listed by `list_sounds` section `effects`) are:
 
 #### **Important Effects Notes**
 - **Where effects live**: MIDI notes share one bus chain per call (the first MIDI note that specifies `effects` defines it); R2D2 notes render their own chain into their buffer; a synth note takes its chain from its patch, so `effects`/`effects_preset` on a synth note is rejected with `-32602`
-- **Stateful and per note**: no effect-count cap and no automatic gain compensation
+- **Stateful, not per-call limited**: no effect-count cap and no automatic gain compensation
 - **All effects use the unified `play_notes` tool** - no separate playback methods needed
 
 ## 🎮 Classic Gaming Instruments
@@ -483,7 +495,7 @@ effects. The 14 names (also listed by `list_sounds` section `effects`) are:
 - **💾 FluidR3_GM SoundFont**: 142MB retro gaming instrument collection from [keymusician01.s3.amazonaws.com](https://keymusician01.s3.amazonaws.com/FluidR3_GM.zip)
 
 ### **Comprehensive Audio Capabilities**
-- **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 43 built-in synth patches, plus unlimited agent-defined patches
+- **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 44 built-in synth patches, plus unlimited agent-defined patches
 - **Mixed Mode Magic**: All audio systems work together in perfect synchronization  
 - **Professional Quality**: Research-driven algorithms for authentic sound reproduction
 - **Real-Time Performance**: Zero latency issues, instant musical reactions
