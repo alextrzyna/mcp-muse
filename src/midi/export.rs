@@ -11,7 +11,9 @@ use crate::midi::engine::{
     CHUNK_FRAMES, EngineCommand, LEAD_FRAMES, MidiEngine, PlayCommand, PlayMode, SAMPLE_RATE,
     find_soundfont, load_synth, soft_clip,
 };
-use crate::midi::translate::{Effects, TranslatedParts, Translator};
+use crate::midi::gm_names::GM_INSTRUMENTS;
+use crate::midi::parser::MidiNote;
+use crate::midi::translate::{Effects, TranslatedParts, Translator, midi_events};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -128,12 +130,19 @@ pub fn export(
 /// One target file and what goes into it.
 struct Target {
     path: PathBuf,
-    #[allow(dead_code)] // read by the split renderers in Task 3
     source: Source,
 }
 
+/// What goes into one target file.
 enum Source {
+    /// Everything, soft-clipped.
     Mixdown,
+    /// One MIDI channel's events plus the bus chain (none for tracks).
+    Channel(u8),
+    /// Index into `TranslatedParts::patches`.
+    Patch(usize),
+    /// Every R2D2 note summed.
+    R2d2,
 }
 
 /// `export` with the SoundFont lookup injected, so tests can run without one.
@@ -196,10 +205,47 @@ pub(crate) fn export_with(
             });
         }
         Split::Stems | Split::Tracks => {
-            return Err(format!(
-                "split {} is not implemented yet",
-                request.split.as_str()
-            ));
+            for target in targets {
+                let samples = match target.source {
+                    Source::Mixdown => unreachable!("splits never plan a mixdown target"),
+                    Source::Channel(channel) => {
+                        let notes: Vec<MidiNote> = parts
+                            .midi
+                            .iter()
+                            .filter(|n| n.channel == channel)
+                            .cloned()
+                            .collect();
+                        render_offline(
+                            &mut engine,
+                            PlayCommand {
+                                events: midi_events(&notes),
+                                buffers: Vec::new(),
+                                midi_effects: parts.midi_effects.clone(),
+                                mode: PlayMode::Replace,
+                                tempo: parts.tempo,
+                            },
+                            frames,
+                        )
+                    }
+                    Source::Patch(i) => {
+                        let patch = &parts.patches[i];
+                        place(&[(patch.start, patch.samples.as_slice())], frames)
+                    }
+                    Source::R2d2 => {
+                        let buffers: Vec<(u64, &[[f32; 2]])> = parts
+                            .r2d2
+                            .iter()
+                            .map(|(start, samples)| (*start, samples.as_slice()))
+                            .collect();
+                        place(&buffers, frames)
+                    }
+                };
+                let peak = write_wav(&target.path, &samples, request.bit_depth)?;
+                files.push(ExportedFile {
+                    path: target.path,
+                    peak,
+                });
+            }
         }
     }
 
@@ -223,17 +269,77 @@ fn plan_targets(
     dir: &Path,
     name: &str,
     split: Split,
-    _parts: &TranslatedParts,
+    parts: &TranslatedParts,
 ) -> Result<Vec<Target>, String> {
-    match split {
-        Split::Mixdown => Ok(vec![Target {
+    Ok(match split {
+        Split::Mixdown => vec![Target {
             path: dir.join(format!("{}.wav", name)),
             source: Source::Mixdown,
-        }]),
+        }],
         Split::Stems | Split::Tracks => {
-            Err(format!("split {} is not implemented yet", split.as_str()))
+            let folder = dir.join(name);
+            sources(parts)
+                .into_iter()
+                .map(|(source_name, source)| Target {
+                    path: folder.join(format!("{}.wav", source_name)),
+                    source,
+                })
+                .collect()
+        }
+    })
+}
+
+/// The split's sources in a stable order: MIDI channels ascending, then
+/// patch groups in translation order, then R2D2. Names that repeat (two
+/// inline patches with the same name) get `_2`, `_3`, ... appended.
+fn sources(parts: &TranslatedParts) -> Vec<(String, Source)> {
+    let mut out: Vec<(String, Source)> = Vec::new();
+    let mut channels: Vec<u8> = parts.midi.iter().map(|n| n.channel).collect();
+    channels.sort_unstable();
+    channels.dedup();
+    for channel in channels {
+        let first = parts
+            .midi
+            .iter()
+            .filter(|n| n.channel == channel)
+            .min_by_key(|n| n.start_time)
+            .expect("channel has notes");
+        out.push((
+            channel_name(channel, first.instrument.unwrap_or(0)),
+            Source::Channel(channel),
+        ));
+    }
+    for (i, patch) in parts.patches.iter().enumerate() {
+        out.push((
+            format!("synth_{}", sanitize_name(&patch.name)),
+            Source::Patch(i),
+        ));
+    }
+    if !parts.r2d2.is_empty() {
+        out.push(("r2d2".to_string(), Source::R2d2));
+    }
+    dedupe_names(&mut out);
+    out
+}
+
+fn dedupe_names(sources: &mut [(String, Source)]) {
+    let mut seen: HashMap<String, usize> = HashMap::new();
+    for (name, _) in sources.iter_mut() {
+        let count = seen.entry(name.clone()).or_insert(0);
+        *count += 1;
+        if *count > 1 {
+            *name = format!("{}_{}", name, count);
         }
     }
+}
+
+/// `ch09_drums` for the drum channel, else `ch<NN>_<gm program name>`.
+fn channel_name(channel: u8, program: u8) -> String {
+    if channel == 9 {
+        return "ch09_drums".to_string();
+    }
+    let gm = GM_INSTRUMENTS[(program as usize).min(GM_INSTRUMENTS.len() - 1)];
+    format!("ch{:02}_{}", channel, sanitize_name(gm).to_lowercase())
 }
 
 fn check_collisions(targets: &[Target], overwrite: bool) -> Result<(), String> {
@@ -271,6 +377,20 @@ fn render_offline(engine: &mut MidiEngine, command: PlayCommand, frames: usize) 
     }
     out.drain(..LEAD_FRAMES as usize);
     out.truncate(frames);
+    out
+}
+
+/// Sum pre-rendered buffers into a zeroed buffer of `frames` frames at their
+/// start offsets; anything past the end is dropped.
+fn place(buffers: &[(u64, &[[f32; 2]])], frames: usize) -> Vec<[f32; 2]> {
+    let mut out = vec![[0.0f32; 2]; frames];
+    for (start, samples) in buffers {
+        let start = *start as usize;
+        for (slot, s) in out.iter_mut().skip(start).zip(samples.iter()) {
+            slot[0] += s[0];
+            slot[1] += s[1];
+        }
+    }
     out
 }
 
@@ -522,5 +642,281 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("name"), "{}", err);
+    }
+
+    fn parts_with(
+        midi: Vec<crate::midi::parser::MidiNote>,
+        patch_names: &[&str],
+        r2d2: bool,
+    ) -> TranslatedParts {
+        TranslatedParts {
+            midi,
+            midi_effects: None,
+            patches: patch_names
+                .iter()
+                .map(|n| crate::midi::translate::PatchRender {
+                    name: n.to_string(),
+                    start: 0,
+                    samples: vec![[0.1, 0.1]; 10],
+                })
+                .collect(),
+            r2d2: if r2d2 {
+                vec![(0, vec![[0.2, 0.2]; 10])]
+            } else {
+                Vec::new()
+            },
+            tempo: 120,
+            duration: Duration::from_secs(1),
+        }
+    }
+
+    fn parsed_midi(
+        channel: u8,
+        instrument: Option<u8>,
+        start: f64,
+    ) -> crate::midi::parser::MidiNote {
+        crate::midi::parser::MidiNote {
+            note: 60,
+            velocity: 100,
+            channel,
+            start_time: Duration::from_secs_f64(start),
+            duration: Duration::from_secs(1),
+            instrument,
+            reverb: None,
+            chorus: None,
+            volume: None,
+            pan: None,
+            balance: None,
+            expression: None,
+            sustain: None,
+        }
+    }
+
+    #[test]
+    fn sources_are_named_after_channel_program_patch_and_r2d2() {
+        let parts = parts_with(
+            vec![
+                parsed_midi(3, Some(73), 1.0),
+                parsed_midi(3, Some(0), 2.0),
+                parsed_midi(0, None, 0.0),
+                parsed_midi(9, None, 0.0),
+            ],
+            &["blip", "blip", "tr_808_kick"],
+            true,
+        );
+        let names: Vec<String> = sources(&parts).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(
+            names,
+            vec![
+                "ch00_acoustic_grand_piano",
+                "ch03_flute",
+                "ch09_drums",
+                "synth_blip",
+                "synth_blip_2",
+                "synth_tr_808_kick",
+                "r2d2",
+            ]
+        );
+    }
+
+    #[test]
+    fn stems_sum_to_the_mixdown_and_share_its_length() {
+        let dir = tmp_dir("stems");
+        let mut a = sine_note(0.0, 0.4, 0.3);
+        let b = sine_note(0.2, 0.4, 0.3);
+        // Two different patches so they become two stems.
+        a.synth = Some(
+            serde_json::from_value(serde_json::json!({
+                "name": "square_quiet", "level": 0.3,
+                "subtractive": {"osc1": {"wave": "square"},
+                    "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}}
+            }))
+            .unwrap(),
+        );
+        let notes = || vec![a.clone(), b.clone()];
+        let mix = export_with(
+            request(notes(), &dir, "mix", Split::Mixdown, BitDepth::Float32),
+            &HashMap::new(),
+            Err("x".into()),
+        )
+        .unwrap();
+        let stems = export_with(
+            request(notes(), &dir, "stems", Split::Stems, BitDepth::Float32),
+            &HashMap::new(),
+            Err("x".into()),
+        )
+        .unwrap();
+
+        assert_eq!(stems.files.len(), 2);
+        assert_eq!(stems.duration, mix.duration);
+        let names: Vec<String> = stems
+            .files
+            .iter()
+            .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["synth_square_quiet.wav", "synth_sine_30.wav"]);
+        assert!(stems.files[0].path.starts_with(dir.join("stems")));
+
+        let (_, mixed) = read_wav(&mix.files[0].path);
+        let (_, s0) = read_wav(&stems.files[0].path);
+        let (_, s1) = read_wav(&stems.files[1].path);
+        assert_eq!(s0.len(), mixed.len());
+        assert_eq!(s1.len(), mixed.len());
+        // Peaks stay below the soft-clip knee, so the mixdown is the plain sum.
+        assert!(mix.files[0].peak < 0.8);
+        let worst = mixed
+            .iter()
+            .zip(&s0)
+            .zip(&s1)
+            .map(|((m, x), y)| {
+                (m[0] - (x[0] + y[0]))
+                    .abs()
+                    .max((m[1] - (x[1] + y[1])).abs())
+            })
+            .fold(0.0f32, f32::max);
+        assert!(
+            worst < 1e-5,
+            "stems must sum to the mixdown, worst diff {}",
+            worst
+        );
+    }
+
+    #[test]
+    fn r2d2_notes_become_one_stem() {
+        let dir = tmp_dir("r2d2");
+        let r2d2 = SimpleNote {
+            note_type: "r2d2".to_string(),
+            r2d2_emotion: Some("Happy".to_string()),
+            r2d2_intensity: Some(0.7),
+            r2d2_complexity: Some(2),
+            duration: Some(0.5),
+            ..Default::default()
+        };
+        let report = export_with(
+            request(
+                vec![r2d2.clone(), r2d2],
+                &dir,
+                "beeps",
+                Split::Stems,
+                BitDepth::Int24,
+            ),
+            &HashMap::new(),
+            Err("x".into()),
+        )
+        .unwrap();
+        assert_eq!(report.files.len(), 1);
+        assert_eq!(report.files[0].path, dir.join("beeps").join("r2d2.wav"));
+        let (_, frames) = read_wav(&report.files[0].path);
+        assert!(rms_left(&frames, 0.0, 0.4) > 0.01);
+    }
+
+    #[test]
+    fn tracks_bypass_the_patch_effect_chain_but_keep_the_stem_length() {
+        let dir = tmp_dir("tracks");
+        let mut note = sine_note(0.0, 0.2, 0.8);
+        note.synth = Some(
+            serde_json::from_value(serde_json::json!({
+                "name": "echo", "level": 0.8,
+                "subtractive": {"osc1": {"wave": "sine"},
+                    "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+                "effects": [{"type": "delay", "delay_time": 0.5, "feedback": 0.5, "intensity": 0.8}]
+            }))
+            .unwrap(),
+        );
+        let wet = export_with(
+            request(
+                vec![note.clone()],
+                &dir,
+                "wet",
+                Split::Stems,
+                BitDepth::Float32,
+            ),
+            &HashMap::new(),
+            Err("x".into()),
+        )
+        .unwrap();
+        let dry = export_with(
+            request(vec![note], &dir, "dry", Split::Tracks, BitDepth::Float32),
+            &HashMap::new(),
+            Err("x".into()),
+        )
+        .unwrap();
+        let (_, wet_frames) = read_wav(&wet.files[0].path);
+        let (_, dry_frames) = read_wav(&dry.files[0].path);
+        assert_eq!(
+            dry_frames.len(),
+            wet_frames.len(),
+            "tracks are padded to the wet length"
+        );
+        // The first echo lands at 0.5 s; a dry track has nothing there.
+        assert!(
+            rms_left(&wet_frames, 1.0, 1.2) > 1e-3,
+            "the stem carries the delay repeats"
+        );
+        assert!(rms_left(&dry_frames, 1.0, 1.2) < 1e-5, "the track does not");
+        assert!(
+            rms_left(&dry_frames, 0.02, 0.18) > 0.05,
+            "the track still has the note"
+        );
+    }
+
+    #[test]
+    fn midi_channels_become_separate_stems() {
+        let Ok(soundfont) = find_soundfont() else {
+            eprintln!("skipping: SoundFont not installed (run `mcp-muse setup`)");
+            return;
+        };
+        let dir = tmp_dir("channels");
+        let report = export_with(
+            request(
+                vec![
+                    midi_note(0, 76, Some(73)), // flute E5, 659.26 Hz
+                    midi_note(1, 67, Some(73)), // flute G4, 392.00 Hz
+                    midi_note(9, 38, None),     // snare on the drum channel
+                ],
+                &dir,
+                "band",
+                Split::Stems,
+                BitDepth::Float32,
+            ),
+            &HashMap::new(),
+            Ok(soundfont),
+        )
+        .unwrap();
+        let names: Vec<String> = report
+            .files
+            .iter()
+            .map(|f| f.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["ch00_flute.wav", "ch01_flute.wav", "ch09_drums.wav"]
+        );
+
+        use crate::expressive::test_util::goertzel_power;
+        let window = |frames: &[[f32; 2]]| -> Vec<f32> {
+            let a = (0.1 * SAMPLE_RATE as f64) as usize;
+            let b = (0.9 * SAMPLE_RATE as f64) as usize;
+            frames[a..b].iter().map(|f| f[0]).collect()
+        };
+        let (_, ch0) = read_wav(&report.files[0].path);
+        let (_, ch1) = read_wav(&report.files[1].path);
+        let (e5, g4) = (659.26, 392.0);
+        let sr = SAMPLE_RATE as f32;
+        let ch0 = window(&ch0);
+        let ch1 = window(&ch1);
+        assert!(
+            goertzel_power(&ch0, e5, sr) > 10.0 * goertzel_power(&ch0, g4, sr),
+            "channel 0 carries only its own pitch"
+        );
+        assert!(
+            goertzel_power(&ch1, g4, sr) > 10.0 * goertzel_power(&ch1, e5, sr),
+            "channel 1 carries only its own pitch"
+        );
+        let (_, drums) = read_wav(&report.files[2].path);
+        assert!(
+            rms_left(&drums, 0.0, 0.2) > 0.01,
+            "the snare hit is on the drum stem"
+        );
     }
 }

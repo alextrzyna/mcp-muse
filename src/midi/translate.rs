@@ -122,7 +122,6 @@ pub enum Effects {
 #[derive(Debug, Clone)]
 pub struct PatchRender {
     /// The patch's key (`Patch::key`), used to name an exported file.
-    #[allow(dead_code)] // read by the exporter in a later task
     pub name: String,
     /// Frames after the start of the composition.
     pub start: u64,
