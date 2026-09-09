@@ -80,7 +80,7 @@
 - 🎭 **Universal Mixed Mode**: All audio systems work together in perfect synchronization
 - 🏆 **Huge Sound Vocabulary**: 128 GM instruments + 9 R2D2 emotions + 44 built-in synth patches + your own
 - ⚡ **Real-Time Performance**: Zero latency issues, perfect timing across all audio types
-- 🔌 **Seven Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`
+- 🔌 **Eight Focused Tools**: `play_notes`, `define_sequence_pattern`, `play_sequence`, `list_patterns`, `define_synth`, `list_sounds`, `stop_playback`, `export_audio`
 - 🎚️ **Stateful Effects**: reverb, delay, chorus, filter, compressor and distortion rendered per patch (shared tails), per R2D2 note and per MIDI bus, stereo output
 - ⚙️ **Zero Setup**: Automatic SoundFont download and multi-engine configuration
 - 🧪 **Production Validated**: Comprehensive 10-scenario test suite confirms all functionality
@@ -328,6 +328,27 @@ is now a patch behind the single `synth` field. Removed fields fail with
 Preset names map to the built-in patch of the same name in snake_case
 (`"TB-303 Acid"` → `tb_303_acid`, `"JP-8 Strings"` → `jp_8_strings`); call
 `list_sounds` with `{"section": "synths"}` for the current list.
+
+## 💾 Saving Audio to Disk
+
+`export_audio` takes the same `notes`, `patterns`, `tempo` and `beats_per_bar` as `play_sequence`, renders offline (nothing plays) and writes 44.1 kHz stereo WAV:
+
+```json
+{
+  "patterns": [{"pattern_name": "drums", "start_bar": 1, "repeat_count": 4}],
+  "notes": [{"synth": "minimoog_bass", "note": 36, "musical_time": "1.1.0", "musical_duration": "1/4"}],
+  "path": "/Users/me/Music/demo",
+  "name": "take1",
+  "split": "stems",
+  "bit_depth": 24
+}
+```
+
+- `split: "mixdown"` (default) writes `<path>/<name>.wav`, soft-clipped like playback.
+- `split: "stems"` writes `<path>/<name>/<source>.wav`, one per MIDI channel (`ch09_drums`, `ch00_acoustic_grand_piano`), per synth patch (`synth_minimoog_bass`) and one `r2d2`, with every effect baked in so they sum back to the mix.
+- `split: "tracks"` is the same split with the MIDI bus, patch and R2D2 effect chains bypassed, for mixing elsewhere.
+
+Every file in an export has the same length, so they line up at zero in a DAW. `bit_depth` is 16, 24 (default) or 32 (float, never clamps); existing files are kept unless `"overwrite": true`.
 
 ## 🎭 **Universal Mixed Mode Examples (All Systems Together)**
 

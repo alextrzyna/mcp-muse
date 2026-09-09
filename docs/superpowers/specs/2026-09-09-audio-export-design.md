@@ -1,7 +1,7 @@
 # Exporting compositions to disk
 
 Date: 2026-09-09
-Status: Approved design, not yet implemented
+Status: Implemented on branch audio-export (2026-09-09)
 
 ## Goal
 
