@@ -106,7 +106,7 @@ fn test_mcp_tools_list() {
     assert!(response["result"]["tools"].is_array());
 
     let tools = response["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 7);
+    assert_eq!(tools.len(), 8);
 
     // Check that all tools are present
     let tool_names: Vec<&str> = tools
@@ -119,6 +119,7 @@ fn test_mcp_tools_list() {
     assert!(tool_names.contains(&"list_patterns"));
     assert!(tool_names.contains(&"stop_playback"));
     assert!(tool_names.contains(&"list_sounds"));
+    assert!(tool_names.contains(&"export_audio"));
 
     // Verify the play_notes tool supports all the functionality
     let play_notes_tool = tools

@@ -36,12 +36,13 @@ Prefer that over listen-by-ear checks when changing synthesis or effects.
 
 ### MCP Server (`src/server/mcp.rs`)
 JSON-RPC 2.0 over stdio. `ServerState` holds the audio player (opened on
-first playback) and the session's patterns and synth patches. Seven tools:
+first playback) and the session's patterns and synth patches. Eight tools:
 - `play_notes` - quick sounds and melodies; every note type in one array; takes `mode: replace|layer`
 - `define_sequence_pattern` / `play_sequence` / `list_patterns` - reusable bar-based patterns with transposition, repeats and time signature; `play_sequence` also takes `mode`
 - `define_synth` - store a validated synth patch for the session; notes reference it by name via `synth`
 - `list_sounds` - catalog of synth patches, GM instruments, drum keys, R2D2 emotions and effects
 - `stop_playback` - silence everything currently playing
+- `export_audio` - render a composition offline and write WAV files: `split: mixdown|stems|tracks`, a required absolute `path`, `name`, `bit_depth: 16|24|32` and `overwrite`; never opens the audio device
 
 Conventions: malformed or invalid arguments (including a patch that fails
 validation) return JSON-RPC `-32602`; anything that fails while executing
@@ -71,6 +72,23 @@ Known limitation: OxiSynth renders all 16 MIDI channels into one bus, so
 per-channel effects are not yet possible (pan, volume, reverb/chorus CCs do
 work per channel inside OxiSynth). A dedicated render thread behind the same
 engine API is the next step if the callback still glitches.
+
+### Export (`src/midi/export.rs`)
+`export_audio` renders without a device. `Translator::translate_parts`
+returns the sources kept apart (`TranslatedParts`: MIDI notes and bus
+chain, one `PatchRender` per patch group, R2D2 buffers); `translate` is
+that plus `into_command`. The exporter builds a private `MidiEngine` with
+its own OxiSynth (about 70 ms to load, a deliberate exception to "one
+engine per process" because it never touches the live path), replays a
+`PlayCommand` through `apply` and `render_unclipped`, and drops the
+lead-in. A mixdown is one pass through `soft_clip`; stems and tracks do
+one pass per MIDI channel (OxiSynth cannot split channels otherwise) and
+place patch and R2D2 buffers directly, unclipped. Tracks are translated
+with `Effects::Dry` (bus, patch and R2D2 chains bypassed) and padded to the
+wet length so every file lines up. Files are written with `hound`; names
+are sanitized to `[A-Za-z0-9_-]`, channels are `ch<NN>_<gm name>`
+(`ch09_drums`), patches `synth_<key>`, R2D2 `r2d2`. Tests read the files
+back and measure them (`src/midi/export.rs` tests).
 
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: the R2D2 ring-modulation voice only. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`).
@@ -103,5 +121,5 @@ Cursor MCP config, stores an optional custom SoundFont path.
 - **Unified playback**: every audio type goes through `MidiPlayer::play` and the one `MidiEngine`.
 - **Effects are stateful**: one instance per synth patch render (shared across every note of that patch in the call), one per R2D2 note, and one per MIDI bus. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
 - **Stereo throughout** the mixer; mono sources are centered.
-- **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call.
+- **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call; the one exception is `export_audio`, which builds a private engine for an offline render (see Export above).
 - **Headroom is measured, not assumed**: the library test renders each category's demo phrase (a chord for pads) and a held full-velocity note and asserts a 1.4 pre-bus ceiling below the limiter's 1.5; set levels with `cargo test print_builtin_headroom_survey -- --ignored --nocapture`.

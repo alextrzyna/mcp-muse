@@ -4,6 +4,9 @@ use serde_json::{Value, json};
 use crate::expressive::{
     FmAlgorithm, GrainSource, LfoTarget, LfoWave, Patch, PatchLibrary, PercussionKind, TableName,
 };
+use crate::midi::export::{
+    BitDepth, ExportReport, ExportRequest, Split, bus_chain_is_nonlinear, export, sanitize_name,
+};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PitchMode, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
     validate_tempo,
@@ -545,6 +548,95 @@ fn note_schema() -> Value {
     })
 }
 
+/// Schema of one entry in a `patterns` array (shared by play_sequence and export_audio).
+fn pattern_reference_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "pattern_name": {
+                "type": "string",
+                "description": "🏷️ Name of the pattern to reference"
+            },
+            "start_time_offset": {
+                "type": "number",
+                "description": "⏰ DEPRECATED: Use start_bar for perfect sync!",
+                "default": 0
+            },
+            "start_bar": {
+                "type": "integer",
+                "description": "🎼 RECOMMENDED: Start at specific bar number (1-based) - ensures perfect alignment!",
+                "minimum": 1,
+                "maximum": 256
+            },
+            "start_beat": {
+                "type": "integer",
+                "description": "🎵 Start on specific beat within the bar (1-4 for 4/4 time)",
+                "minimum": 1,
+                "maximum": 8,
+                "default": 1
+            },
+            "bars": {
+                "type": "array",
+                "description": "🎯 SMART ARRANGEMENT: Play pattern on specific bars only (e.g., [1, 5, 9, 13])",
+                "items": {"type": "integer", "minimum": 1, "maximum": 256}
+            },
+            "transpose": {
+                "type": "integer",
+                "description": "🎵 Transpose by semitones (-12 to +12): -12=octave down, 0=original, +7=fifth up, +12=octave up",
+                "minimum": -12,
+                "maximum": 12,
+                "default": 0
+            },
+            "instrument_override": {
+                "type": "integer",
+                "description": "🎹 Override instrument for all MIDI notes in pattern",
+                "minimum": 0,
+                "maximum": 127
+            },
+            "velocity_scale": {
+                "type": "number",
+                "description": "🔊 Scale all velocities (0.1-2.0): 0.5=softer, 1.0=original, 1.5=louder",
+                "minimum": 0.1,
+                "maximum": 2.0,
+                "default": 1.0
+            },
+            "duration_scale": {
+                "type": "number",
+                "description": "⏳ Scale all durations (0.1-4.0): 0.5=staccato, 1.0=original, 2.0=legato",
+                "minimum": 0.1,
+                "maximum": 4.0,
+                "default": 1.0
+            },
+            "channel_override": {
+                "type": "integer",
+                "description": "📻 Override MIDI channel for all notes in pattern",
+                "minimum": 0,
+                "maximum": 15
+            },
+            "repeat_count": {
+                "type": "integer",
+                "description": "🔄 Number of times to repeat this pattern (ignored if 'bars' specified)",
+                "minimum": 1,
+                "maximum": 64,
+                "default": 1
+            },
+            "repeat_spacing_bars": {
+                "type": "number",
+                "description": "🎼 RECOMMENDED: Spacing between repeats in bars (musical spacing)",
+                "minimum": 0,
+                "maximum": 16,
+                "default": 0
+            },
+            "align_to_bars": {
+                "type": "boolean",
+                "description": "📐 Align pattern to bar boundaries for perfect sync",
+                "default": true
+            }
+        },
+        "required": ["pattern_name"]
+    })
+}
+
 fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     tracing::info!("Handling tools/list request");
 
@@ -644,91 +736,7 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                     "patterns": {
                         "type": "array",
                         "description": "🎼 Pattern references with transformations",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "pattern_name": {
-                                    "type": "string",
-                                    "description": "🏷️ Name of the pattern to reference"
-                                },
-                                "start_time_offset": {
-                                    "type": "number",
-                                    "description": "⏰ DEPRECATED: Use start_bar for perfect sync!",
-                                    "default": 0
-                                },
-                                "start_bar": {
-                                    "type": "integer",
-                                    "description": "🎼 RECOMMENDED: Start at specific bar number (1-based) - ensures perfect alignment!",
-                                    "minimum": 1,
-                                    "maximum": 256
-                                },
-                                "start_beat": {
-                                    "type": "integer",
-                                    "description": "🎵 Start on specific beat within the bar (1-4 for 4/4 time)",
-                                    "minimum": 1,
-                                    "maximum": 8,
-                                    "default": 1
-                                },
-                                "bars": {
-                                    "type": "array",
-                                    "description": "🎯 SMART ARRANGEMENT: Play pattern on specific bars only (e.g., [1, 5, 9, 13])",
-                                    "items": {"type": "integer", "minimum": 1, "maximum": 256}
-                                },
-                                "transpose": {
-                                    "type": "integer",
-                                    "description": "🎵 Transpose by semitones (-12 to +12): -12=octave down, 0=original, +7=fifth up, +12=octave up",
-                                    "minimum": -12,
-                                    "maximum": 12,
-                                    "default": 0
-                                },
-                                "instrument_override": {
-                                    "type": "integer",
-                                    "description": "🎹 Override instrument for all MIDI notes in pattern",
-                                    "minimum": 0,
-                                    "maximum": 127
-                                },
-                                "velocity_scale": {
-                                    "type": "number",
-                                    "description": "🔊 Scale all velocities (0.1-2.0): 0.5=softer, 1.0=original, 1.5=louder",
-                                    "minimum": 0.1,
-                                    "maximum": 2.0,
-                                    "default": 1.0
-                                },
-                                "duration_scale": {
-                                    "type": "number",
-                                    "description": "⏳ Scale all durations (0.1-4.0): 0.5=staccato, 1.0=original, 2.0=legato",
-                                    "minimum": 0.1,
-                                    "maximum": 4.0,
-                                    "default": 1.0
-                                },
-                                "channel_override": {
-                                    "type": "integer",
-                                    "description": "📻 Override MIDI channel for all notes in pattern",
-                                    "minimum": 0,
-                                    "maximum": 15
-                                },
-                                "repeat_count": {
-                                    "type": "integer",
-                                    "description": "🔄 Number of times to repeat this pattern (ignored if 'bars' specified)",
-                                    "minimum": 1,
-                                    "maximum": 64,
-                                    "default": 1
-                                },
-                                "repeat_spacing_bars": {
-                                    "type": "number",
-                                    "description": "🎼 RECOMMENDED: Spacing between repeats in bars (musical spacing)",
-                                    "minimum": 0,
-                                    "maximum": 16,
-                                    "default": 0
-                                },
-                                "align_to_bars": {
-                                    "type": "boolean",
-                                    "description": "📐 Align pattern to bar boundaries for perfect sync",
-                                    "default": true
-                                }
-                            },
-                            "required": ["pattern_name"]
-                        }
+                        "items": pattern_reference_schema()
                     },
                     "tempo": {
                         "type": "integer",
@@ -833,6 +841,68 @@ Pass \"mode\": \"layer\" to play over what is already sounding; the default repl
                 },
                 "required": ["notes"]
             }
+        },
+        {
+            "name": "export_audio",
+            "description": "Save a composition to disk as WAV instead of playing it. Takes the same notes, patterns, tempo and beats_per_bar as play_sequence and renders offline (nothing is heard, live playback is untouched). split selects what is written: \"mixdown\" (default) is one stereo file; \"stems\" is one file per sound source (each MIDI channel, each synth patch, all R2D2 together) with every effect baked in so they sum back to the mix; \"tracks\" is the same split with the MIDI bus, patch and R2D2 effect chains bypassed, for mixing elsewhere. Every file in one export has the same length so they line up at zero in a DAW. MIDI channel stems each carry their own copy of the MIDI bus chain, so a bus with a compressor, distortion or Time Fracture delay does not sum back exactly; synth and R2D2 stems always do.
+
+Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repeat_count\": 4}], \"path\": \"/Users/me/Music/demo\", \"name\": \"take1\", \"split\": \"stems\"} writes /Users/me/Music/demo/take1/ch09_drums.wav and friends.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "array",
+                        "description": "🎵 Individual notes (same format as play_notes)",
+                        "items": note_schema()
+                    },
+                    "patterns": {
+                        "type": "array",
+                        "description": "🎼 Pattern references with transformations (same format as play_sequence)",
+                        "items": pattern_reference_schema()
+                    },
+                    "tempo": {
+                        "type": "integer",
+                        "description": "🎵 Tempo in BPM for the entire sequence",
+                        "minimum": 20,
+                        "maximum": 300,
+                        "default": 120
+                    },
+                    "beats_per_bar": {
+                        "type": "integer",
+                        "description": "🎶 Time signature numerator used to convert musical_time and musical_duration (4 for 4/4, 3 for 3/4)",
+                        "minimum": 2,
+                        "maximum": 8,
+                        "default": 4
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "📁 Absolute directory to write into; created if missing. A mixdown is written as <path>/<name>.wav, stems and tracks as <path>/<name>/<source>.wav."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "🏷️ Base file or folder name. Letters, digits, '_' and '-' are kept; anything else becomes '_'.",
+                        "default": "mix"
+                    },
+                    "split": {
+                        "type": "string",
+                        "enum": ["mixdown", "stems", "tracks"],
+                        "default": "mixdown",
+                        "description": "mixdown: one soft-clipped stereo file. stems: one file per source with effects, not clipped. tracks: one file per source with the effect chains bypassed, not clipped."
+                    },
+                    "bit_depth": {
+                        "type": "integer",
+                        "enum": [16, 24, 32],
+                        "default": 24,
+                        "description": "WAV sample format: 16 or 24-bit integer (peaks above 0 dBFS are clamped and reported) or 32 for IEEE float (never clamps)."
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Replace files that already exist. Without it an existing target is an error listing the collisions."
+                    }
+                },
+                "required": ["path"]
+            }
         }
     ]);
 
@@ -900,6 +970,7 @@ fn dispatch_tool(
         "list_patterns" => handle_list_patterns(state, id),
         "list_sounds" => handle_list_sounds(state, tool_params.arguments, id),
         "stop_playback" => handle_stop_playback(state, id),
+        "export_audio" => handle_export_audio(state, tool_params.arguments, id),
         other => JsonRpcResponse::error(id, METHOD_NOT_FOUND, format!("Unknown tool: {}", other)),
     }
 }
@@ -1153,51 +1224,56 @@ fn handle_define_pattern(
     JsonRpcResponse::tool_text(id, details)
 }
 
-fn handle_play_sequence(
-    state: &mut ServerState,
+/// The shared front half of play_sequence and export_audio: parse the
+/// notes/patterns arguments, validate, resolve patterns against the session
+/// and describe the result. `Err` carries the response to send back.
+// The whole response is the error payload here, not a hot path; boxing it
+// would only push the allocation onto every call site.
+#[allow(clippy::result_large_err)]
+fn resolve_sequence_arguments(
+    state: &ServerState,
     arguments: Value,
-    id: Option<Value>,
-) -> JsonRpcResponse {
-    let mode = match parse_mode(&arguments) {
-        Ok(mode) => mode,
-        Err(e) => return JsonRpcResponse::error(id, INVALID_PARAMS, e),
-    };
+    id: &Option<Value>,
+) -> Result<(SimpleSequence, String), JsonRpcResponse> {
     let extended: ExtendedSequence = match serde_json::from_value(arguments) {
         Ok(seq) => seq,
         Err(e) => {
-            return JsonRpcResponse::error(
-                id,
+            return Err(JsonRpcResponse::error(
+                id.clone(),
                 INVALID_PARAMS,
                 format!("Failed to parse sequence: {}", e),
-            );
+            ));
         }
     };
     if extended.notes.is_empty() && extended.patterns.is_empty() {
-        return JsonRpcResponse::error(
-            id,
+        return Err(JsonRpcResponse::error(
+            id.clone(),
             INVALID_PARAMS,
             "Sequence must contain either notes or pattern references",
-        );
+        ));
     }
     if let Err(e) = validate_tempo(extended.tempo) {
-        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
+        return Err(JsonRpcResponse::error(id.clone(), INVALID_PARAMS, e));
     }
     if let Err(e) = validate_notes(&extended.notes) {
-        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
+        return Err(JsonRpcResponse::error(id.clone(), INVALID_PARAMS, e));
     }
 
     let resolved = match extended.resolve_patterns(&state.patterns) {
         Ok(seq) => seq,
         Err(e) => {
             let known: Vec<&String> = state.patterns.keys().collect();
-            return JsonRpcResponse::tool_error(
-                id,
+            return Err(JsonRpcResponse::tool_error(
+                id.clone(),
                 format!("{}. Defined patterns: {:?}", e, known),
-            );
+            ));
         }
     };
     if resolved.notes.is_empty() {
-        return JsonRpcResponse::tool_error(id, "Resolved sequence contains no notes");
+        return Err(JsonRpcResponse::tool_error(
+            id.clone(),
+            "Resolved sequence contains no notes",
+        ));
     }
 
     let summary = format!(
@@ -1207,7 +1283,165 @@ fn handle_play_sequence(
         resolved.notes.len(),
         describe_sources(&resolved.notes)
     );
+    Ok((resolved, summary))
+}
+
+fn handle_play_sequence(
+    state: &mut ServerState,
+    arguments: Value,
+    id: Option<Value>,
+) -> JsonRpcResponse {
+    let mode = match parse_mode(&arguments) {
+        Ok(mode) => mode,
+        Err(e) => return JsonRpcResponse::error(id, INVALID_PARAMS, e),
+    };
+    let (resolved, summary) = match resolve_sequence_arguments(state, arguments, &id) {
+        Ok(r) => r,
+        Err(response) => return response,
+    };
     start_playback(state, resolved, mode, id, summary)
+}
+
+/// Output options of export_audio. The sequence fields in the same object
+/// are parsed separately by `resolve_sequence_arguments`.
+#[derive(Debug, Deserialize)]
+struct ExportOptions {
+    path: String,
+    #[serde(default = "default_export_name")]
+    name: String,
+    #[serde(default)]
+    split: Split,
+    #[serde(default = "default_bit_depth")]
+    bit_depth: u32,
+    #[serde(default)]
+    overwrite: bool,
+}
+
+fn default_export_name() -> String {
+    "mix".to_string()
+}
+
+fn default_bit_depth() -> u32 {
+    24
+}
+
+fn handle_export_audio(
+    state: &mut ServerState,
+    arguments: Value,
+    id: Option<Value>,
+) -> JsonRpcResponse {
+    let options: ExportOptions = match serde_json::from_value(arguments.clone()) {
+        Ok(o) => o,
+        Err(e) => {
+            return JsonRpcResponse::error(
+                id,
+                INVALID_PARAMS,
+                format!(
+                    "Invalid export options: {} (split must be mixdown|stems|tracks, path is required)",
+                    e
+                ),
+            );
+        }
+    };
+    let dir = std::path::PathBuf::from(&options.path);
+    if !dir.is_absolute() {
+        return JsonRpcResponse::error(
+            id,
+            INVALID_PARAMS,
+            format!("path must be an absolute directory, got {:?}", options.path),
+        );
+    }
+    if sanitize_name(&options.name).is_empty() {
+        return JsonRpcResponse::error(
+            id,
+            INVALID_PARAMS,
+            "name must contain at least one letter, digit, '_' or '-'",
+        );
+    }
+    let bit_depth = match BitDepth::from_bits(options.bit_depth) {
+        Ok(b) => b,
+        Err(e) => return JsonRpcResponse::error(id, INVALID_PARAMS, e),
+    };
+    let (sequence, summary) = match resolve_sequence_arguments(state, arguments, &id) {
+        Ok(r) => r,
+        Err(response) => return response,
+    };
+
+    let bus_warning = options.split == Split::Stems && bus_chain_is_nonlinear(&sequence);
+    let request = ExportRequest {
+        sequence,
+        dir,
+        name: options.name,
+        split: options.split,
+        bit_depth,
+        overwrite: options.overwrite,
+    };
+    match export(request, &state.synths) {
+        Ok(report) => {
+            tracing::info!("Export finished ({}): {}", options.split.as_str(), summary);
+            JsonRpcResponse::tool_text(
+                id,
+                export_finished_text(&report, options.split, bit_depth, bus_warning),
+            )
+        }
+        Err(e) => {
+            tracing::error!("Export failed: {}", e);
+            JsonRpcResponse::tool_error(id, format!("Export failed: {}", e))
+        }
+    }
+}
+
+fn export_finished_text(
+    report: &ExportReport,
+    split: Split,
+    bit_depth: BitDepth,
+    bus_warning: bool,
+) -> String {
+    let what = match split {
+        Split::Mixdown => "stereo mixdown",
+        Split::Stems => "stems",
+        Split::Tracks => "dry tracks",
+    };
+    let dir = report
+        .files
+        .first()
+        .and_then(|f| f.path.parent())
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let mut out = format!("💾 Exported {} {} to {}:\n", report.files.len(), what, dir);
+    for file in &report.files {
+        out.push_str(&format!("  {}\n", file.path.display()));
+    }
+    out.push_str(&format!(
+        "Duration {:.1} s (including effect tails), rendered in {:.1} s.",
+        report.duration.as_secs_f64(),
+        report.render_time.as_secs_f64()
+    ));
+    if bus_warning {
+        out.push_str(
+            "\n⚠️ MIDI channel stems each ran their own copy of the bus chain (compressor, distortion or Time Fracture delay), so they will not sum back to the mixdown exactly.",
+        );
+    }
+    if bit_depth != BitDepth::Float32 {
+        let hot: Vec<String> = report
+            .files
+            .iter()
+            .filter(|f| f.peak > 1.0)
+            .map(|f| {
+                f.path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| f.path.display().to_string())
+            })
+            .collect();
+        if !hot.is_empty() {
+            out.push_str(&format!(
+                "\n⚠️ Clamped at 0 dBFS: {}. Pass \"bit_depth\": 32 to keep the full range.",
+                hot.join(", ")
+            ));
+        }
+    }
+    out
 }
 
 fn handle_list_patterns(state: &ServerState, id: Option<Value>) -> JsonRpcResponse {
@@ -1473,6 +1707,7 @@ pub fn run_stdio_server() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::midi::export::ExportedFile;
     use serde_json::json;
 
     fn call(state: &mut ServerState, tool: &str, args: Value) -> JsonRpcResponse {
@@ -1648,7 +1883,10 @@ mod tests {
                 seen += 1;
             }
         }
-        assert_eq!(seen, 3, "play_notes, play_sequence and the pattern tool");
+        assert_eq!(
+            seen, 4,
+            "play_notes, play_sequence, export_audio and the pattern tool"
+        );
     }
 
     #[test]
@@ -1682,10 +1920,10 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_has_seven_tools_and_the_note_schema_has_synth() {
+    fn tools_list_has_eight_tools_and_the_note_schema_has_synth() {
         let r = handle_tools_list(Some(json!(1)));
         let tools = r.result.unwrap()["tools"].clone();
-        assert_eq!(tools.as_array().unwrap().len(), 7);
+        assert_eq!(tools.as_array().unwrap().len(), 8);
         let names: Vec<&str> = tools
             .as_array()
             .unwrap()
@@ -1697,6 +1935,169 @@ mod tests {
         assert!(schema["properties"]["synth"].is_object());
         assert!(schema["properties"].get("synth_type").is_none());
         assert!(schema["properties"].get("preset_name").is_none());
+        assert!(names.contains(&"export_audio"));
+        let export = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "export_audio")
+            .unwrap();
+        let props = &export["inputSchema"]["properties"];
+        assert!(props["path"].is_object());
+        assert_eq!(
+            props["split"]["enum"],
+            json!(["mixdown", "stems", "tracks"])
+        );
+        assert_eq!(props["bit_depth"]["enum"], json!([16, 24, 32]));
+        assert!(props["patterns"]["items"]["properties"]["pattern_name"].is_object());
+        assert!(props.get("mode").is_none(), "an export has no play mode");
+        assert_eq!(export["inputSchema"]["required"], json!(["path"]));
+    }
+
+    fn export_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("mcp-muse-mcp-{}-{}", tag, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    fn blip() -> Value {
+        json!({"synth": {"name": "blip", "subtractive": {"osc1": {"wave": "square"}, "env": {"release": 0.05}}},
+               "note": 84, "duration": 0.1})
+    }
+
+    #[test]
+    fn export_audio_rejects_bad_options_as_invalid_params() {
+        let mut state = ServerState::new();
+        let dir = export_dir("bad").to_string_lossy().into_owned();
+        for (args, needle) in [
+            (
+                json!({"notes": [blip()], "path": "relative/dir"}),
+                "absolute",
+            ),
+            (
+                json!({"notes": [blip()], "path": dir, "bit_depth": 20}),
+                "bit_depth",
+            ),
+            (
+                json!({"notes": [blip()], "path": dir, "split": "loud"}),
+                "split",
+            ),
+            (
+                json!({"notes": [blip()], "path": dir, "name": "  "}),
+                "name",
+            ),
+            (json!({"notes": [blip()]}), "path"),
+        ] {
+            let r = call(&mut state, "export_audio", args);
+            let err = r
+                .error
+                .as_ref()
+                .unwrap_or_else(|| panic!("expected -32602 for {}", needle));
+            assert_eq!(err.code, INVALID_PARAMS, "{}", needle);
+            assert!(
+                err.message.contains(needle),
+                "{} not in {}",
+                needle,
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn export_audio_writes_a_mixdown_and_reports_the_path() {
+        let mut state = ServerState::new();
+        let dir = export_dir("mix");
+        let r = call(
+            &mut state,
+            "export_audio",
+            json!({"notes": [blip()], "path": dir.to_string_lossy(), "name": "Demo Take"}),
+        );
+        let t = text(&r);
+        assert!(r.result.as_ref().unwrap().get("isError").is_none(), "{}", t);
+        let expected = dir.join("Demo_Take.wav");
+        assert!(t.contains(&expected.display().to_string()), "{}", t);
+        assert!(t.contains("mixdown"), "{}", t);
+        assert!(expected.exists());
+    }
+
+    #[test]
+    fn export_audio_reports_runtime_failures_as_tool_errors() {
+        let mut state = ServerState::new();
+        let dir = export_dir("toolerr");
+        let r = call(
+            &mut state,
+            "export_audio",
+            json!({"patterns": [{"pattern_name": "nope"}], "path": dir.to_string_lossy()}),
+        );
+        assert_eq!(r.result.as_ref().unwrap()["isError"], json!(true));
+        assert!(text(&r).contains("nope"));
+
+        let r = call(
+            &mut state,
+            "export_audio",
+            json!({"notes": [{"synth": "no_such_patch", "note": 60}], "path": dir.to_string_lossy()}),
+        );
+        assert_eq!(r.result.as_ref().unwrap()["isError"], json!(true));
+        assert!(text(&r).contains("no_such_patch"));
+    }
+
+    #[test]
+    fn export_audio_names_hot_files_when_they_are_clamped() {
+        let report = ExportReport {
+            files: vec![
+                ExportedFile {
+                    path: "/tmp/x/a.wav".into(),
+                    peak: 1.3,
+                },
+                ExportedFile {
+                    path: "/tmp/x/b.wav".into(),
+                    peak: 0.5,
+                },
+            ],
+            duration: Duration::from_secs_f64(3.3),
+            render_time: Duration::from_millis(400),
+        };
+        let t = export_finished_text(&report, Split::Stems, BitDepth::Int24, false);
+        assert!(t.contains("2 stems"), "{}", t);
+        assert!(t.contains("2 stems to /tmp/x:"), "{}", t);
+        assert!(t.contains("/tmp/x/a.wav"), "{}", t);
+        assert!(t.contains("Duration 3.3 s"), "{}", t);
+        let clamped = t.lines().last().unwrap();
+        assert!(
+            clamped.contains("Clamped") && clamped.contains("a.wav"),
+            "{}",
+            t
+        );
+        assert!(clamped.contains("bit_depth"), "{}", t);
+        assert!(
+            !clamped.contains("b.wav"),
+            "quiet files are not listed as clamped: {}",
+            t
+        );
+        let f = export_finished_text(&report, Split::Stems, BitDepth::Float32, false);
+        assert!(!f.contains("Clamped"), "float never clamps: {}", f);
+    }
+
+    #[test]
+    fn export_audio_warns_when_the_bus_chain_is_nonlinear() {
+        let report = ExportReport {
+            files: vec![ExportedFile {
+                path: "/tmp/x/ch00_flute.wav".into(),
+                peak: 0.5,
+            }],
+            duration: Duration::from_secs_f64(1.0),
+            render_time: Duration::from_millis(50),
+        };
+        let quiet = export_finished_text(&report, Split::Stems, BitDepth::Int24, false);
+        assert!(!quiet.contains("⚠️ MIDI channel stems"), "{}", quiet);
+        let warned = export_finished_text(&report, Split::Stems, BitDepth::Int24, true);
+        assert!(
+            warned.contains(
+                "⚠️ MIDI channel stems each ran their own copy of the bus chain (compressor, distortion or Time Fracture delay), so they will not sum back to the mixdown exactly."
+            ),
+            "{}",
+            warned
+        );
     }
 
     #[test]
