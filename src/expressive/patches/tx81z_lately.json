@@ -1,0 +1,19 @@
+{
+  "name": "tx81z_lately",
+  "description": "Clean digital FM bass with punchy attack, famous in hip-hop and house (Yamaha TX81Z 'Lately Bass')",
+  "category": "bass",
+  "level": 0.85,
+  "fm": {
+    "algorithm": "stack",
+    "operators": [
+      {"ratio": 1.0, "level": 1.0, "env": {"attack": 0.005, "decay": 0.2, "sustain": 0.6, "release": 0.4}},
+      {"ratio": 2.0, "level": 0.625, "env": {"attack": 0.005, "decay": 0.2, "sustain": 0.6, "release": 0.4}}
+    ]
+  },
+  "effects": [
+    {"type": "filter", "filter_type": "low_pass", "cutoff": 1000, "resonance": 0.3, "intensity": 1.0},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.12},
+    {"type": "compressor", "threshold": -14.0, "ratio": 4.0, "attack": 0.001, "release": 0.03, "intensity": 0.6},
+    {"type": "filter", "filter_type": "high_pass", "cutoff": 80, "resonance": 0.3, "intensity": 0.4}
+  ]
+}

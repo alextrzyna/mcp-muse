@@ -9,6 +9,7 @@ use std::collections::HashMap;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expressive::render::NoteEvent;
     use serde_json::json;
 
     fn parse(v: serde_json::Value) -> Result<Patch, String> {
@@ -141,38 +142,364 @@ mod tests {
         assert!(!p.has_pitched_engine());
     }
 
+    /// The phrases `cargo run -- test-synths` plays, so the test hears what
+    /// the user hears; `demos.rs` reads the same table.
+    fn demo_phrase(category: PatchCategory) -> &'static [(u8, f32, f32)] {
+        category.demo_phrase()
+    }
+
+    fn phrase_events(p: &Patch, phrase: &[(u8, f32, f32)], velocity: f32) -> Vec<NoteEvent> {
+        phrase
+            .iter()
+            .map(|&(n, start, duration)| NoteEvent {
+                start,
+                duration,
+                frequency: if p.has_pitched_engine() {
+                    440.0 * 2f32.powf((n as f32 - 69.0) / 12.0)
+                } else {
+                    60.0
+                },
+                velocity,
+            })
+            .collect()
+    }
+
+    fn peak(buf: &[[f32; 2]]) -> f32 {
+        buf.iter()
+            .flat_map(|s| s.iter())
+            .fold(0.0f32, |m, x| m.max(x.abs()))
+    }
+
+    /// Ceiling for built-ins over their demo phrase, before `SYNTH_BUS_GAIN`.
+    /// Below `PATCH_LIMITER_CEILING` on purpose: a built-in must not lean on the limiter.
+    const HEADROOM_CEILING: f32 = 1.4;
+
+    /// True when a patch's peak is a distribution rather than a number, so
+    /// measuring it against a floor tests the draw and not the patch's level.
+    /// Two engines do this, both because they are driven by an unseeded RNG:
+    ///
+    /// - a raw noise source -- every enabled pitched engine is a subtractive
+    ///   voice whose `osc1` is `Wave::Noise` with no contributing `osc2`
+    ///   (`mix <= 0`). Filtered noise's peak swings widely render to render
+    ///   regardless of `level`.
+    /// - any enabled granular engine, whatever its `source`: the grains are
+    ///   scattered randomly across the source cycle, so the peak varies the
+    ///   same way even when the cycle itself is deterministic (`formant_texture`
+    ///   at `level` 1.0 ran 0.713 to 1.03 over 1500 renders).
+    ///
+    /// Either way the peak is not a stable loudness measure, so the patch is
+    /// floored like fx.
+    fn has_random_peak(p: &Patch) -> bool {
+        if p.granular.as_ref().is_some_and(|g| g.level > 0.0) {
+            return true;
+        }
+        let sub = p.subtractive.as_ref().filter(|s| s.level > 0.0);
+        let fm = p.fm.as_ref().filter(|f| f.level > 0.0);
+        let wavetable = p.wavetable.as_ref().filter(|w| w.level > 0.0);
+        let checks: Vec<bool> = [
+            sub.map(|s| s.osc1.wave == Wave::Noise && s.osc2.as_ref().is_none_or(|o| o.mix <= 0.0)),
+            fm.map(|_| false),
+            wavetable.map(|_| false),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        !checks.is_empty() && checks.iter().all(|&ok| ok)
+    }
+
+    /// Lower bound per category so a patch is not lost in a mix (pre-bus peak).
+    /// Fx is lower than the general 0.3: sound effects (sweeps, zaps, noise
+    /// beds) are legitimately quieter than a sustained instrument voice. A
+    /// patch whose peak is a random draw (see `has_random_peak`) is floored
+    /// like fx no matter its category: a tight floor on a number that moves
+    /// every render tests the draw, not the patch.
+    ///
+    /// Why a drum patch can fail this floor no matter its `level`: the peak
+    /// measured here is taken *after* the patch's effects chain, while
+    /// percussion normalisation (`PERCUSSION_PEAK`) happens at note-on,
+    /// *before* it. A filter in that chain that removes most of the hit's
+    /// energy therefore takes the patch below the floor and `level` cannot
+    /// put it back -- it is already capped at 1.0. That is what the 808
+    /// kick's original 120 Hz low-pass did (it left a 0.10 peak against a
+    /// 0.5 floor). The fix is to retune the filter to a corner that leaves
+    /// the hit intact, or to delete it -- not to chase the floor with `level`.
+    fn headroom_floor(p: &Patch, category: PatchCategory) -> f32 {
+        if has_random_peak(p) {
+            return 0.2;
+        }
+        match category {
+            // 0.7 is the tightest floor in the table, and it applies to the
+            // pads whose peak is a fixed number. The granular pads are not
+            // among them: `formant_texture` at `level` 1.0 -- the maximum, so
+            // there is nothing left to raise -- ran 0.713 to 1.03 over 1500
+            // renders, which would have cleared this floor by under 2% on a
+            // bad draw. That is why `has_random_peak` relaxes them to 0.2
+            // rather than this floor being lowered for every pad.
+            PatchCategory::Pad => 0.7,
+            PatchCategory::Drums => 0.5,
+            PatchCategory::Fx => 0.2,
+            _ => 0.3,
+        }
+    }
+
+    /// Every enabled envelope-driven engine's amplitude envelope. Percussion
+    /// carries its own envelope and is not one of them.
+    fn engine_envelopes(p: &Patch) -> Vec<&Adsr> {
+        let mut envs: Vec<&Adsr> = Vec::new();
+        if let Some(s) = &p.subtractive {
+            envs.push(&s.env);
+        }
+        if let Some(f) = &p.fm {
+            envs.extend(f.operators.iter().map(|op| &op.env));
+        }
+        if let Some(w) = &p.wavetable {
+            envs.push(&w.env);
+        }
+        if let Some(g) = &p.granular {
+            envs.push(&g.env);
+        }
+        envs
+    }
+
+    /// Longest attack among a patch's enabled envelope-driven engines.
+    fn max_engine_attack(p: &Patch) -> f32 {
+        engine_envelopes(p)
+            .iter()
+            .fold(0.0f32, |m, e| m.max(e.attack))
+    }
+
+    /// How long a note has to be held before every engine has finished its
+    /// onset and settled on its sustain level: the slowest attack plus that
+    /// same envelope's decay. Taking the max of `attack + decay` picks the
+    /// slowest engine and its own decay in one pass, so the held-note guard
+    /// below measures a patch at its sustained loudness rather than
+    /// somewhere partway up a 4 s pad attack.
+    fn slowest_onset_seconds(p: &Patch) -> f32 {
+        engine_envelopes(p)
+            .iter()
+            .fold(0.0f32, |m, e| m.max(e.attack + e.decay))
+    }
+
+    /// Chord used to measure a pad's floor. A pad whose engine attack is
+    /// slow (>= 2 s) hasn't reached its sustained loudness by the end of the
+    /// regular 3 s demo phrase, so measuring the floor there is measuring
+    /// mid-attack, not the patch's real level. Those pads get a 6 s chord
+    /// instead; `HEADROOM_CEILING` is still checked against the (shorter)
+    /// demo phrase, this chord, and the held note.
+    fn floor_phrase(p: &Patch, category: PatchCategory) -> Vec<(u8, f32, f32)> {
+        if category == PatchCategory::Pad && max_engine_attack(p) >= 2.0 {
+            vec![(48, 0.0, 6.0), (55, 0.0, 6.0), (60, 0.0, 6.0)]
+        } else {
+            demo_phrase(category).to_vec()
+        }
+    }
+
     #[test]
     fn every_builtin_patch_parses_validates_and_renders_cleanly() {
-        use crate::expressive::render::{NoteEvent, render_patch};
+        use crate::expressive::render::{PATCH_LIMITER_CEILING, render_patch};
+        const { assert!(HEADROOM_CEILING < PATCH_LIMITER_CEILING) };
         let lib = PatchLibrary::new();
         assert!(
-            lib.count() >= 28,
-            "expected the migrated presets, got {}",
+            lib.count() >= 44,
+            "expected the built-ins, got {}",
             lib.count()
         );
         for name in lib.names() {
             let p = lib.get(name).unwrap();
             p.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(p.category.is_some(), "{name} needs a category");
+            let category = p
+                .category
+                .unwrap_or_else(|| panic!("{name} needs a category"));
             assert!(!p.description.is_empty(), "{name} needs a description");
-            let note = NoteEvent {
-                start: 0.0,
-                duration: 0.5,
-                frequency: if p.has_pitched_engine() { 261.63 } else { 60.0 },
-                velocity: 100.0 / 127.0,
-            };
-            let buf = render_patch(p, &[note], 44100.0);
-            let peak = buf
-                .iter()
-                .flat_map(|s| s.iter())
-                .fold(0.0f32, |m, x| m.max(x.abs()));
-            assert!(peak.is_finite(), "{name} produced NaN/inf");
-            // SYNTH_BUS_GAIN (0.5) is applied later; stay under the 0.8 clipper knee after it.
-            assert!(
-                peak * 0.5 <= 0.8,
-                "{name} peaks at {peak}, too hot for the bus"
+
+            let phrase = render_patch(
+                p,
+                &phrase_events(p, demo_phrase(category), 100.0 / 127.0),
+                44100.0,
+                120,
             );
-            assert!(peak > 0.02, "{name} is nearly silent (peak {peak})");
+            let phrase_peak = peak(&phrase);
+            assert!(phrase_peak.is_finite(), "{name} produced NaN/inf");
+            assert!(
+                phrase_peak <= HEADROOM_CEILING,
+                "{name} peaks at {phrase_peak} over its demo phrase; lower its level"
+            );
+            let floor_notes = floor_phrase(p, category);
+            let uses_demo_phrase = floor_notes.as_slice() == demo_phrase(category);
+            // Name the stimulus the floor number actually came from: most
+            // patches are measured on the demo phrase, slow pads on the chord.
+            let floor_stimulus = if uses_demo_phrase {
+                "its demo phrase"
+            } else {
+                "its 6 s floor chord"
+            };
+            let floor_peak = if uses_demo_phrase {
+                phrase_peak
+            } else {
+                let floor_buf = render_patch(
+                    p,
+                    &phrase_events(p, &floor_notes, 100.0 / 127.0),
+                    44100.0,
+                    120,
+                );
+                let fp = peak(&floor_buf);
+                assert!(
+                    fp <= HEADROOM_CEILING,
+                    "{name} peaks at {fp} over {floor_stimulus}; lower its level"
+                );
+                fp
+            };
+            assert!(
+                floor_peak >= headroom_floor(p, category),
+                "{name} peaks at only {floor_peak} over {floor_stimulus}; raise its level"
+            );
+
+            // A long note at full velocity catches slow pads measured
+            // mid-attack by the phrase -- but only if it is held long enough
+            // for the slowest engine to get through its own attack and decay,
+            // which for `dream_pad` (4 s attack) a flat 3 s note is not.
+            let held_seconds = 3.0f32.max(slowest_onset_seconds(p));
+            let held = render_patch(
+                p,
+                &phrase_events(p, &[(60, 0.0, held_seconds)], 1.0),
+                44100.0,
+                120,
+            );
+            let held_peak = peak(&held);
+            assert!(
+                held_peak <= HEADROOM_CEILING,
+                "{name} peaks at {held_peak} on a {held_seconds} s held full-velocity note; lower its level"
+            );
+        }
+    }
+
+    /// The kick's and the crash's filter cutoffs were retuned during the level
+    /// pass so percussion normalisation reaches the bus; nothing else measures
+    /// the tone those filters leave behind, so a later cutoff edit that still
+    /// clears the headroom bands could quietly turn either patch into a
+    /// different sound. The bounds below come from measurement, not theory.
+    #[test]
+    fn drum_patches_keep_their_character_through_their_filters() {
+        use crate::expressive::render::render_patch;
+        use crate::expressive::test_util::goertzel_power;
+
+        const SAMPLE_RATE: f32 = 44100.0;
+        let lib = PatchLibrary::new();
+        // One hit, exactly as the demo phrase plays these unpitched patches.
+        let hit = |p: &Patch| -> Vec<f32> {
+            let buf = render_patch(
+                p,
+                &phrase_events(p, &[(36, 0.0, 0.5)], 100.0 / 127.0),
+                SAMPLE_RATE,
+                120,
+            );
+            buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect()
+        };
+
+        // The kick keeps its body: the 800 Hz click its low-pass exists to tame
+        // must not swamp the 60 Hz fundamental. The ratio is below 1 because the
+        // body sweeps down from 240 Hz and leaves only part of its power in the
+        // 60 Hz bin; what this pins is the click's share, which grows as the
+        // low-pass opens. Measured at resonance 0.7: 0.97 at 450 Hz, 0.67 at
+        // 500 Hz, 0.37 at the shipped 600 Hz, 0.29 at 650 Hz, 0.12 at 1 kHz,
+        // and 0.09 with no filter at all. The kick path has no randomness, so
+        // one render is the measurement.
+        const KICK_BODY_OVER_CLICK: f32 = 0.30;
+        let kick = lib.get("tr_808_kick").unwrap();
+        let mono = hit(kick);
+        let body = goertzel_power(&mono, 60.0, SAMPLE_RATE);
+        let click = goertzel_power(&mono, 800.0, SAMPLE_RATE);
+        assert!(
+            body >= KICK_BODY_OVER_CLICK * click,
+            "tr_808_kick lost its body: 60 Hz power {body:e} is only {:.3}x the 800 Hz click {click:e}; its low-pass is too far open",
+            body / click
+        );
+
+        // The crash stays bright: every partial of the cymbal sits at or above
+        // 2.55 kHz, so its high-pass corner has to leave those alone while
+        // still clearing the noise bed underneath them. The hiss is unseeded,
+        // so the 200 Hz bin swings hard render to render; over 300 renders of
+        // the shipped 1.5 kHz corner the ratio bottomed out at 645, and the
+        // bound sits well under that tail. For scale: the no-op 200 Hz corner
+        // this replaced measured 37, and a filter that really did dull the
+        // crash lands below 1.
+        const CRASH_BRIGHT_OVER_LOW: f32 = 100.0;
+        let crash = lib.get("crash_cymbal").unwrap();
+        for _ in 0..20 {
+            let mono = hit(crash);
+            let bright: f32 = [2500.0, 3500.0, 5000.0]
+                .iter()
+                .map(|&f| goertzel_power(&mono, f, SAMPLE_RATE))
+                .sum();
+            let low = goertzel_power(&mono, 200.0, SAMPLE_RATE);
+            assert!(
+                bright >= CRASH_BRIGHT_OVER_LOW * low,
+                "crash_cymbal lost its sparkle: 2.5-5 kHz power {bright:e} is only {:.1}x the 200 Hz power {low:e}",
+                bright / low
+            );
+        }
+    }
+
+    /// Pins the exact set: the relaxed floor is an escape hatch, so a patch
+    /// must not drift into it by accident. `formant_texture` and `grain_cloud`
+    /// are here for their grain scatter, `noise_texture` for both reasons, and
+    /// `wind_pad` for its noise oscillator.
+    #[test]
+    fn has_random_peak_matches_only_the_noise_and_granular_engines() {
+        let lib = PatchLibrary::new();
+        let matches: Vec<&str> = lib
+            .names()
+            .into_iter()
+            .filter(|name| has_random_peak(lib.get(name).unwrap()))
+            .collect();
+        assert_eq!(
+            matches,
+            vec![
+                "formant_texture",
+                "grain_cloud",
+                "noise_texture",
+                "wind_pad"
+            ],
+            "{matches:?}"
+        );
+    }
+
+    /// `cargo test print_builtin_headroom_survey -- --ignored --nocapture`
+    /// prints pre-bus peak and RMS per patch; use it to set levels.
+    #[test]
+    #[ignore]
+    fn print_builtin_headroom_survey() {
+        use crate::expressive::render::render_patch;
+        use crate::expressive::test_util::{db, rms};
+        let lib = PatchLibrary::new();
+        for (category, patches) in lib.catalog() {
+            println!("## {}", category.as_str());
+            for p in patches {
+                let buf = render_patch(
+                    p,
+                    &phrase_events(p, demo_phrase(category), 100.0 / 127.0),
+                    44100.0,
+                    120,
+                );
+                let mono: Vec<f32> = buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect();
+                // The same held note the ceiling guard uses, so the survey
+                // rows are the numbers that test asserts on.
+                let held_seconds = 3.0f32.max(slowest_onset_seconds(p));
+                let held = render_patch(
+                    p,
+                    &phrase_events(p, &[(60, 0.0, held_seconds)], 1.0),
+                    44100.0,
+                    120,
+                );
+                println!(
+                    "{:<22} level {:<5} phrase peak {:.2} rms {:>6.1} dB   held peak {:.2}",
+                    p.name,
+                    p.level,
+                    peak(&buf),
+                    db(rms(&mono)),
+                    peak(&held)
+                );
+            }
         }
     }
 
@@ -192,6 +519,238 @@ mod tests {
                 "sorted by name"
             );
         }
+        assert!(lib.get("dx7_e_piano").is_some());
+        assert!(cats.contains(&PatchCategory::Keys), "keys category is back");
+        assert!(lib.get("wt_organ").is_some());
+        assert!(lib.get("grain_cloud").is_some() && lib.get("drone").is_some());
+        assert!(lib.get("shimmer_keys").is_some());
+        assert!(lib.count() >= 44);
+    }
+
+    #[test]
+    fn fm_patch_parses_with_defaults_and_round_trips() {
+        let p = parse(json!({"name": "op", "fm": {}})).unwrap();
+        let fm = p.fm.as_ref().unwrap();
+        assert_eq!(fm.level, 1.0);
+        assert_eq!(fm.algorithm, FmAlgorithm::Stack);
+        assert_eq!(fm.feedback, 0.0);
+        assert_eq!(fm.operators.len(), 1);
+        assert_eq!(fm.operators[0].ratio, 1.0);
+        assert_eq!(fm.operators[0].level, 1.0);
+        assert!(p.validate().is_ok());
+        assert!(p.has_pitched_engine());
+
+        let v = json!({"name": "bell", "fm": {"level": 0.8, "algorithm": "fan_in", "feedback": 0.2,
+        "operators": [
+            {"ratio": 1.0, "level": 1.0, "env": {"release": 2.0}},
+            {"ratio": 3.5, "level": 0.6, "detune_cents": 3, "env": {"decay": 0.5, "sustain": 0.0}}
+        ]}});
+        let p = parse(v).unwrap();
+        assert!(p.validate().is_ok());
+        let back = serde_json::to_value(&p).unwrap();
+        assert_eq!(back["fm"]["algorithm"], "fan_in");
+        assert_eq!(back["fm"]["operators"][1]["ratio"], 3.5);
+        assert_eq!(p.release_seconds(), 2.0, "release comes from the carrier");
+    }
+
+    #[test]
+    fn fm_validation_names_the_field() {
+        let p = parse(json!({"name": "x", "fm": {"operators": []}})).unwrap();
+        assert!(
+            p.validate().unwrap_err().contains("fm.operators"),
+            "empty operators"
+        );
+        let five: Vec<serde_json::Value> = (0..5).map(|_| json!({})).collect();
+        let p = parse(json!({"name": "x", "fm": {"operators": five}})).unwrap();
+        assert!(
+            p.validate().unwrap_err().contains("fm.operators"),
+            "too many operators"
+        );
+        let p = parse(json!({"name": "x", "fm": {"operators": [{"ratio": 20}]}})).unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(
+            err.contains("fm.operators[0].ratio") && err.contains("16"),
+            "{err}"
+        );
+        let p =
+            parse(json!({"name": "x", "fm": {"operators": [{}, {"detune_cents": 150}]}})).unwrap();
+        assert!(
+            p.validate()
+                .unwrap_err()
+                .contains("fm.operators[1].detune_cents")
+        );
+        let p = parse(json!({"name": "x", "fm": {"feedback": 2}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("fm.feedback"));
+        let p =
+            parse(json!({"name": "x", "fm": {"operators": [{"env": {"sustain": 3}}]}})).unwrap();
+        assert!(
+            p.validate()
+                .unwrap_err()
+                .contains("fm.operators[0].env.sustain")
+        );
+        assert!(
+            parse(json!({"name": "x", "fm": {"algorithm": "serial"}})).is_err(),
+            "unknown algorithm"
+        );
+        assert!(
+            parse(json!({"name": "x", "fm": {"mod_index": 2}}))
+                .unwrap_err()
+                .contains("mod_index")
+        );
+    }
+
+    #[test]
+    fn fm_algorithm_tables_match_the_spec() {
+        assert_eq!(FmAlgorithm::Stack.modulators(0), &[1]);
+        assert_eq!(FmAlgorithm::Stack.modulators(2), &[3]);
+        assert_eq!(FmAlgorithm::Stack.modulators(3), &[] as &[usize]);
+        assert_eq!(FmAlgorithm::Stack.carriers(), &[0]);
+        assert_eq!(FmAlgorithm::Pairs.modulators(0), &[2]);
+        assert_eq!(FmAlgorithm::Pairs.modulators(1), &[3]);
+        assert_eq!(FmAlgorithm::Pairs.carriers(), &[0, 1]);
+        assert_eq!(FmAlgorithm::FanIn.modulators(0), &[1, 2, 3]);
+        assert_eq!(FmAlgorithm::FanIn.carriers(), &[0]);
+        assert_eq!(FmAlgorithm::Parallel.carriers(), &[0, 1, 2, 3]);
+        for op in 0..4 {
+            assert!(FmAlgorithm::Parallel.modulators(op).is_empty());
+        }
+    }
+
+    #[test]
+    fn wavetable_patch_parses_validates_and_names_fields() {
+        let p = parse(json!({"name": "w", "wavetable": {}})).unwrap();
+        let wt = p.wavetable.as_ref().unwrap();
+        assert_eq!(wt.table, TableName::Basic);
+        assert_eq!(wt.morph, 0.0);
+        assert!(p.validate().is_ok() && p.has_pitched_engine());
+        let p = parse(json!({"name": "w", "wavetable": {"table": "organ", "morph": 0.4, "env": {"release": 1.0}}})).unwrap();
+        assert_eq!(p.release_seconds(), 1.0);
+        assert_eq!(
+            serde_json::to_value(&p).unwrap()["wavetable"]["table"],
+            "organ"
+        );
+        let p = parse(json!({"name": "w", "wavetable": {"morph": 1.5}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("wavetable.morph"));
+        assert!(parse(json!({"name": "w", "wavetable": {"table": "sawtooth"}})).is_err());
+        assert!(
+            parse(json!({"name": "w", "wavetable": {"position": 0.2}}))
+                .unwrap_err()
+                .contains("position")
+        );
+        assert_eq!(TableName::Noise.next(), TableName::Basic, "morph wraps");
+        assert_eq!(TableName::Pwm.index(), 5);
+    }
+
+    #[test]
+    fn release_seconds_is_the_longest_across_engines() {
+        let p = parse(json!({"name": "both",
+            "subtractive": {"env": {"release": 0.5}},
+            "fm": {"operators": [{"env": {"release": 1.5}}, {"env": {"release": 9.0}}]}}))
+        .unwrap();
+        // operator 2 is a modulator in `stack`, so its 9 s release does not count.
+        assert_eq!(p.release_seconds(), 1.5);
+    }
+
+    #[test]
+    fn lfo_config_parses_with_defaults_validates_and_reports_activity() {
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {}})).unwrap();
+        let lfo = p.lfo.as_ref().unwrap();
+        assert_eq!((lfo.rate, lfo.depth), (1.0, 0.0));
+        assert_eq!(lfo.wave, LfoWave::Sine);
+        assert_eq!(lfo.target, LfoTarget::Off);
+        assert!(!lfo.is_active());
+        assert!(p.validate().is_ok());
+
+        let p = parse(json!({"name": "x", "subtractive": {},
+            "lfo": {"rate": 0.3, "depth": 0.2, "wave": "sample_hold", "target": "cutoff"}}))
+        .unwrap();
+        assert!(p.lfo.as_ref().unwrap().is_active());
+        assert_eq!(serde_json::to_value(&p).unwrap()["lfo"]["target"], "cutoff");
+
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {"rate": 50}})).unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(err.contains("lfo.rate") && err.contains("20"), "{err}");
+        let p = parse(json!({"name": "x", "subtractive": {}, "lfo": {"depth": 2}})).unwrap();
+        assert!(p.validate().unwrap_err().contains("lfo.depth"));
+        assert!(
+            parse(json!({"name": "x", "subtractive": {}, "lfo": {"target": "filter"}})).is_err()
+        );
+        assert!(
+            parse(json!({"name": "x", "subtractive": {}, "lfo": {"speed": 1}}))
+                .unwrap_err()
+                .contains("speed")
+        );
+        assert_eq!(LfoTarget::ALL.len(), 6);
+        assert_eq!(LfoTarget::GrainDensity.as_str(), "grain_density");
+        assert_eq!(LfoWave::SampleHold.as_str(), "sample_hold");
+    }
+
+    #[test]
+    fn granular_patch_parses_validates_and_names_fields() {
+        let p = parse(json!({"name": "g", "granular": {}})).unwrap();
+        let g = p.granular.as_ref().unwrap();
+        assert_eq!(g.source, GrainSource::Harmonics);
+        assert_eq!(
+            (
+                g.grain_ms,
+                g.density,
+                g.pitch_semitones,
+                g.randomness,
+                g.stereo_width
+            ),
+            (50.0, 10.0, 0.0, 0.2, 0.5)
+        );
+        assert!(p.validate().is_ok() && p.has_pitched_engine());
+        let p = parse(
+            json!({"name": "g", "granular": {"source": "formant", "grain_ms": 120,
+            "density": 15, "pitch_semitones": 7, "randomness": 0.7, "stereo_width": 0.9,
+            "env": {"release": 3.0}}}),
+        )
+        .unwrap();
+        assert!(p.validate().is_ok());
+        assert_eq!(p.release_seconds(), 3.0);
+        assert_eq!(
+            serde_json::to_value(&p).unwrap()["granular"]["source"],
+            "formant"
+        );
+        for (field, value) in [
+            ("grain_ms", 1000.0),
+            ("density", 0.5),
+            ("pitch_semitones", 30.0),
+            ("randomness", 1.5),
+            ("stereo_width", -0.1),
+            ("level", 2.0),
+        ] {
+            let p = parse(json!({"name": "g", "granular": {field: value}})).unwrap();
+            let err = p.validate().unwrap_err();
+            assert!(err.contains(&format!("granular.{field}")), "{field}: {err}");
+        }
+        assert!(parse(json!({"name": "g", "granular": {"source": "sample"}})).is_err());
+        assert!(
+            parse(json!({"name": "g", "granular": {"grain_size": 0.1}}))
+                .unwrap_err()
+                .contains("grain_size")
+        );
+        let p = parse(json!({"name": "silent"})).unwrap();
+        assert!(
+            p.validate().unwrap_err().contains("granular"),
+            "no-engines message lists granular"
+        );
+    }
+
+    #[test]
+    fn invalid_effect_on_a_patch_is_reported_with_its_index() {
+        let p = parse(json!({
+            "name": "fractured",
+            "subtractive": {},
+            "effects": [{"type": "delay", "random_rate": 50}],
+        }))
+        .unwrap();
+        let err = p.validate().unwrap_err();
+        assert!(
+            err.contains("effects[0]") && err.contains("random_rate"),
+            "{err}"
+        );
     }
 }
 
@@ -239,6 +798,24 @@ impl PatchCategory {
             PatchCategory::Fx => "fx",
         }
     }
+
+    /// A short phrase that shows this category off: `(midi_note, start_seconds,
+    /// duration_seconds)`. `cargo run -- test-synths` plays it and the headroom
+    /// test measures it, so the levels the test asserts are the levels a
+    /// listener hears. One definition, so the two cannot drift apart.
+    pub fn demo_phrase(&self) -> &'static [(u8, f32, f32)] {
+        match self {
+            // Unpitched one-shots: two hits, so a tail overlapping the next
+            // hit shows up in the peak.
+            PatchCategory::Drums | PatchCategory::Fx => &[(36, 0.0, 0.5), (36, 0.5, 0.5)],
+            // Pads are played as chords, which is where they stack up.
+            PatchCategory::Pad => &[(48, 0.0, 3.0), (55, 0.0, 3.0), (60, 0.0, 3.0)],
+            PatchCategory::Keys => &[(60, 0.0, 0.6), (64, 0.7, 0.6), (67, 1.4, 1.2)],
+            PatchCategory::Bass | PatchCategory::Lead => {
+                &[(36, 0.0, 0.4), (43, 0.5, 0.4), (48, 1.0, 0.8)]
+            }
+        }
+    }
 }
 
 /// One agent-defined instrument: engines, their envelopes and a shared effects chain.
@@ -255,7 +832,15 @@ pub struct Patch {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtractive: Option<Subtractive>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fm: Option<Fm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wavetable: Option<Wavetable>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granular: Option<Granular>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub percussion: Option<Percussion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lfo: Option<LfoConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<EffectConfig>,
 }
@@ -347,6 +932,139 @@ pub struct Filter {
     pub env_amount: f32,
     #[serde(default)]
     pub env: Adsr,
+}
+
+/// Operator routing. Indices are 0-based (operator 1 = index 0); operator 1
+/// is always a carrier. Modulators always have higher indices than the
+/// operators they modulate, so evaluating operators from the last to the
+/// first resolves every modulator before it is needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FmAlgorithm {
+    /// 4 -> 3 -> 2 -> 1; one carrier.
+    #[default]
+    Stack,
+    /// 3 -> 1 and 4 -> 2; carriers 1 and 2.
+    Pairs,
+    /// 2, 3 and 4 all modulate 1; one carrier.
+    FanIn,
+    /// Every operator is a carrier (additive).
+    Parallel,
+}
+
+impl FmAlgorithm {
+    pub const ALL: [FmAlgorithm; 4] = [
+        FmAlgorithm::Stack,
+        FmAlgorithm::Pairs,
+        FmAlgorithm::FanIn,
+        FmAlgorithm::Parallel,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FmAlgorithm::Stack => "stack",
+            FmAlgorithm::Pairs => "pairs",
+            FmAlgorithm::FanIn => "fan_in",
+            FmAlgorithm::Parallel => "parallel",
+        }
+    }
+
+    /// Operators (0-based) that modulate operator `op`.
+    pub fn modulators(&self, op: usize) -> &'static [usize] {
+        match (self, op) {
+            (FmAlgorithm::Stack, 0) => &[1],
+            (FmAlgorithm::Stack, 1) => &[2],
+            (FmAlgorithm::Stack, 2) => &[3],
+            (FmAlgorithm::Pairs, 0) => &[2],
+            (FmAlgorithm::Pairs, 1) => &[3],
+            (FmAlgorithm::FanIn, 0) => &[1, 2, 3],
+            _ => &[],
+        }
+    }
+
+    /// Operators (0-based) whose output is heard.
+    pub fn carriers(&self) -> &'static [usize] {
+        match self {
+            FmAlgorithm::Stack | FmAlgorithm::FanIn => &[0],
+            FmAlgorithm::Pairs => &[0, 1],
+            FmAlgorithm::Parallel => &[0, 1, 2, 3],
+        }
+    }
+}
+
+/// One FM operator: a sine at `ratio` times the note frequency with its own envelope.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Operator {
+    pub ratio: f32,
+    /// Output gain for a carrier; modulation depth for a modulator.
+    pub level: f32,
+    pub detune_cents: f32,
+    pub env: Adsr,
+}
+
+impl Default for Operator {
+    fn default() -> Self {
+        Self {
+            ratio: 1.0,
+            level: 1.0,
+            detune_cents: 0.0,
+            env: Adsr::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Fm {
+    pub level: f32,
+    pub algorithm: FmAlgorithm,
+    /// Self-modulation of the last operator, 0 to 1.
+    pub feedback: f32,
+    /// 1 to 4 operators; the first is always a carrier.
+    pub operators: Vec<Operator>,
+}
+
+impl Default for Fm {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            algorithm: FmAlgorithm::Stack,
+            feedback: 0.0,
+            operators: vec![Operator::default()],
+        }
+    }
+}
+
+impl Fm {
+    /// Longest release among the carriers that exist; the sound ends when they do.
+    pub fn carrier_release(&self) -> f32 {
+        self.algorithm
+            .carriers()
+            .iter()
+            .filter_map(|&c| self.operators.get(c))
+            .map(|op| op.env.release)
+            .fold(0.0, f32::max)
+    }
+
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.feedback"), self.feedback, 0.0, 1.0)?;
+        if self.operators.is_empty() || self.operators.len() > 4 {
+            return Err(format!(
+                "{path}.operators must have 1 to 4 entries, got {}",
+                self.operators.len()
+            ));
+        }
+        for (i, op) in self.operators.iter().enumerate() {
+            let p = format!("{path}.operators[{i}]");
+            check_range(&format!("{p}.ratio"), op.ratio, 0.25, 16.0)?;
+            check_range(&format!("{p}.level"), op.level, 0.0, 1.0)?;
+            check_range(&format!("{p}.detune_cents"), op.detune_cents, -100.0, 100.0)?;
+            op.env.validate(&format!("{p}.env"))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -578,6 +1296,262 @@ impl Percussion {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableName {
+    #[default]
+    Basic,
+    Warm,
+    Bright,
+    Digital,
+    Vocal,
+    Pwm,
+    Organ,
+    Noise,
+}
+
+impl TableName {
+    pub const ALL: [TableName; 8] = [
+        TableName::Basic,
+        TableName::Warm,
+        TableName::Bright,
+        TableName::Digital,
+        TableName::Vocal,
+        TableName::Pwm,
+        TableName::Organ,
+        TableName::Noise,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TableName::Basic => "basic",
+            TableName::Warm => "warm",
+            TableName::Bright => "bright",
+            TableName::Digital => "digital",
+            TableName::Vocal => "vocal",
+            TableName::Pwm => "pwm",
+            TableName::Organ => "organ",
+            TableName::Noise => "noise",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|t| t == self)
+            .expect("every table is in ALL")
+    }
+
+    /// The table `morph` blends toward; wraps from `noise` back to `basic`.
+    pub fn next(&self) -> TableName {
+        Self::ALL[(self.index() + 1) % Self::ALL.len()]
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Wavetable {
+    pub level: f32,
+    pub table: TableName,
+    /// 0 = this table, 1 = the next table in the list.
+    pub morph: f32,
+    pub env: Adsr,
+}
+
+impl Default for Wavetable {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            table: TableName::Basic,
+            morph: 0.0,
+            env: Adsr::default(),
+        }
+    }
+}
+
+impl Wavetable {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.morph"), self.morph, 0.0, 1.0)?;
+        self.env.validate(&format!("{path}.env"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GrainSource {
+    #[default]
+    Harmonics,
+    Noise,
+    Formant,
+    Inharmonic,
+}
+
+impl GrainSource {
+    pub const ALL: [GrainSource; 4] = [
+        GrainSource::Harmonics,
+        GrainSource::Noise,
+        GrainSource::Formant,
+        GrainSource::Inharmonic,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GrainSource::Harmonics => "harmonics",
+            GrainSource::Noise => "noise",
+            GrainSource::Formant => "formant",
+            GrainSource::Inharmonic => "inharmonic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Granular {
+    pub level: f32,
+    pub source: GrainSource,
+    /// Grain length in milliseconds (5 to 500).
+    pub grain_ms: f32,
+    /// Grains started per second (1 to 50).
+    pub density: f32,
+    pub pitch_semitones: f32,
+    /// Random start position inside the source cycle (0 = always the start).
+    pub randomness: f32,
+    /// Random stereo placement of each grain (0 = centre, 1 = full width).
+    pub stereo_width: f32,
+    pub env: Adsr,
+}
+
+impl Default for Granular {
+    fn default() -> Self {
+        Self {
+            level: 1.0,
+            source: GrainSource::Harmonics,
+            grain_ms: 50.0,
+            density: 10.0,
+            pitch_semitones: 0.0,
+            randomness: 0.2,
+            stereo_width: 0.5,
+            env: Adsr::default(),
+        }
+    }
+}
+
+impl Granular {
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.level"), self.level, 0.0, 1.0)?;
+        check_range(&format!("{path}.grain_ms"), self.grain_ms, 5.0, 500.0)?;
+        check_range(&format!("{path}.density"), self.density, 1.0, 50.0)?;
+        check_range(
+            &format!("{path}.pitch_semitones"),
+            self.pitch_semitones,
+            -24.0,
+            24.0,
+        )?;
+        check_range(&format!("{path}.randomness"), self.randomness, 0.0, 1.0)?;
+        check_range(&format!("{path}.stereo_width"), self.stereo_width, 0.0, 1.0)?;
+        self.env.validate(&format!("{path}.env"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfoWave {
+    #[default]
+    Sine,
+    Triangle,
+    Saw,
+    Square,
+    SampleHold,
+}
+
+impl LfoWave {
+    pub const ALL: [LfoWave; 5] = [
+        LfoWave::Sine,
+        LfoWave::Triangle,
+        LfoWave::Saw,
+        LfoWave::Square,
+        LfoWave::SampleHold,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LfoWave::Sine => "sine",
+            LfoWave::Triangle => "triangle",
+            LfoWave::Saw => "saw",
+            LfoWave::Square => "square",
+            LfoWave::SampleHold => "sample_hold",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfoTarget {
+    #[default]
+    Off,
+    Cutoff,
+    Pitch,
+    Amplitude,
+    Morph,
+    GrainDensity,
+}
+
+impl LfoTarget {
+    pub const ALL: [LfoTarget; 6] = [
+        LfoTarget::Off,
+        LfoTarget::Cutoff,
+        LfoTarget::Pitch,
+        LfoTarget::Amplitude,
+        LfoTarget::Morph,
+        LfoTarget::GrainDensity,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LfoTarget::Off => "off",
+            LfoTarget::Cutoff => "cutoff",
+            LfoTarget::Pitch => "pitch",
+            LfoTarget::Amplitude => "amplitude",
+            LfoTarget::Morph => "morph",
+            LfoTarget::GrainDensity => "grain_density",
+        }
+    }
+}
+
+/// One low-frequency oscillator per patch, free-running from the start of
+/// the rendered buffer, routed to a single target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct LfoConfig {
+    pub rate: f32,
+    pub depth: f32,
+    pub wave: LfoWave,
+    pub target: LfoTarget,
+}
+
+impl Default for LfoConfig {
+    fn default() -> Self {
+        Self {
+            rate: 1.0,
+            depth: 0.0,
+            wave: LfoWave::Sine,
+            target: LfoTarget::Off,
+        }
+    }
+}
+
+impl LfoConfig {
+    pub fn is_active(&self) -> bool {
+        self.target != LfoTarget::Off && self.depth > 0.0
+    }
+
+    fn validate(&self, path: &str) -> Result<(), String> {
+        check_range(&format!("{path}.rate"), self.rate, 0.1, 20.0)?;
+        check_range(&format!("{path}.depth"), self.depth, 0.0, 1.0)
+    }
+}
+
 /// A patch reference on a note: a stored name or a one-off inline patch.
 ///
 /// Serialized untagged (a bare string or a patch object). Deserialization is
@@ -626,16 +1600,39 @@ impl Patch {
 
     /// Longest amplitude release of any enabled engine; percussion has none.
     pub fn release_seconds(&self) -> f32 {
-        self.subtractive
+        let sub = self
+            .subtractive
             .as_ref()
             .filter(|s| s.level > 0.0)
             .map(|s| s.env.release)
-            .unwrap_or(0.0)
+            .unwrap_or(0.0);
+        let fm = self
+            .fm
+            .as_ref()
+            .filter(|f| f.level > 0.0)
+            .map(|f| f.carrier_release())
+            .unwrap_or(0.0);
+        let wavetable = self
+            .wavetable
+            .as_ref()
+            .filter(|w| w.level > 0.0)
+            .map(|w| w.env.release)
+            .unwrap_or(0.0);
+        let granular = self
+            .granular
+            .as_ref()
+            .filter(|g| g.level > 0.0)
+            .map(|g| g.env.release)
+            .unwrap_or(0.0);
+        sub.max(fm).max(wavetable).max(granular)
     }
 
     /// True when at least one enabled engine takes its pitch from the note.
     pub fn has_pitched_engine(&self) -> bool {
         self.subtractive.as_ref().is_some_and(|s| s.level > 0.0)
+            || self.fm.as_ref().is_some_and(|f| f.level > 0.0)
+            || self.wavetable.as_ref().is_some_and(|w| w.level > 0.0)
+            || self.granular.as_ref().is_some_and(|g| g.level > 0.0)
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -643,9 +1640,14 @@ impl Patch {
             return Err("name must not be empty".into());
         }
         check_range("level", self.level, 0.0, 1.0)?;
-        if self.subtractive.is_none() && self.percussion.is_none() {
+        if self.subtractive.is_none()
+            && self.percussion.is_none()
+            && self.fm.is_none()
+            && self.wavetable.is_none()
+            && self.granular.is_none()
+        {
             return Err(format!(
-                "patch '{}' has no engines: add \"subtractive\" or \"percussion\"",
+                "patch '{}' has no engines: add \"subtractive\", \"fm\", \"wavetable\", \"granular\" or \"percussion\"",
                 self.name
             ));
         }
@@ -687,8 +1689,24 @@ impl Patch {
             }
             sub.env.validate("subtractive.env")?;
         }
+        if let Some(fm) = &self.fm {
+            fm.validate("fm")?;
+        }
+        if let Some(wt) = &self.wavetable {
+            wt.validate("wavetable")?;
+        }
+        if let Some(g) = &self.granular {
+            g.validate("granular")?;
+        }
         if let Some(perc) = &self.percussion {
             perc.validate("percussion")?;
+        }
+        if let Some(lfo) = &self.lfo {
+            lfo.validate("lfo")?;
+        }
+        for (i, e) in self.effects.iter().enumerate() {
+            e.validate_effect_config()
+                .map_err(|err| format!("effects[{i}]: {err}"))?;
         }
         Ok(())
     }
@@ -732,6 +1750,23 @@ const BUILTIN_PATCHES: &[&str] = &[
     include_str!("patches/sweep_up.json"),
     include_str!("patches/chime.json"),
     include_str!("patches/burst.json"),
+    // fm
+    include_str!("patches/dx7_e_piano.json"),
+    include_str!("patches/dx7_slap_bass.json"),
+    include_str!("patches/tx81z_lately.json"),
+    include_str!("patches/fm_bell.json"),
+    // wavetable
+    include_str!("patches/wt_organ.json"),
+    include_str!("patches/wt_vocal_pad.json"),
+    include_str!("patches/wt_pwm_lead.json"),
+    include_str!("patches/wt_glass_keys.json"),
+    // granular / lfo
+    include_str!("patches/grain_cloud.json"),
+    include_str!("patches/formant_texture.json"),
+    include_str!("patches/noise_texture.json"),
+    include_str!("patches/drone.json"),
+    // time fracture
+    include_str!("patches/shimmer_keys.json"),
 ];
 
 /// Every built-in patch, parsed and validated once at construction.

@@ -2,14 +2,15 @@
 //! R2D2/patch buffers and a time-ordered MIDI event list.
 
 use crate::expressive::{
-    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, NoteEvent, Patch, PatchLibrary,
-    R2D2Emotion, R2D2Expression, R2D2Voice, SynthRef, render_length_seconds, render_patch,
+    EffectsChain, EffectsPresetLibrary, ExpressiveSynth, MAX_RENDER_SECONDS, NoteEvent, Patch,
+    PatchLibrary, R2D2Emotion, R2D2Expression, R2D2Voice, SynthRef, render_length_seconds,
+    render_patch,
 };
 use crate::midi::engine::{
     EventKind, PlayCommand, PlayMode, SAMPLE_RATE, SYNTH_BUS_GAIN, seconds_to_frames,
 };
 use crate::midi::parser::MidiNote;
-use crate::midi::{EffectConfig, SimpleSequence};
+use crate::midi::{EffectConfig, SimpleSequence, effects_tail_seconds};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -163,6 +164,7 @@ impl Translator {
             return Ok(Translation {
                 command: PlayCommand {
                     mode,
+                    tempo: sequence.tempo,
                     ..Default::default()
                 },
                 duration: Duration::ZERO,
@@ -285,13 +287,20 @@ impl Translator {
                     params.duration,
                     &params.pitch_contour,
                 );
+                let effects = note.effects.as_deref().unwrap_or(&[]);
                 let mut chain =
-                    EffectsChain::new(SAMPLE_RATE as f32, note.effects.as_deref().unwrap_or(&[]));
+                    EffectsChain::with_tempo(SAMPLE_RATE as f32, sequence.tempo, effects);
+                let mut tail = 0.0f32;
                 if !chain.is_empty() {
-                    samples.resize(samples.len() + SAMPLE_RATE as usize, 0.0);
+                    tail = r2d2_tail_seconds(effects, sequence.tempo);
+                    samples.resize(samples.len() + (tail * SAMPLE_RATE as f32) as usize, 0.0);
                     chain.process_buffer(&mut samples);
                 }
-                note_end = note_end.max(start + Duration::from_secs_f32(expression.duration));
+                note_end = note_end.max(
+                    start
+                        + Duration::from_secs_f32(expression.duration)
+                        + Duration::from_secs_f32(tail),
+                );
                 buffers.push((
                     seconds_to_frames(start),
                     samples.into_iter().map(|s| [s, s]).collect(),
@@ -331,14 +340,14 @@ impl Translator {
                     ..*event
                 })
                 .collect();
-            let mut samples = render_patch(&patch, &events, SAMPLE_RATE as f32);
+            let mut samples = render_patch(&patch, &events, SAMPLE_RATE as f32, sequence.tempo);
             for frame in &mut samples {
                 frame[0] *= SYNTH_BUS_GAIN;
                 frame[1] *= SYNTH_BUS_GAIN;
             }
             buffers.push((seconds_to_frames(Duration::from_secs_f64(first)), samples));
             note_end = note_end.max(Duration::from_secs_f64(
-                first + render_length_seconds(&patch, &events) as f64,
+                first + render_length_seconds(&patch, &events, sequence.tempo) as f64,
             ));
         }
 
@@ -351,7 +360,13 @@ impl Translator {
         let duration = if midi_notes.is_empty() && buffers.is_empty() {
             Duration::ZERO
         } else {
-            note_end + calculate_tail_time(&midi_notes)
+            // The bus chain rings out too: a beat-synced delay outlasts the
+            // CC-based estimate by far, and the caller sleeps this duration.
+            let bus_tail = Duration::from_secs_f32(effects_tail_seconds(
+                midi_effects.as_deref().unwrap_or(&[]),
+                sequence.tempo,
+            ));
+            note_end + calculate_tail_time(&midi_notes).max(bus_tail)
         };
         tracing::info!(
             "Translated {} MIDI notes and {} buffers ({} mode), {:.2}s including tail",
@@ -367,6 +382,7 @@ impl Translator {
                 buffers,
                 midi_effects,
                 mode,
+                tempo: sequence.tempo,
             },
             duration,
         })
@@ -402,6 +418,13 @@ fn parse_emotion(name: &str) -> Result<R2D2Emotion, String> {
         "Thoughtful" => R2D2Emotion::Thoughtful,
         _ => return Err(format!("Unknown R2D2 emotion: {}", name)),
     })
+}
+
+/// Seconds of silence appended to an R2D2 note so its effects can ring out.
+/// Capped like a patch render: `tempo` is bounded at the tool layer, but this
+/// buffer is sized here, so it carries the same ceiling `render_patch` does.
+fn r2d2_tail_seconds(effects: &[EffectConfig], tempo: u32) -> f32 {
+    effects_tail_seconds(effects, tempo).min(MAX_RENDER_SECONDS)
 }
 
 /// Calculate additional tail time needed for effects like reverb, chorus, sustain, and natural decay
@@ -608,6 +631,27 @@ mod tests {
             synth: Some(serde_json::from_value(synth).unwrap()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn the_sequence_tempo_reaches_patch_effects_and_the_midi_bus() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let mut s = seq(vec![patch_note(
+            json!({"name": "d", "subtractive": {"env": {"release": 0.01}},
+            "effects": [{"type": "delay", "random_beats": [1.0, 1.0], "intensity": 0.5}]}),
+            60,
+            0.0,
+            0.1,
+        )]);
+        s.tempo = 60;
+        let slow = t
+            .translate(s.clone(), PlayMode::Replace, &no_session())
+            .unwrap();
+        s.tempo = 120;
+        let fast = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        assert!(slow.duration > fast.duration, "longer beats, longer tail");
+        assert_eq!(fast.command.tempo, 120);
+        assert_eq!(slow.command.tempo, 60);
     }
 
     #[test]
@@ -988,6 +1032,120 @@ mod tests {
         assert!(
             (without as f64) < tail,
             "a dry R2D2 note must not be padded, got {without} samples"
+        );
+    }
+
+    #[test]
+    fn an_r2d2_tail_is_capped_like_a_patch_render() {
+        // The tool layer keeps `tempo` inside 20-300, but nothing downstream
+        // re-checks it, so the tail itself carries `render_patch`'s ceiling.
+        let delay: Vec<EffectConfig> = vec![
+            serde_json::from_value(
+                serde_json::json!({"type": "delay", "random_beats": [4.0, 4.0]}),
+            )
+            .unwrap(),
+        ];
+        assert_eq!(r2d2_tail_seconds(&delay, 1), MAX_RENDER_SECONDS);
+        // 4 beats at 20 BPM is 12 s, so the uncapped tail is 48.5 s.
+        assert!((r2d2_tail_seconds(&delay, 20) - 48.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_slowest_supported_tempo_still_bounds_the_r2d2_buffer() {
+        // Built directly, bypassing the tool-level tempo check.
+        let t = Translator::new(Ok(()));
+        let mut s = seq(vec![SimpleNote {
+            note_type: "r2d2".to_string(),
+            r2d2_emotion: Some("Happy".to_string()),
+            r2d2_intensity: Some(0.7),
+            r2d2_complexity: Some(2),
+            duration: Some(0.2),
+            effects: Some(vec![
+                serde_json::from_value(
+                    serde_json::json!({"type": "delay", "random_beats": [4.0, 4.0]}),
+                )
+                .unwrap(),
+            ]),
+            ..Default::default()
+        }]);
+        s.tempo = 20;
+        let tr = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        let frames = tr.command.buffers[0].1.len() as f32;
+        let ceiling =
+            (crate::midi::MAX_NOTE_SECONDS as f32 + MAX_RENDER_SECONDS) * SAMPLE_RATE as f32;
+        assert!(frames <= ceiling, "{frames} frames");
+        assert!(
+            tr.duration.as_secs_f32() <= crate::midi::MAX_NOTE_SECONDS as f32 + MAX_RENDER_SECONDS,
+            "{:?}",
+            tr.duration
+        );
+    }
+
+    #[test]
+    fn the_midi_bus_duration_covers_its_delay_tail() {
+        let t = Translator::new(Ok(()));
+        let mut s = seq(vec![SimpleNote {
+            note: Some(60),
+            start_time: Some(0.0),
+            duration: Some(0.5),
+            effects: Some(vec![
+                serde_json::from_value(
+                    serde_json::json!({"type": "delay", "random_beats": [1.0, 1.0]}),
+                )
+                .unwrap(),
+            ]),
+            ..Default::default()
+        }]);
+        s.tempo = 60;
+        let tr = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        // 1 beat at 60 BPM is 1 s, so the delay rings for 4 x 1 + 0.5 s.
+        assert!(
+            tr.duration.as_secs_f64() >= 0.5 + 4.5 - 1e-6,
+            "the bus tail must follow the delay, not just the CC-based estimate: {:?}",
+            tr.duration
+        );
+    }
+
+    #[test]
+    fn an_r2d2_notes_reported_duration_follows_the_tempo_scaled_tail() {
+        let delay: EffectConfig = serde_json::from_value(serde_json::json!({
+            "type": "delay", "random_beats": [1.0, 1.0], "intensity": 0.5
+        }))
+        .unwrap();
+        let r2d2_note = |effects| SimpleNote {
+            note_type: "r2d2".to_string(),
+            r2d2_emotion: Some("Happy".to_string()),
+            r2d2_intensity: Some(0.7),
+            r2d2_complexity: Some(2),
+            duration: Some(0.2),
+            effects: Some(vec![effects]),
+            ..Default::default()
+        };
+        let t = Translator::new(Ok(()));
+        let mut s = seq(vec![r2d2_note(delay.clone())]);
+        s.tempo = 60;
+        let slow = t
+            .translate(s.clone(), PlayMode::Replace, &no_session())
+            .unwrap();
+        s.tempo = 120;
+        let fast = t.translate(s, PlayMode::Replace, &no_session()).unwrap();
+        assert!(
+            slow.duration > fast.duration,
+            "slower tempo means longer beat-synced repeats, so a longer reported duration: {:?} vs {:?}",
+            slow.duration,
+            fast.duration
+        );
+        // 1 beat at 60 BPM is 1 s -> tail 4.5 s; note duration 0.2 s.
+        assert!(
+            slow.duration.as_secs_f64() >= 0.2 + 4.5 - 1e-6,
+            "duration must cover the note plus its tempo-scaled tail: {:?}",
+            slow.duration
+        );
+        // 1 beat at 120 BPM is 0.5 s -> tail 2.5 s; note duration 0.2 s.
+        assert!(
+            fast.duration.as_secs_f64() >= 0.2 + 2.5 - 1e-6,
+            "duration must cover the note plus its tempo-scaled tail: {:?}",
+            fast.duration
         );
     }
 

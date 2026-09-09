@@ -12,7 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Testing Commands
 - `cargo test` - Run all unit and integration tests (integration tests spawn the server binary)
-- `cargo clippy --all-targets -- -D warnings` - Check code quality (must pass for CI)
+- `cargo clippy --all-targets --all-features -- -D warnings` - Check code quality (must pass for CI)
+- CI runs clippy on the latest stable toolchain (`dtolnay/rust-toolchain@stable`), not a pinned one. Run `rustup update stable` before clippy so local lints match CI; a stale local toolchain passes locally and fails CI on newer lints.
 - `cargo fmt` - Format code (required before PR)
 
 DSP behaviour is verified by rendering to sample buffers and measuring
@@ -55,9 +56,12 @@ min-heap of MIDI events keyed to the engine's 44.1 kHz sample clock, the
 pre-rendered R2D2/synthesis buffers, and the MIDI bus `EffectsChain` (one
 per side). `MidiPlayer::play(sequence, mode, &session_patches)` translates and sends a
 `PlayCommand`; it returns the duration including effect tails.
+`PlayCommand.tempo` carries the sequence tempo to the MIDI bus chain;
+`render_patch` and the R2D2 chain take it directly; render tails come from
+`EffectConfig::tail_seconds`.
 
 1. `Translator` resolves `synth` references (session patches, then built-ins, then inline; an unknown name is an error) and converts musical time with the sequence's tempo and `beats_per_bar`.
-2. Synthesis notes are grouped by patch, rendered on the tool thread by `render_patch` into one stereo buffer per patch (voices summed, the patch's effects chain applied once, `SYNTH_BUS_GAIN` applied) and scheduled as buffers.
+2. Synthesis notes are grouped by patch, rendered on the tool thread by `render_patch` into one stereo buffer per patch (voices summed, the patch's optional LFO read once per sample and mapped onto `Modulation`, the patch's effects chain applied once, then `SYNTH_BUS_GAIN`) and scheduled as buffers. Between the chain and the gain sits a per-patch peak limiter (`PATCH_LIMITER_CEILING` 1.5), so a chord on one patch stays under the 0.8 soft-clip knee; the sum of several patches still relies on the mixer's soft clipper.
 3. MIDI notes become time-ordered events: per call, the first note on a channel sends a program change (its instrument, or 0), controllers only when specified. Channel 9 is OxiSynth's drum channel; no bank select is needed.
 4. The engine drains commands per 1024-frame chunk and applies events at their exact frame (`LEAD_FRAMES` = 2048 after the command). It sums the buses, soft-clips, and emits stereo.
 5. `mode: replace` (default) fades 6 ms, sends SystemReset, clears the queue and installs the call's bus chain; `layer` mixes on top. `stop_playback` is the same reset with nothing scheduled.
@@ -69,11 +73,14 @@ engine API is the next step if the callback still glitches.
 
 ### Synthesis (`src/expressive/`)
 - `synth.rs` - `ExpressiveSynth`: the R2D2 ring-modulation voice only. Swept oscillators use `PhaseAccumulator` (never `sin(2π·f(t)·t)`).
-- `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive and percussion engines plus an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
-- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh, chime, burst; these carry their own envelopes so the ADSR is skipped.
-- `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay, 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::new(sample_rate, &[EffectConfig])` then `process` per sample or `process_buffer`.
+- `patch.rs` / `envelope.rs` / `oscillator.rs` / `engines/` / `wavetables.rs` / `render.rs` / `patches/*.json` - agent-defined synth patches: `Patch` (subtractive, fm, wavetable, granular and percussion engines plus an optional per-patch `lfo` and an effects chain), `SynthRef` (a name or an inline patch) and `render_patch`, which renders one patch's notes into a stereo buffer.
+- `percussion.rs` - kick, snare, hi-hat, cymbal, zap, swoosh, chime, burst; these carry their own envelopes so the ADSR is skipped. Hits are peak-normalised to `PERCUSSION_PEAK` at note-on so `level` is comparable across kinds.
+- `wavetables.rs` - builds eight procedural tables once (`OnceLock`) as ten per-octave band-limited levels; `WavetableVoice` picks the level from the note's pitch.
+- `engines/granular.rs` - `GranularVoice`: at note-on builds one peak-normalised source cycle (`harmonics|noise|formant|inharmonic`; `noise` is a fresh random cycle each time) and scatters up to 32 overlapping grains across it, summed with 1/sqrt(active) normalisation and panned for true stereo width.
+- `lfo.rs` - five-shape LFO; `render_patch` runs one per patch and maps it onto `Modulation` (`engines/mod.rs`) each sample: cutoff, pitch, amplitude, wavetable morph, grain density.
+- `effects.rs` - stateful effects: Schroeder reverb, damped feedback delay with Time Fracture (beat-synced random time, pitch-shifted repeats), 3-voice chorus, TPT state-variable filter, compressor, tanh distortion. `EffectsChain::with_tempo(sample_rate, tempo, &[EffectConfig])` (or `new` for 120 BPM) then `process` per sample or `process_buffer`.
 - `effects_presets.rs` - named chains ("studio", "concert_hall", ...).
-- `patches/` - 31 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
+- `patches/` - 44 built-in patches as JSON, embedded at compile time and loaded by `PatchLibrary`; a note's `synth` name resolves against the session's patches first, then these.
 - `r2d2.rs` - emotion parameter tables (pitch contours, ranges).
 
 ### Data model (`src/midi/mod.rs`)
@@ -93,6 +100,7 @@ Cursor MCP config, stores an optional custom SoundFont path.
 
 ## Important Architectural Decisions
 - **Unified playback**: every audio type goes through `MidiPlayer::play` and the one `MidiEngine`.
-- **Effects are stateful and per note** for synthesis/R2D2, per bus for MIDI. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
+- **Effects are stateful**: one instance per synth patch render (shared across every note of that patch in the call), one per R2D2 note, and one per MIDI bus. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
 - **Stereo throughout** the mixer; mono sources are centered.
 - **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call.
+- **Headroom is measured, not assumed**: the library test renders each category's demo phrase (a chord for pads) and a held full-velocity note and asserts a 1.4 pre-bus ceiling below the limiter's 1.5; set levels with `cargo test print_builtin_headroom_survey -- --ignored --nocapture`.

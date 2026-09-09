@@ -121,6 +121,30 @@ A patch object passed straight on the note works for one-off sounds.
 
 The built-in `sci_fi_zap` patch does the same thing without the object.
 
+## Example 8: Shimmer Delay (Time Fracture)
+
+The `delay` effect can also glide its time within a beat range and
+pitch-shift each repeat. `random_beats: [0.75, 0.75]` below fixes the
+delay at 3/4 beat of the sequence tempo (a wider range plus `random_rate`
+would let it drift); `pitch_intervals` climbs a fifth, then an octave,
+before the pattern repeats.
+
+```json
+{"name": "shimmer", "category": "keys",
+ "fm": {"algorithm": "stack",
+        "operators": [{"ratio": 1, "env": {"decay": 1.5, "sustain": 0.2, "release": 2}},
+                       {"ratio": 3.5, "level": 0.5, "env": {"decay": 0.5, "sustain": 0}}]},
+ "effects": [{"type": "delay", "random_beats": [0.75, 0.75], "pitch_intervals": [7, 12], "pitch_mode": "up",
+              "feedback": 0.5, "intensity": 0.6},
+             {"type": "reverb", "room_size": 0.8, "intensity": 0.4}]}
+```
+
+```json
+{"notes": [{"synth": "shimmer", "note": 60, "start_time": 0.0, "duration": 1.0}]}
+```
+
+The built-in `shimmer_keys` patch does the same thing without `define_synth`.
+
 ## Stopping and Timing
 
 Playback tools return immediately; the reply says how long the audio will

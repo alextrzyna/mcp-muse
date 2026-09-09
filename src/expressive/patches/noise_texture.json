@@ -1,0 +1,13 @@
+{
+  "name": "noise_texture",
+  "description": "Filtered noise grains sample-and-held into a pulsing density for risers and beds",
+  "category": "fx",
+  "level": 1.0,
+  "granular": {"source": "noise", "grain_ms": 30, "density": 40, "randomness": 1.0, "stereo_width": 1.0,
+               "env": {"attack": 0.5, "decay": 0.5, "sustain": 0.6, "release": 1.5}},
+  "lfo": {"rate": 0.3, "depth": 0.6, "wave": "sample_hold", "target": "grain_density"},
+  "effects": [
+    {"type": "filter", "filter_type": "low_pass", "cutoff": 4000, "resonance": 0.3, "intensity": 1.0},
+    {"type": "reverb", "room_size": 0.7, "intensity": 0.3}
+  ]
+}
