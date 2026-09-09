@@ -38,10 +38,10 @@ Releases are **fully automated** via GitHub Actions:
    - Checks if any releases exist for the current year-month
    - If no releases exist: Creates `v2025.11.0`
    - If releases exist: Increments patch number (e.g., `v2025.11.1`)
-   - Updates `Cargo.toml` with the new version
-   - Commits the version bump to `main`
    - Creates and pushes the git tag
-3. **Tag push triggers release workflow**:
+   - Dispatches the release workflow for that tag (a tag pushed by the workflow's own token never fires the release workflow's tag trigger, so it is started explicitly)
+3. **Release workflow** (also runnable by hand from the Actions tab, or with `gh workflow run release.yml --ref vYYYY.M.PATCH -f tag=vYYYY.M.PATCH`):
+   - Stamps the tag's version into `Cargo.toml` before building (`.github/scripts/set-version-from-tag.sh`), because the protected `main` branch does not accept the workflow's version bump commit
    - Builds binaries for all platforms (Linux, macOS, Windows)
    - Creates GitHub Release with binaries attached
    - Publishes to [crates.io](https://crates.io/crates/mcp-muse)
