@@ -1,12 +1,23 @@
 name: Release
 
+# Runs for a manually pushed tag, or when the auto-tag workflow dispatches it.
+# The auto-tag workflow has to dispatch explicitly: a tag it pushes with the
+# workflow's GITHUB_TOKEN never fires this workflow's push trigger.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and publish (e.g. v2026.9.9)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
+  # The tag being released, whichever way the workflow was started.
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
@@ -30,6 +41,12 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set crate version from the tag
+        shell: bash
+        run: .github/scripts/set-version-from-tag.sh "$RELEASE_TAG"
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -86,6 +103,8 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Download all artifacts
         uses: actions/download-artifact@v8
@@ -93,6 +112,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             mcp-muse-linux-x86_64.tar.gz/mcp-muse-linux-x86_64.tar.gz
             mcp-muse-windows-x86_64.zip/mcp-muse-windows-x86_64.zip
@@ -101,9 +121,9 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          name: "MCP-Muse ${{ github.ref_name }}"
+          name: "MCP-Muse ${{ env.RELEASE_TAG }}"
           body: |
-            ## 🎮 MCP-Muse Release ${{ github.ref_name }}
+            ## 🎮 MCP-Muse Release ${{ env.RELEASE_TAG }}
 
             ### Installation Options
 
@@ -124,10 +144,15 @@ jobs:
     name: Publish to crates.io
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(inputs.tag || github.ref_name, 'v')
     steps:
       - name: Checkout sources
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set crate version from the tag
+        run: .github/scripts/set-version-from-tag.sh "$RELEASE_TAG"
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
