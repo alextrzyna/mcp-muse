@@ -109,6 +109,57 @@ pub struct Translation {
     pub duration: Duration,
 }
 
+/// Whether the patch, R2D2 and MIDI-bus effect chains are rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effects {
+    /// Every chain applied, as in playback.
+    Wet,
+    /// Every chain bypassed: dry material for mixing elsewhere.
+    Dry,
+}
+
+/// One patch group's rendered stereo buffer, already at bus level.
+#[derive(Debug, Clone)]
+pub struct PatchRender {
+    /// The patch's key (`Patch::key`), used to name an exported file.
+    #[allow(dead_code)] // read by the exporter in a later task
+    pub name: String,
+    /// Frames after the start of the composition.
+    pub start: u64,
+    pub samples: Vec<[f32; 2]>,
+}
+
+/// A translated call with its sound sources kept apart, so an export can
+/// write them separately. Playback flattens it with `into_command`.
+#[derive(Debug)]
+pub struct TranslatedParts {
+    pub midi: Vec<MidiNote>,
+    /// MIDI bus chain for this call, if any MIDI note specified one.
+    pub midi_effects: Option<Vec<EffectConfig>>,
+    pub patches: Vec<PatchRender>,
+    /// One buffer per R2D2 note at its start frame.
+    pub r2d2: Vec<(u64, Vec<[f32; 2]>)>,
+    pub tempo: u32,
+    /// Time until the last note plus its effect tail.
+    pub duration: Duration,
+}
+
+impl TranslatedParts {
+    /// Flatten into the engine's command: R2D2 buffers first, then patch
+    /// buffers (the order playback has always used).
+    pub fn into_command(self, mode: PlayMode) -> PlayCommand {
+        let mut buffers = self.r2d2;
+        buffers.extend(self.patches.into_iter().map(|p| (p.start, p.samples)));
+        PlayCommand {
+            events: midi_events(&self.midi),
+            buffers,
+            midi_effects: self.midi_effects,
+            mode,
+            tempo: self.tempo,
+        }
+    }
+}
+
 pub struct Translator {
     effects_library: EffectsPresetLibrary,
     patch_library: PatchLibrary,
@@ -160,13 +211,30 @@ impl Translator {
         mode: PlayMode,
         session_patches: &HashMap<String, Patch>,
     ) -> Result<Translation, String> {
+        let parts = self.translate_parts(sequence, session_patches, Effects::Wet)?;
+        let duration = parts.duration;
+        Ok(Translation {
+            command: parts.into_command(mode),
+            duration,
+        })
+    }
+
+    /// Translate without flattening. `effects` selects wet (playback) or
+    /// dry (bypassed chains) rendering of the patch and R2D2 buffers and
+    /// decides whether the MIDI bus chain is kept.
+    pub fn translate_parts(
+        &self,
+        sequence: SimpleSequence,
+        session_patches: &HashMap<String, Patch>,
+        effects: Effects,
+    ) -> Result<TranslatedParts, String> {
         if sequence.notes.is_empty() {
-            return Ok(Translation {
-                command: PlayCommand {
-                    mode,
-                    tempo: sequence.tempo,
-                    ..Default::default()
-                },
+            return Ok(TranslatedParts {
+                midi: Vec::new(),
+                midi_effects: None,
+                patches: Vec::new(),
+                r2d2: Vec::new(),
+                tempo: sequence.tempo,
                 duration: Duration::ZERO,
             });
         }
@@ -198,13 +266,17 @@ impl Translator {
         // Synthesis and R2D2 notes render their own effects into their sample
         // buffers. MIDI comes out of OxiSynth as one mixed bus, so the first
         // MIDI note that specifies effects defines the chain for that bus.
-        let midi_effects: Option<Vec<EffectConfig>> = processed_notes
-            .iter()
-            .filter(|n| n.note_type != "r2d2" && !n.is_synthesis())
-            .find_map(|n| n.effects.clone().filter(|e| !e.is_empty()));
+        let midi_effects: Option<Vec<EffectConfig>> = match effects {
+            Effects::Dry => None,
+            Effects::Wet => processed_notes
+                .iter()
+                .filter(|n| n.note_type != "r2d2" && !n.is_synthesis())
+                .find_map(|n| n.effects.clone().filter(|e| !e.is_empty())),
+        };
 
         let mut midi_notes: Vec<MidiNote> = Vec::new();
-        let mut buffers: Vec<(u64, Vec<[f32; 2]>)> = Vec::new();
+        let mut r2d2_buffers: Vec<(u64, Vec<[f32; 2]>)> = Vec::new();
+        let mut patches: Vec<PatchRender> = Vec::new();
         let mut note_end = Duration::ZERO;
         let expressive_synth = ExpressiveSynth::new();
         let r2d2_voice = R2D2Voice::new();
@@ -287,12 +359,15 @@ impl Translator {
                     params.duration,
                     &params.pitch_contour,
                 );
-                let effects = note.effects.as_deref().unwrap_or(&[]);
+                let note_effects: &[EffectConfig] = match effects {
+                    Effects::Dry => &[],
+                    Effects::Wet => note.effects.as_deref().unwrap_or(&[]),
+                };
                 let mut chain =
-                    EffectsChain::with_tempo(SAMPLE_RATE as f32, sequence.tempo, effects);
+                    EffectsChain::with_tempo(SAMPLE_RATE as f32, sequence.tempo, note_effects);
                 let mut tail = 0.0f32;
                 if !chain.is_empty() {
-                    tail = r2d2_tail_seconds(effects, sequence.tempo);
+                    tail = r2d2_tail_seconds(note_effects, sequence.tempo);
                     samples.resize(samples.len() + (tail * SAMPLE_RATE as f32) as usize, 0.0);
                     chain.process_buffer(&mut samples);
                 }
@@ -301,7 +376,7 @@ impl Translator {
                         + Duration::from_secs_f32(expression.duration)
                         + Duration::from_secs_f32(tail),
                 );
-                buffers.push((
+                r2d2_buffers.push((
                     seconds_to_frames(start),
                     samples.into_iter().map(|s| [s, s]).collect(),
                 ));
@@ -328,7 +403,10 @@ impl Translator {
 
         // Render one stereo buffer per patch group, scheduled at the
         // group's earliest note.
-        for (_, patch, timed_events) in patch_groups {
+        for (_, mut patch, timed_events) in patch_groups {
+            if effects == Effects::Dry {
+                patch.effects.clear();
+            }
             let first = timed_events
                 .iter()
                 .map(|(abs, _)| *abs)
@@ -345,7 +423,11 @@ impl Translator {
                 frame[0] *= SYNTH_BUS_GAIN;
                 frame[1] *= SYNTH_BUS_GAIN;
             }
-            buffers.push((seconds_to_frames(Duration::from_secs_f64(first)), samples));
+            patches.push(PatchRender {
+                name: patch.key(),
+                start: seconds_to_frames(Duration::from_secs_f64(first)),
+                samples,
+            });
             note_end = note_end.max(Duration::from_secs_f64(
                 first + render_length_seconds(&patch, &events, sequence.tempo) as f64,
             ));
@@ -357,7 +439,7 @@ impl Translator {
             return Err(format!("MIDI notes need a SoundFont: {}", reason));
         }
 
-        let duration = if midi_notes.is_empty() && buffers.is_empty() {
+        let duration = if midi_notes.is_empty() && r2d2_buffers.is_empty() && patches.is_empty() {
             Duration::ZERO
         } else {
             // The bus chain rings out too: a beat-synced delay outlasts the
@@ -369,21 +451,18 @@ impl Translator {
             note_end + calculate_tail_time(&midi_notes).max(bus_tail)
         };
         tracing::info!(
-            "Translated {} MIDI notes and {} buffers ({} mode), {:.2}s including tail",
+            "Translated {} MIDI notes and {} buffers, {:.2}s including tail",
             midi_notes.len(),
-            buffers.len(),
-            mode.as_str(),
+            r2d2_buffers.len() + patches.len(),
             duration.as_secs_f64()
         );
 
-        Ok(Translation {
-            command: PlayCommand {
-                events: midi_events(&midi_notes),
-                buffers,
-                midi_effects,
-                mode,
-                tempo: sequence.tempo,
-            },
+        Ok(TranslatedParts {
+            midi: midi_notes,
+            midi_effects,
+            patches,
+            r2d2: r2d2_buffers,
+            tempo: sequence.tempo,
             duration,
         })
     }
@@ -675,6 +754,108 @@ mod tests {
             .iter()
             .fold(0.0f32, |m, s| m.max(s[0].abs()));
         assert!(peak <= SYNTH_BUS_GAIN * 100.0 / 127.0 + 0.01 && peak > SYNTH_BUS_GAIN * 0.5);
+    }
+
+    fn r2d2_note(duration: f64, effects: Option<Vec<EffectConfig>>) -> SimpleNote {
+        SimpleNote {
+            note_type: "r2d2".to_string(),
+            r2d2_emotion: Some("Happy".to_string()),
+            r2d2_intensity: Some(0.7),
+            r2d2_complexity: Some(2),
+            duration: Some(duration),
+            effects,
+            ..Default::default()
+        }
+    }
+
+    fn wet_reverb() -> EffectConfig {
+        serde_json::from_value(json!({
+            "type": "reverb", "room_size": 0.8, "wet_level": 0.5, "intensity": 0.8
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn dry_parts_bypass_every_effect_chain() {
+        let t = Translator::new(Ok(()));
+        let reverb_patch = json!({"name": "wet", "subtractive": {"osc1": {"wave": "sine"},
+            "env": {"attack": 0.001, "decay": 0.001, "sustain": 1.0, "release": 0.01}},
+            "effects": [{"type": "reverb", "room_size": 0.8, "wet_level": 0.5, "intensity": 0.8}]});
+        let notes = || {
+            vec![
+                patch_note(reverb_patch.clone(), 69, 0.0, 0.5),
+                r2d2_note(0.5, Some(vec![wet_reverb()])),
+                SimpleNote {
+                    note: Some(60),
+                    duration: Some(0.5),
+                    effects: Some(vec![wet_reverb()]),
+                    ..Default::default()
+                },
+            ]
+        };
+        let wet = t
+            .translate_parts(seq(notes()), &no_session(), Effects::Wet)
+            .unwrap();
+        let dry = t
+            .translate_parts(seq(notes()), &no_session(), Effects::Dry)
+            .unwrap();
+
+        assert!(wet.midi_effects.is_some(), "wet keeps the bus chain");
+        assert!(dry.midi_effects.is_none(), "dry drops the bus chain");
+        assert_eq!(wet.midi.len(), 1);
+        assert_eq!(dry.midi.len(), 1);
+        assert_eq!(wet.patches.len(), 1);
+        assert_eq!(dry.patches.len(), 1);
+        assert_eq!(dry.patches[0].name, "wet");
+        assert!(
+            dry.patches[0].samples.len() < wet.patches[0].samples.len(),
+            "a dry patch buffer has no reverb tail"
+        );
+        assert_eq!(wet.r2d2.len(), 1);
+        assert!(
+            dry.r2d2[0].1.len() < wet.r2d2[0].1.len(),
+            "a dry R2D2 buffer has no reverb tail"
+        );
+        assert!(dry.duration < wet.duration);
+    }
+
+    #[test]
+    fn wet_parts_flatten_to_the_playback_command() {
+        let t = Translator::new(Ok(()));
+        let notes = || {
+            vec![
+                patch_note(json!({"name": "s", "subtractive": {}}), 60, 0.25, 0.5),
+                patch_note(json!("tr_808_kick"), 36, 0.0, 0.25),
+                SimpleNote {
+                    note: Some(60),
+                    duration: Some(0.5),
+                    channel: 2,
+                    instrument: Some(73),
+                    ..Default::default()
+                },
+            ]
+        };
+        let direct = t
+            .translate(seq(notes()), PlayMode::Layer, &no_session())
+            .unwrap();
+        let parts = t
+            .translate_parts(seq(notes()), &no_session(), Effects::Wet)
+            .unwrap();
+        assert_eq!(parts.duration, direct.duration);
+        assert_eq!(parts.tempo, 120);
+
+        let command = parts.into_command(PlayMode::Layer);
+        assert_eq!(command.mode, PlayMode::Layer);
+        assert_eq!(command.tempo, direct.command.tempo);
+        assert_eq!(command.events, direct.command.events);
+        assert_eq!(
+            command.midi_effects.is_some(),
+            direct.command.midi_effects.is_some()
+        );
+        let shape = |c: &PlayCommand| -> Vec<(u64, usize)> {
+            c.buffers.iter().map(|(s, b)| (*s, b.len())).collect()
+        };
+        assert_eq!(shape(&command), shape(&direct.command));
     }
 
     #[test]
