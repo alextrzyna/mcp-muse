@@ -2,7 +2,7 @@
   "name": "dark_pad",
   "description": "Dark, mysterious pad for suspenseful and moody atmospheres (Film Scoring Techniques)",
   "category": "pad",
-  "level": 0.75,
+  "level": 0.42,
   "subtractive": {
     "osc1": {"wave": "saw"},
     "filter": {"type": "low_pass", "cutoff": 400, "resonance": 0.5},

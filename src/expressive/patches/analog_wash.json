@@ -2,7 +2,7 @@
   "name": "analog_wash",
   "description": "Atmospheric analog pad with flowing texture and movement (Analog Synthesizer Traditions)",
   "category": "pad",
-  "level": 0.75,
+  "level": 0.33,
   "subtractive": {
     "osc1": {"wave": "saw"},
     "osc2": {"wave": "saw", "mix": 0.5, "detune_cents": 13, "octave": 0},

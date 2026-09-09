@@ -1,4 +1,4 @@
-use crate::midi::{EffectConfig, EffectType};
+use crate::midi::{EffectConfig, EffectType, PitchMode};
 use std::collections::HashMap;
 
 /// Effects preset library for common audio scenarios
@@ -188,6 +188,10 @@ impl EffectsPresetLibrary {
                         feedback: 0.3,
                         wet_level: 0.3,
                         sync_tempo: false,
+                        random_beats: None,
+                        random_rate: 0.0,
+                        pitch_intervals: Vec::new(),
+                        pitch_mode: PitchMode::Random,
                     },
                     intensity: 0.5,
                     enabled: true,
@@ -252,6 +256,10 @@ impl EffectsPresetLibrary {
                         feedback: 0.25,
                         wet_level: 0.2,
                         sync_tempo: false,
+                        random_beats: None,
+                        random_rate: 0.0,
+                        pitch_intervals: Vec::new(),
+                        pitch_mode: PitchMode::Random,
                     },
                     intensity: 0.4,
                     enabled: true,
@@ -344,6 +352,10 @@ impl EffectsPresetLibrary {
                         feedback: 0.45,
                         wet_level: 0.35,
                         sync_tempo: false,
+                        random_beats: None,
+                        random_rate: 0.0,
+                        pitch_intervals: Vec::new(),
+                        pitch_mode: PitchMode::Random,
                     },
                     intensity: 0.7,
                     enabled: true,
@@ -393,6 +405,10 @@ impl EffectsPresetLibrary {
                         feedback: 0.6,
                         wet_level: 0.4,
                         sync_tempo: false,
+                        random_beats: None,
+                        random_rate: 0.0,
+                        pitch_intervals: Vec::new(),
+                        pitch_mode: PitchMode::Random,
                     },
                     intensity: 0.7,
                     enabled: true,

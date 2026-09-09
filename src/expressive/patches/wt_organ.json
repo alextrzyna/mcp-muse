@@ -1,0 +1,9 @@
+{
+  "name": "wt_organ",
+  "description": "Drawbar organ from the organ wavetable with a touch of chorus",
+  "category": "keys",
+  "level": 0.7,
+  "wavetable": {"table": "organ", "morph": 0.0, "env": {"attack": 0.005, "decay": 0.05, "sustain": 1.0, "release": 0.15}},
+  "effects": [{"type": "chorus", "rate": 0.8, "depth": 0.25, "intensity": 0.3},
+              {"type": "reverb", "room_size": 0.4, "dampening": 0.5, "wet_level": 0.3, "intensity": 0.25}]
+}
