@@ -8,13 +8,13 @@ use crate::midi::engine::{
     load_synth, seconds_to_frames,
 };
 use crate::midi::translate::{Translation, Translator};
-use rodio::OutputStream;
+use rodio::MixerDeviceSink;
 use std::collections::HashMap;
 use std::time::Duration;
 
 pub struct MidiPlayer {
     /// Kept alive for the process; dropping it closes the device.
-    _stream: OutputStream,
+    _stream: MixerDeviceSink,
     engine: EngineHandle,
     translator: Translator,
     /// Engine frame at which each started playback ends (including tail).
@@ -25,7 +25,7 @@ impl MidiPlayer {
     /// Open the output device, load the SoundFont once, and attach the engine
     /// to the mixer. Without a SoundFont, synthesis and R2D2 still work.
     pub fn new() -> Result<Self, String> {
-        let stream = rodio::OutputStreamBuilder::open_default_stream()
+        let stream = rodio::DeviceSinkBuilder::open_default_sink()
             .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
 
         let (synth, midi_available) = match find_soundfont().and_then(|p| load_synth(&p)) {

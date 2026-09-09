@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::env;
+use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -548,12 +549,12 @@ impl rodio::Source for EngineSource {
         None
     }
 
-    fn channels(&self) -> u16 {
-        2
+    fn channels(&self) -> rodio::ChannelCount {
+        rodio::nz!(2)
     }
 
-    fn sample_rate(&self) -> u32 {
-        SAMPLE_RATE
+    fn sample_rate(&self) -> rodio::SampleRate {
+        const { NonZero::new(SAMPLE_RATE).unwrap() }
     }
 
     fn total_duration(&self) -> Option<Duration> {
@@ -960,8 +961,8 @@ pub(crate) mod tests {
         let (mut engine, _handle) = MidiEngine::new(None);
         engine.apply(play(vec![(0, vec![[0.5, 0.5]; 100])], PlayMode::Replace));
         let mut source = EngineSource::new(engine);
-        assert_eq!(source.channels(), 2);
-        assert_eq!(source.sample_rate(), SAMPLE_RATE);
+        assert_eq!(source.channels().get(), 2);
+        assert_eq!(source.sample_rate().get(), SAMPLE_RATE);
         assert_eq!(source.total_duration(), None);
         let samples: Vec<f32> = source
             .by_ref()
