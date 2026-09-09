@@ -121,7 +121,7 @@ The body of `translate` moves into
 ```rust
 pub enum Effects { Wet, Dry }
 
-pub struct PatchRender { pub key: String, pub start: u64, pub samples: Vec<[f32; 2]> }
+pub struct PatchRender { pub name: String, pub start: u64, pub samples: Vec<[f32; 2]> }
 
 pub struct TranslatedParts {
     pub midi: Vec<MidiNote>,
