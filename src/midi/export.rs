@@ -1,9 +1,5 @@
 //! Offline export of a composition to WAV files: a stereo mixdown, wet stems
 //! or dry tracks. Design: docs/superpowers/specs/2026-09-09-audio-export-design.md.
-//!
-//! Not yet wired into the `export_audio` MCP tool (a later task), so outside
-//! of tests nothing in the binary calls this module yet.
-#![allow(dead_code)]
 
 use crate::expressive::Patch;
 use crate::midi::SimpleSequence;
