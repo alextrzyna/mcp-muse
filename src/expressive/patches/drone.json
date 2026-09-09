@@ -2,7 +2,7 @@
   "name": "drone",
   "description": "Slow evolving detuned drone with a breathing filter sweep",
   "category": "pad",
-  "level": 0.19,
+  "level": 0.12,
   "subtractive": {
     "osc1": {"wave": "saw"},
     "osc2": {"wave": "square", "mix": 0.35, "detune_cents": 6, "octave": -1},

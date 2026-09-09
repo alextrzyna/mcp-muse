@@ -2,7 +2,7 @@
   "name": "wt_vocal_pad",
   "description": "Airy vocal pad from the vocal wavetable, morphed toward pwm for movement",
   "category": "pad",
-  "level": 0.6,
+  "level": 0.8,
   "wavetable": {"table": "vocal", "morph": 0.35, "env": {"attack": 1.2, "decay": 1.0, "sustain": 0.8, "release": 2.5}},
   "effects": [{"type": "chorus", "rate": 0.4, "depth": 0.4, "intensity": 0.35},
               {"type": "reverb", "room_size": 0.8, "dampening": 0.4, "wet_level": 0.5, "intensity": 0.4}]

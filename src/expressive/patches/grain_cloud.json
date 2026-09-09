@@ -2,7 +2,7 @@
   "name": "grain_cloud",
   "description": "Shimmering granular cloud: harmonic grains a fifth up, wide and slowly breathing",
   "category": "pad",
-  "level": 0.9,
+  "level": 0.7,
   "granular": {"source": "harmonics", "grain_ms": 120, "density": 15, "pitch_semitones": 7,
                "randomness": 0.7, "stereo_width": 0.9,
                "env": {"attack": 1.5, "decay": 1.0, "sustain": 0.7, "release": 3.0}},

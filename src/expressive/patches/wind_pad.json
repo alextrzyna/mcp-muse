@@ -2,7 +2,7 @@
   "name": "wind_pad",
   "description": "Breathy, wind-like pad texture with organic movement (Natural Sound Design)",
   "category": "pad",
-  "level": 0.65,
+  "level": 1.0,
   "subtractive": {
     "osc1": {"wave": "noise"},
     "filter": {"type": "band_pass", "cutoff": 600, "resonance": 0.1},

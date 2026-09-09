@@ -2,7 +2,7 @@
   "name": "warm_pad",
   "description": "Slow detuned saw pad with a filter sweep",
   "category": "pad",
-  "level": 0.7,
+  "level": 0.23,
   "lfo": {"rate": 0.3, "depth": 0.2, "wave": "sine", "target": "cutoff"},
   "subtractive": {
     "osc1": {"wave": "saw"},

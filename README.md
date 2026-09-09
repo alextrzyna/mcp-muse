@@ -246,7 +246,7 @@ The system has been thoroughly validated through a comprehensive 10-scenario tes
 
 ## 🎛️ Synth Patches (agent-defined instruments)
 
-Every synthesized sound is a **patch**: a JSON object with one or more engines, envelopes and an effects chain. Use a built-in patch by name, define your own once with `define_synth`, or pass a patch inline on a note. All notes of a patch in one call share its effects, so reverb and delay tails are real.
+Every synthesized sound is a **patch**: a JSON object with one or more engines, envelopes and an effects chain. Use a built-in patch by name, define your own once with `define_synth`, or pass a patch inline on a note. All notes of a patch in one call share its effects, so reverb and delay tails are real. After the effects chain, every patch passes through a gentle peak limiter, so a chord on any single patch, including agent-defined ones, stays under the clipper. The limiter runs per patch per render call, so playing several patches at once, or layering calls with `mode: "layer"`, still relies on the mixer's soft clipper for the sum.
 
 ### Built-in patch by name
 ```json

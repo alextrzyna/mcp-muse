@@ -9,6 +9,7 @@ use std::collections::HashMap;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expressive::render::NoteEvent;
     use serde_json::json;
 
     fn parse(v: serde_json::Value) -> Result<Patch, String> {
@@ -141,38 +142,364 @@ mod tests {
         assert!(!p.has_pitched_engine());
     }
 
+    /// The phrases `cargo run -- test-synths` plays, so the test hears what
+    /// the user hears; `demos.rs` reads the same table.
+    fn demo_phrase(category: PatchCategory) -> &'static [(u8, f32, f32)] {
+        category.demo_phrase()
+    }
+
+    fn phrase_events(p: &Patch, phrase: &[(u8, f32, f32)], velocity: f32) -> Vec<NoteEvent> {
+        phrase
+            .iter()
+            .map(|&(n, start, duration)| NoteEvent {
+                start,
+                duration,
+                frequency: if p.has_pitched_engine() {
+                    440.0 * 2f32.powf((n as f32 - 69.0) / 12.0)
+                } else {
+                    60.0
+                },
+                velocity,
+            })
+            .collect()
+    }
+
+    fn peak(buf: &[[f32; 2]]) -> f32 {
+        buf.iter()
+            .flat_map(|s| s.iter())
+            .fold(0.0f32, |m, x| m.max(x.abs()))
+    }
+
+    /// Ceiling for built-ins over their demo phrase, before `SYNTH_BUS_GAIN`.
+    /// Below `PATCH_LIMITER_CEILING` on purpose: a built-in must not lean on the limiter.
+    const HEADROOM_CEILING: f32 = 1.4;
+
+    /// True when a patch's peak is a distribution rather than a number, so
+    /// measuring it against a floor tests the draw and not the patch's level.
+    /// Two engines do this, both because they are driven by an unseeded RNG:
+    ///
+    /// - a raw noise source -- every enabled pitched engine is a subtractive
+    ///   voice whose `osc1` is `Wave::Noise` with no contributing `osc2`
+    ///   (`mix <= 0`). Filtered noise's peak swings widely render to render
+    ///   regardless of `level`.
+    /// - any enabled granular engine, whatever its `source`: the grains are
+    ///   scattered randomly across the source cycle, so the peak varies the
+    ///   same way even when the cycle itself is deterministic (`formant_texture`
+    ///   at `level` 1.0 ran 0.713 to 1.03 over 1500 renders).
+    ///
+    /// Either way the peak is not a stable loudness measure, so the patch is
+    /// floored like fx.
+    fn has_random_peak(p: &Patch) -> bool {
+        if p.granular.as_ref().is_some_and(|g| g.level > 0.0) {
+            return true;
+        }
+        let sub = p.subtractive.as_ref().filter(|s| s.level > 0.0);
+        let fm = p.fm.as_ref().filter(|f| f.level > 0.0);
+        let wavetable = p.wavetable.as_ref().filter(|w| w.level > 0.0);
+        let checks: Vec<bool> = [
+            sub.map(|s| s.osc1.wave == Wave::Noise && s.osc2.as_ref().is_none_or(|o| o.mix <= 0.0)),
+            fm.map(|_| false),
+            wavetable.map(|_| false),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        !checks.is_empty() && checks.iter().all(|&ok| ok)
+    }
+
+    /// Lower bound per category so a patch is not lost in a mix (pre-bus peak).
+    /// Fx is lower than the general 0.3: sound effects (sweeps, zaps, noise
+    /// beds) are legitimately quieter than a sustained instrument voice. A
+    /// patch whose peak is a random draw (see `has_random_peak`) is floored
+    /// like fx no matter its category: a tight floor on a number that moves
+    /// every render tests the draw, not the patch.
+    ///
+    /// Why a drum patch can fail this floor no matter its `level`: the peak
+    /// measured here is taken *after* the patch's effects chain, while
+    /// percussion normalisation (`PERCUSSION_PEAK`) happens at note-on,
+    /// *before* it. A filter in that chain that removes most of the hit's
+    /// energy therefore takes the patch below the floor and `level` cannot
+    /// put it back -- it is already capped at 1.0. That is what the 808
+    /// kick's original 120 Hz low-pass did (it left a 0.10 peak against a
+    /// 0.5 floor). The fix is to retune the filter to a corner that leaves
+    /// the hit intact, or to delete it -- not to chase the floor with `level`.
+    fn headroom_floor(p: &Patch, category: PatchCategory) -> f32 {
+        if has_random_peak(p) {
+            return 0.2;
+        }
+        match category {
+            // 0.7 is the tightest floor in the table, and it applies to the
+            // pads whose peak is a fixed number. The granular pads are not
+            // among them: `formant_texture` at `level` 1.0 -- the maximum, so
+            // there is nothing left to raise -- ran 0.713 to 1.03 over 1500
+            // renders, which would have cleared this floor by under 2% on a
+            // bad draw. That is why `has_random_peak` relaxes them to 0.2
+            // rather than this floor being lowered for every pad.
+            PatchCategory::Pad => 0.7,
+            PatchCategory::Drums => 0.5,
+            PatchCategory::Fx => 0.2,
+            _ => 0.3,
+        }
+    }
+
+    /// Every enabled envelope-driven engine's amplitude envelope. Percussion
+    /// carries its own envelope and is not one of them.
+    fn engine_envelopes(p: &Patch) -> Vec<&Adsr> {
+        let mut envs: Vec<&Adsr> = Vec::new();
+        if let Some(s) = &p.subtractive {
+            envs.push(&s.env);
+        }
+        if let Some(f) = &p.fm {
+            envs.extend(f.operators.iter().map(|op| &op.env));
+        }
+        if let Some(w) = &p.wavetable {
+            envs.push(&w.env);
+        }
+        if let Some(g) = &p.granular {
+            envs.push(&g.env);
+        }
+        envs
+    }
+
+    /// Longest attack among a patch's enabled envelope-driven engines.
+    fn max_engine_attack(p: &Patch) -> f32 {
+        engine_envelopes(p)
+            .iter()
+            .fold(0.0f32, |m, e| m.max(e.attack))
+    }
+
+    /// How long a note has to be held before every engine has finished its
+    /// onset and settled on its sustain level: the slowest attack plus that
+    /// same envelope's decay. Taking the max of `attack + decay` picks the
+    /// slowest engine and its own decay in one pass, so the held-note guard
+    /// below measures a patch at its sustained loudness rather than
+    /// somewhere partway up a 4 s pad attack.
+    fn slowest_onset_seconds(p: &Patch) -> f32 {
+        engine_envelopes(p)
+            .iter()
+            .fold(0.0f32, |m, e| m.max(e.attack + e.decay))
+    }
+
+    /// Chord used to measure a pad's floor. A pad whose engine attack is
+    /// slow (>= 2 s) hasn't reached its sustained loudness by the end of the
+    /// regular 3 s demo phrase, so measuring the floor there is measuring
+    /// mid-attack, not the patch's real level. Those pads get a 6 s chord
+    /// instead; `HEADROOM_CEILING` is still checked against the (shorter)
+    /// demo phrase, this chord, and the held note.
+    fn floor_phrase(p: &Patch, category: PatchCategory) -> Vec<(u8, f32, f32)> {
+        if category == PatchCategory::Pad && max_engine_attack(p) >= 2.0 {
+            vec![(48, 0.0, 6.0), (55, 0.0, 6.0), (60, 0.0, 6.0)]
+        } else {
+            demo_phrase(category).to_vec()
+        }
+    }
+
     #[test]
     fn every_builtin_patch_parses_validates_and_renders_cleanly() {
-        use crate::expressive::render::{NoteEvent, render_patch};
+        use crate::expressive::render::{PATCH_LIMITER_CEILING, render_patch};
+        const { assert!(HEADROOM_CEILING < PATCH_LIMITER_CEILING) };
         let lib = PatchLibrary::new();
         assert!(
-            lib.count() >= 28,
-            "expected the migrated presets, got {}",
+            lib.count() >= 44,
+            "expected the built-ins, got {}",
             lib.count()
         );
         for name in lib.names() {
             let p = lib.get(name).unwrap();
             p.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(p.category.is_some(), "{name} needs a category");
+            let category = p
+                .category
+                .unwrap_or_else(|| panic!("{name} needs a category"));
             assert!(!p.description.is_empty(), "{name} needs a description");
-            let note = NoteEvent {
-                start: 0.0,
-                duration: 0.5,
-                frequency: if p.has_pitched_engine() { 261.63 } else { 60.0 },
-                velocity: 100.0 / 127.0,
-            };
-            let buf = render_patch(p, &[note], 44100.0, 120);
-            let peak = buf
-                .iter()
-                .flat_map(|s| s.iter())
-                .fold(0.0f32, |m, x| m.max(x.abs()));
-            assert!(peak.is_finite(), "{name} produced NaN/inf");
-            // SYNTH_BUS_GAIN (0.5) is applied later; stay under the 0.8 clipper knee after it.
-            assert!(
-                peak * 0.5 <= 0.8,
-                "{name} peaks at {peak}, too hot for the bus"
+
+            let phrase = render_patch(
+                p,
+                &phrase_events(p, demo_phrase(category), 100.0 / 127.0),
+                44100.0,
+                120,
             );
-            assert!(peak > 0.02, "{name} is nearly silent (peak {peak})");
+            let phrase_peak = peak(&phrase);
+            assert!(phrase_peak.is_finite(), "{name} produced NaN/inf");
+            assert!(
+                phrase_peak <= HEADROOM_CEILING,
+                "{name} peaks at {phrase_peak} over its demo phrase; lower its level"
+            );
+            let floor_notes = floor_phrase(p, category);
+            let uses_demo_phrase = floor_notes.as_slice() == demo_phrase(category);
+            // Name the stimulus the floor number actually came from: most
+            // patches are measured on the demo phrase, slow pads on the chord.
+            let floor_stimulus = if uses_demo_phrase {
+                "its demo phrase"
+            } else {
+                "its 6 s floor chord"
+            };
+            let floor_peak = if uses_demo_phrase {
+                phrase_peak
+            } else {
+                let floor_buf = render_patch(
+                    p,
+                    &phrase_events(p, &floor_notes, 100.0 / 127.0),
+                    44100.0,
+                    120,
+                );
+                let fp = peak(&floor_buf);
+                assert!(
+                    fp <= HEADROOM_CEILING,
+                    "{name} peaks at {fp} over {floor_stimulus}; lower its level"
+                );
+                fp
+            };
+            assert!(
+                floor_peak >= headroom_floor(p, category),
+                "{name} peaks at only {floor_peak} over {floor_stimulus}; raise its level"
+            );
+
+            // A long note at full velocity catches slow pads measured
+            // mid-attack by the phrase -- but only if it is held long enough
+            // for the slowest engine to get through its own attack and decay,
+            // which for `dream_pad` (4 s attack) a flat 3 s note is not.
+            let held_seconds = 3.0f32.max(slowest_onset_seconds(p));
+            let held = render_patch(
+                p,
+                &phrase_events(p, &[(60, 0.0, held_seconds)], 1.0),
+                44100.0,
+                120,
+            );
+            let held_peak = peak(&held);
+            assert!(
+                held_peak <= HEADROOM_CEILING,
+                "{name} peaks at {held_peak} on a {held_seconds} s held full-velocity note; lower its level"
+            );
+        }
+    }
+
+    /// The kick's and the crash's filter cutoffs were retuned during the level
+    /// pass so percussion normalisation reaches the bus; nothing else measures
+    /// the tone those filters leave behind, so a later cutoff edit that still
+    /// clears the headroom bands could quietly turn either patch into a
+    /// different sound. The bounds below come from measurement, not theory.
+    #[test]
+    fn drum_patches_keep_their_character_through_their_filters() {
+        use crate::expressive::render::render_patch;
+        use crate::expressive::test_util::goertzel_power;
+
+        const SAMPLE_RATE: f32 = 44100.0;
+        let lib = PatchLibrary::new();
+        // One hit, exactly as the demo phrase plays these unpitched patches.
+        let hit = |p: &Patch| -> Vec<f32> {
+            let buf = render_patch(
+                p,
+                &phrase_events(p, &[(36, 0.0, 0.5)], 100.0 / 127.0),
+                SAMPLE_RATE,
+                120,
+            );
+            buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect()
+        };
+
+        // The kick keeps its body: the 800 Hz click its low-pass exists to tame
+        // must not swamp the 60 Hz fundamental. The ratio is below 1 because the
+        // body sweeps down from 240 Hz and leaves only part of its power in the
+        // 60 Hz bin; what this pins is the click's share, which grows as the
+        // low-pass opens. Measured at resonance 0.7: 0.97 at 450 Hz, 0.67 at
+        // 500 Hz, 0.37 at the shipped 600 Hz, 0.29 at 650 Hz, 0.12 at 1 kHz,
+        // and 0.09 with no filter at all. The kick path has no randomness, so
+        // one render is the measurement.
+        const KICK_BODY_OVER_CLICK: f32 = 0.30;
+        let kick = lib.get("tr_808_kick").unwrap();
+        let mono = hit(kick);
+        let body = goertzel_power(&mono, 60.0, SAMPLE_RATE);
+        let click = goertzel_power(&mono, 800.0, SAMPLE_RATE);
+        assert!(
+            body >= KICK_BODY_OVER_CLICK * click,
+            "tr_808_kick lost its body: 60 Hz power {body:e} is only {:.3}x the 800 Hz click {click:e}; its low-pass is too far open",
+            body / click
+        );
+
+        // The crash stays bright: every partial of the cymbal sits at or above
+        // 2.55 kHz, so its high-pass corner has to leave those alone while
+        // still clearing the noise bed underneath them. The hiss is unseeded,
+        // so the 200 Hz bin swings hard render to render; over 300 renders of
+        // the shipped 1.5 kHz corner the ratio bottomed out at 645, and the
+        // bound sits well under that tail. For scale: the no-op 200 Hz corner
+        // this replaced measured 37, and a filter that really did dull the
+        // crash lands below 1.
+        const CRASH_BRIGHT_OVER_LOW: f32 = 100.0;
+        let crash = lib.get("crash_cymbal").unwrap();
+        for _ in 0..20 {
+            let mono = hit(crash);
+            let bright: f32 = [2500.0, 3500.0, 5000.0]
+                .iter()
+                .map(|&f| goertzel_power(&mono, f, SAMPLE_RATE))
+                .sum();
+            let low = goertzel_power(&mono, 200.0, SAMPLE_RATE);
+            assert!(
+                bright >= CRASH_BRIGHT_OVER_LOW * low,
+                "crash_cymbal lost its sparkle: 2.5-5 kHz power {bright:e} is only {:.1}x the 200 Hz power {low:e}",
+                bright / low
+            );
+        }
+    }
+
+    /// Pins the exact set: the relaxed floor is an escape hatch, so a patch
+    /// must not drift into it by accident. `formant_texture` and `grain_cloud`
+    /// are here for their grain scatter, `noise_texture` for both reasons, and
+    /// `wind_pad` for its noise oscillator.
+    #[test]
+    fn has_random_peak_matches_only_the_noise_and_granular_engines() {
+        let lib = PatchLibrary::new();
+        let matches: Vec<&str> = lib
+            .names()
+            .into_iter()
+            .filter(|name| has_random_peak(lib.get(name).unwrap()))
+            .collect();
+        assert_eq!(
+            matches,
+            vec![
+                "formant_texture",
+                "grain_cloud",
+                "noise_texture",
+                "wind_pad"
+            ],
+            "{matches:?}"
+        );
+    }
+
+    /// `cargo test print_builtin_headroom_survey -- --ignored --nocapture`
+    /// prints pre-bus peak and RMS per patch; use it to set levels.
+    #[test]
+    #[ignore]
+    fn print_builtin_headroom_survey() {
+        use crate::expressive::render::render_patch;
+        use crate::expressive::test_util::{db, rms};
+        let lib = PatchLibrary::new();
+        for (category, patches) in lib.catalog() {
+            println!("## {}", category.as_str());
+            for p in patches {
+                let buf = render_patch(
+                    p,
+                    &phrase_events(p, demo_phrase(category), 100.0 / 127.0),
+                    44100.0,
+                    120,
+                );
+                let mono: Vec<f32> = buf.iter().map(|s| 0.5 * (s[0] + s[1])).collect();
+                // The same held note the ceiling guard uses, so the survey
+                // rows are the numbers that test asserts on.
+                let held_seconds = 3.0f32.max(slowest_onset_seconds(p));
+                let held = render_patch(
+                    p,
+                    &phrase_events(p, &[(60, 0.0, held_seconds)], 1.0),
+                    44100.0,
+                    120,
+                );
+                println!(
+                    "{:<22} level {:<5} phrase peak {:.2} rms {:>6.1} dB   held peak {:.2}",
+                    p.name,
+                    p.level,
+                    peak(&buf),
+                    db(rms(&mono)),
+                    peak(&held)
+                );
+            }
         }
     }
 
@@ -469,6 +796,24 @@ impl PatchCategory {
             PatchCategory::Keys => "keys",
             PatchCategory::Drums => "drums",
             PatchCategory::Fx => "fx",
+        }
+    }
+
+    /// A short phrase that shows this category off: `(midi_note, start_seconds,
+    /// duration_seconds)`. `cargo run -- test-synths` plays it and the headroom
+    /// test measures it, so the levels the test asserts are the levels a
+    /// listener hears. One definition, so the two cannot drift apart.
+    pub fn demo_phrase(&self) -> &'static [(u8, f32, f32)] {
+        match self {
+            // Unpitched one-shots: two hits, so a tail overlapping the next
+            // hit shows up in the peak.
+            PatchCategory::Drums | PatchCategory::Fx => &[(36, 0.0, 0.5), (36, 0.5, 0.5)],
+            // Pads are played as chords, which is where they stack up.
+            PatchCategory::Pad => &[(48, 0.0, 3.0), (55, 0.0, 3.0), (60, 0.0, 3.0)],
+            PatchCategory::Keys => &[(60, 0.0, 0.6), (64, 0.7, 0.6), (67, 1.4, 1.2)],
+            PatchCategory::Bass | PatchCategory::Lead => {
+                &[(36, 0.0, 0.4), (43, 0.5, 0.4), (48, 1.0, 0.8)]
+            }
         }
     }
 }
