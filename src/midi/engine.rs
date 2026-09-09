@@ -4,7 +4,9 @@
 //! to its sample clock, and the pre-rendered R2D2/synthesis buffers scheduled
 //! on a shared mono bus. Tool calls send `EngineCommand`s over a channel; the
 //! engine drains them at chunk boundaries and applies events at their exact
-//! sample.
+//! sample. Each playback's MIDI channels are remapped onto physical channels
+//! no other active playback owns, so layered calls keep their own programs
+//! and controllers (GitHub issue #98).
 
 use crate::expressive::{DEFAULT_TEMPO, EffectsChain};
 use crate::midi::EffectConfig;
@@ -40,6 +42,19 @@ const OXISYNTH_GAIN: f32 = 1.0;
 /// Gain on the pre-rendered synthesis bus so preset notes (amplitude ~0.8)
 /// sit at the same level as MIDI instruments. Applied by the translator.
 pub const SYNTH_BUS_GAIN: f32 = 0.5;
+/// OxiSynth's percussion channel. It is never remapped: the kit is fixed, so
+/// two playbacks sharing it is harmless.
+const DRUM_CHANNEL: u8 = 9;
+const MIDI_CHANNELS: usize = 16;
+
+/// Which playback holds a physical MIDI channel, and the engine frame of its
+/// last scheduled event on it. Once that frame has passed the channel may be
+/// handed to another playback (GitHub issue #98).
+#[derive(Debug, Clone, Copy)]
+struct ChannelOwner {
+    playback: u64,
+    last_event: u64,
+}
 
 /// How a play call relates to whatever is already sounding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -82,6 +97,26 @@ pub enum EventKind {
         channel: u8,
         program: u8,
     },
+}
+
+impl EventKind {
+    fn channel(&self) -> u8 {
+        match self {
+            EventKind::NoteOn { channel, .. }
+            | EventKind::NoteOff { channel, .. }
+            | EventKind::ControlChange { channel, .. }
+            | EventKind::ProgramChange { channel, .. } => *channel,
+        }
+    }
+
+    fn set_channel(&mut self, physical: u8) {
+        match self {
+            EventKind::NoteOn { channel, .. }
+            | EventKind::NoteOff { channel, .. }
+            | EventKind::ControlChange { channel, .. }
+            | EventKind::ProgramChange { channel, .. } => *channel = physical,
+        }
+    }
 }
 
 /// Everything one play call schedules. Offsets are frames after the
@@ -263,6 +298,10 @@ pub struct MidiEngine {
     /// Declick tail rendered from the state before the last replace/stop.
     fade_tail: Vec<(f32, f32)>,
     fade_pos: usize,
+    /// Physical channel ownership; `None` is pristine since the last reset.
+    channels: [Option<ChannelOwner>; MIDI_CHANNELS],
+    /// Id handed to the next scheduled playback.
+    next_playback: u64,
 }
 
 impl MidiEngine {
@@ -281,6 +320,8 @@ impl MidiEngine {
             commands: receiver,
             fade_tail: Vec::new(),
             fade_pos: 0,
+            channels: [None; MIDI_CHANNELS],
+            next_playback: 0,
         };
         (engine, EngineHandle { clock, sender })
     }
@@ -315,7 +356,11 @@ impl MidiEngine {
             }
         }
         let start = self.clock + LEAD_FRAMES;
-        for (offset, kind) in play.events {
+        let playback = self.next_playback;
+        self.next_playback += 1;
+        let mut events = play.events;
+        self.allocate_channels(playback, start, &mut events);
+        for (offset, kind) in events {
             self.push_event(start + offset, kind);
         }
         for (offset, samples) in play.buffers {
@@ -343,6 +388,118 @@ impl MidiEngine {
     fn set_bus_effects(&mut self, tempo: u32, effects: &[EffectConfig]) {
         self.bus_left = EffectsChain::with_tempo(SAMPLE_RATE as f32, tempo, effects);
         self.bus_right = EffectsChain::with_tempo(SAMPLE_RATE as f32, tempo, effects);
+    }
+
+    /// Move a playback's logical channels onto physical channels no active
+    /// playback owns, so layered calls keep their own programs and
+    /// controllers. Events are rewritten in place; a channel taken over from
+    /// a finished playback gets its controllers reset first (queued at
+    /// `start`, ahead of the call's own events). Channel 9 stays channel 9.
+    fn allocate_channels(&mut self, playback: u64, start: u64, events: &mut [(u64, EventKind)]) {
+        let mut last_offset: [Option<u64>; MIDI_CHANNELS] = [None; MIDI_CHANNELS];
+        for (offset, kind) in events.iter() {
+            let slot = &mut last_offset[kind.channel() as usize];
+            *slot = Some(slot.map_or(*offset, |l| l.max(*offset)));
+        }
+        let mut map: [u8; MIDI_CHANNELS] = std::array::from_fn(|c| c as u8);
+        for logical in 0..MIDI_CHANNELS as u8 {
+            let Some(offset) = last_offset[logical as usize] else {
+                continue;
+            };
+            if logical == DRUM_CHANNEL {
+                continue;
+            }
+            let physical = self.claim_channel(logical, start);
+            map[logical as usize] = physical;
+            let last_event = start + offset;
+            let slot = &mut self.channels[physical as usize];
+            match *slot {
+                // Pristine since the last reset: nothing to undo.
+                None => {
+                    *slot = Some(ChannelOwner {
+                        playback,
+                        last_event,
+                    })
+                }
+                // A finished playback left its controllers behind.
+                Some(previous) if previous.last_event < start => {
+                    self.reset_controllers(physical, start);
+                    self.channels[physical as usize] = Some(ChannelOwner {
+                        playback,
+                        last_event,
+                    });
+                }
+                // Sharing fallback: the channel frees when the later of the two ends.
+                Some(previous) => {
+                    tracing::info!(
+                        "All melodic MIDI channels are busy; playback {} shares channel {} \
+                         with playback {} (its program and controllers apply to both)",
+                        playback,
+                        physical,
+                        previous.playback
+                    );
+                    self.channels[physical as usize] = Some(ChannelOwner {
+                        playback,
+                        last_event: last_event.max(previous.last_event),
+                    });
+                }
+            }
+        }
+        for (logical, physical) in map.iter().enumerate() {
+            if *physical != logical as u8 {
+                tracing::debug!(
+                    "Playback {}: MIDI channel {} plays on physical channel {}",
+                    playback,
+                    logical,
+                    physical
+                );
+            }
+        }
+        for (_, kind) in events.iter_mut() {
+            let logical = kind.channel() as usize;
+            if map[logical] != logical as u8 {
+                kind.set_channel(map[logical]);
+            }
+        }
+    }
+
+    /// The physical channel for `logical`: itself when free, else the lowest
+    /// free melodic channel, else (all fifteen busy) the one that frees soonest.
+    fn claim_channel(&self, logical: u8, start: u64) -> u8 {
+        let is_free = |c: u8| self.channels[c as usize].is_none_or(|o| o.last_event < start);
+        if is_free(logical) {
+            return logical;
+        }
+        let melodic = || (0..MIDI_CHANNELS as u8).filter(|c| *c != DRUM_CHANNEL);
+        if let Some(free) = melodic().find(|c| is_free(*c)) {
+            return free;
+        }
+        melodic()
+            .min_by_key(|c| self.channels[*c as usize].map_or(0, |o| o.last_event))
+            .expect("fifteen melodic channels")
+    }
+
+    /// Return a reassigned channel to the state a SystemReset leaves: every
+    /// controller and the pitch bend cleared, volume 100, pan centred, no
+    /// reverb or chorus send. Sounding voices keep their preset.
+    fn reset_controllers(&mut self, channel: u8, at: u64) {
+        const RESET_ALL_CONTROLLERS: u8 = 121;
+        for (controller, value) in [
+            (RESET_ALL_CONTROLLERS, 0),
+            (7, 100),
+            (10, 64),
+            (91, 0),
+            (93, 0),
+        ] {
+            self.push_event(
+                at,
+                EventKind::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                },
+            );
+        }
     }
 
     /// Fade the current output over `FADE_FRAMES`, then reset everything:
@@ -380,6 +537,7 @@ impl MidiEngine {
         }
         self.events.clear();
         self.buffers.clear();
+        self.channels = [None; MIDI_CHANNELS];
         self.set_bus_effects(DEFAULT_TEMPO, &[]);
     }
 
@@ -953,6 +1111,177 @@ pub(crate) mod tests {
             piano.name(),
             "channel 9 must draw from the percussion bank"
         );
+    }
+
+    /// Program change, note-on and note-off for one note on `channel`.
+    fn voice(channel: u8, program: u8, key: u8, at: u64, frames: u64) -> Vec<(u64, EventKind)> {
+        vec![
+            (at, EventKind::ProgramChange { channel, program }),
+            (
+                at,
+                EventKind::NoteOn {
+                    channel,
+                    key,
+                    velocity: 100,
+                },
+            ),
+            (at + frames, EventKind::NoteOff { channel, key }),
+        ]
+    }
+
+    /// Note-ons still queued, as (frame, channel, key).
+    fn queued_note_ons(engine: &MidiEngine) -> Vec<(u64, u8, u8)> {
+        let mut ons: Vec<(u64, u8, u8)> = engine
+            .events
+            .iter()
+            .filter_map(|e| match e.kind {
+                EventKind::NoteOn { channel, key, .. } => Some((e.at, channel, key)),
+                _ => None,
+            })
+            .collect();
+        ons.sort();
+        ons
+    }
+
+    fn queued_program_changes(engine: &MidiEngine) -> Vec<(u8, u8)> {
+        engine
+            .events
+            .iter()
+            .filter_map(|e| match e.kind {
+                EventKind::ProgramChange { channel, program } => Some((channel, program)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_layered_call_on_a_busy_logical_channel_moves_to_a_free_physical_channel() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        // A: two notes on channel 2, the second a second in.
+        let mut a = voice(2, 80, 60, 0, 44_100);
+        a.extend(voice(2, 80, 62, 44_100, 44_100));
+        engine.apply(play_events(a, PlayMode::Replace));
+        render_all(&mut engine, 3 * CHUNK_FRAMES); // A's first note has started
+        // B lands on logical channel 2 while A still owns it.
+        engine.apply(play_events(voice(2, 60, 64, 0, 22_050), PlayMode::Layer));
+
+        let ons = queued_note_ons(&engine);
+        let a_later = ons
+            .iter()
+            .find(|(_, _, key)| *key == 62)
+            .expect("A's second note");
+        let b = ons.iter().find(|(_, _, key)| *key == 64).expect("B's note");
+        assert_eq!(a_later.1, 2, "A keeps its channel");
+        assert_ne!(b.1, 2, "B must not share A's channel");
+        assert_ne!(b.1, 9, "B must not land on the drum channel");
+        assert!(
+            queued_program_changes(&engine).contains(&(b.1, 60)),
+            "B's program change follows it to the new channel"
+        );
+    }
+
+    #[test]
+    fn a_replace_call_keeps_its_logical_channels() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play_events(voice(2, 80, 60, 0, 44_100), PlayMode::Replace));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        engine.apply(play_events(voice(2, 60, 64, 0, 22_050), PlayMode::Replace));
+        assert_eq!(
+            queued_note_ons(&engine)[0].1,
+            2,
+            "replace starts from a clear map"
+        );
+    }
+
+    #[test]
+    fn channel_9_is_never_remapped() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play_events(voice(9, 0, 36, 0, 44_100), PlayMode::Replace));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        engine.apply(play_events(voice(9, 0, 38, 0, 44_100), PlayMode::Layer));
+        assert_eq!(queued_note_ons(&engine)[0].1, 9);
+    }
+
+    #[test]
+    fn a_layered_call_after_the_owner_finishes_reuses_the_channel() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(play_events(voice(2, 80, 60, 0, 1000), PlayMode::Replace));
+        render_all(&mut engine, 4 * CHUNK_FRAMES); // past A's note-off
+        engine.apply(play_events(voice(2, 60, 64, 0, 1000), PlayMode::Layer));
+        assert_eq!(
+            queued_note_ons(&engine)[0].1,
+            2,
+            "A's channel is free again"
+        );
+    }
+
+    #[test]
+    fn sharing_is_the_fallback_when_every_melodic_channel_is_busy() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        let mut all: Vec<(u64, EventKind)> = Vec::new();
+        for channel in (0..16u8).filter(|c| *c != 9) {
+            all.extend(voice(channel, 1, 60, 0, 88_200));
+        }
+        engine.apply(play_events(all, PlayMode::Replace));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        engine.apply(play_events(voice(0, 60, 64, 0, 1000), PlayMode::Layer));
+        let ons = queued_note_ons(&engine);
+        assert_eq!(ons.len(), 1, "the call is still scheduled");
+        assert!(ons[0].1 < 16 && ons[0].1 != 9, "on a real melodic channel");
+    }
+
+    #[test]
+    fn layered_programs_survive_on_the_synth() {
+        let Some((mut engine, _handle)) = engine_with_soundfont() else {
+            return;
+        };
+        engine.apply(play_events(flute(0, 2.0, None), PlayMode::Replace));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        engine.apply(play_events(voice(0, 56, 60, 0, 4410), PlayMode::Layer));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        let synth = engine.synth().unwrap();
+        assert_eq!(synth.program(0).unwrap().2, 73, "the flute keeps channel 0");
+        assert!(
+            (0..16u8)
+                .filter(|c| *c != 9)
+                .any(|c| synth.program(c).unwrap().2 == 56),
+            "the trumpet plays on its own channel"
+        );
+    }
+
+    #[test]
+    fn a_reassigned_channel_starts_from_default_controllers() {
+        let Some((mut engine, _handle)) = engine_with_soundfont() else {
+            return;
+        };
+        // A: flute panned hard left, sustain on, over in 0.1 s.
+        let mut a = flute(0, 0.1, Some(0));
+        a.insert(
+            1,
+            (
+                0,
+                EventKind::ControlChange {
+                    channel: 0,
+                    controller: 64,
+                    value: 127,
+                },
+            ),
+        );
+        engine.apply(play_events(a, PlayMode::Replace));
+        render_all(&mut engine, 8 * CHUNK_FRAMES);
+        assert_eq!(
+            engine.synth().unwrap().cc(0, 10).unwrap(),
+            0,
+            "A panned left"
+        );
+        // B takes channel 0 over without saying anything about pan or sustain.
+        engine.apply(play_events(voice(0, 56, 60, 0, 4410), PlayMode::Layer));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        let synth = engine.synth().unwrap();
+        assert_eq!(synth.program(0).unwrap().2, 56);
+        assert_eq!(synth.cc(0, 10).unwrap(), 64, "pan back to centre");
+        assert_eq!(synth.cc(0, 64).unwrap(), 0, "sustain released");
+        assert_eq!(synth.cc(0, 7).unwrap(), 100, "volume back to default");
     }
 
     #[test]

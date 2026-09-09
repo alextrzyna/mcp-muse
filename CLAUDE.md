@@ -65,6 +65,7 @@ per side). `MidiPlayer::play(sequence, mode, &session_patches)` translates and s
 3. MIDI notes become time-ordered events: per call, the first note on a channel sends a program change (its instrument, or 0), controllers only when specified. Channel 9 is OxiSynth's drum channel; no bank select is needed.
 4. The engine drains commands per 1024-frame chunk and applies events at their exact frame (`LEAD_FRAMES` = 2048 after the command). It sums the buses, soft-clips, and emits stereo.
 5. `mode: replace` (default) fades 6 ms, sends SystemReset, clears the queue and installs the call's bus chain; `layer` mixes on top. `stop_playback` is the same reset with nothing scheduled.
+6. When a command is scheduled, the engine remaps each of its melodic MIDI channels onto a physical channel no active playback owns (`allocate_channels`, issue #98): the logical channel itself when free, else the lowest free one, else it shares the channel that frees soonest and logs at info. A channel taken over from a finished playback first gets CC 121 plus volume, pan and reverb/chorus sends reset. Channel 9 is never remapped; replace and stop clear all ownership.
 
 Known limitation: OxiSynth renders all 16 MIDI channels into one bus, so
 per-channel effects are not yet possible (pan, volume, reverb/chorus CCs do
