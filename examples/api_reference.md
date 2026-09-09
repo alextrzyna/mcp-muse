@@ -154,7 +154,7 @@ the patch shares):
 }
 ```
 
-Notes then use `{"synth": "gritty_bass", "note": 36, "duration": 0.5}`.
+Notes then use `{"synth": "minimoog_bass", "note": 36, "duration": 0.5}`.
 Defining the same name again replaces the stored patch. An unknown field or
 an out-of-range value is `-32602` and names the field.
 
@@ -212,7 +212,7 @@ write failure are normal results with `"isError": true`.
 
 ```json
 {"patterns": [{"pattern_name": "drums", "start_bar": 1, "repeat_count": 4}],
- "notes": [{"synth": "gritty_bass", "note": 36, "musical_time": "1.1.0", "musical_duration": "1/4"}],
+ "notes": [{"synth": "minimoog_bass", "note": 36, "musical_time": {"bar": 1, "beat": 1, "tick": 0}, "musical_duration": "quarter"}],
  "path": "/Users/me/Music/demo", "name": "take1", "split": "stems", "bit_depth": 24}
 ```
 
