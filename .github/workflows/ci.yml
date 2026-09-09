@@ -22,9 +22,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
+        run: .github/scripts/apt-install.sh libasound2-dev pkg-config
 
       - name: Cache cargo registry
         uses: actions/cache@v6
@@ -68,9 +66,7 @@ jobs:
           components: clippy
 
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
+        run: .github/scripts/apt-install.sh libasound2-dev pkg-config
 
       - name: Cache cargo registry
         uses: actions/cache@v6
@@ -108,9 +104,7 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
+        run: .github/scripts/apt-install.sh libasound2-dev pkg-config
 
       - name: Run tests
         run: cargo test --verbose --all-features
@@ -141,9 +135,7 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
+        run: .github/scripts/apt-install.sh libasound2-dev pkg-config
 
       - name: Build
         run: cargo build --release --verbose
@@ -173,9 +165,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev pkg-config
+        run: .github/scripts/apt-install.sh libasound2-dev pkg-config
 
       - name: Install cargo-tarpaulin
         run: cargo install cargo-tarpaulin
