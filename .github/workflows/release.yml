@@ -44,9 +44,21 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
+      # Steps in this workflow are inlined rather than calling .github/scripts:
+      # the job checks out the release tag, which may predate scripts on the
+      # ref the workflow itself runs from (e.g. a re-release dispatched from main).
       - name: Set crate version from the tag
         shell: bash
-        run: .github/scripts/set-version-from-tag.sh "$RELEASE_TAG"
+        run: |
+          version="${RELEASE_TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$ ]]; then
+            echo "Tag '$RELEASE_TAG' is not a CalVer release tag (vYYYY.M.PATCH)" >&2
+            exit 1
+          fi
+          sed "s/^version = \".*\"/version = \"$version\"/" Cargo.toml > Cargo.toml.new
+          mv Cargo.toml.new Cargo.toml
+          grep -q "^version = \"$version\"" Cargo.toml
+          echo "Cargo.toml version set to $version"
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -66,7 +78,12 @@ jobs:
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
-        run: .github/scripts/apt-install.sh libasound2-dev
+        run: |
+          # The runner's Google Chrome apt source intermittently fails its hash
+          # check and makes apt-get update exit 100; nothing here needs it.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google-chrome*.sources
+          sudo apt-get update -o Acquire::Retries=3 || echo "::warning::apt-get update reported errors; installing with the indexes that were fetched"
+          sudo apt-get install -y libasound2-dev
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -150,7 +167,15 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
 
       - name: Set crate version from the tag
-        run: .github/scripts/set-version-from-tag.sh "$RELEASE_TAG"
+        run: |
+          version="${RELEASE_TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]{4}\.[0-9]{1,2}\.[0-9]+$ ]]; then
+            echo "Tag '$RELEASE_TAG' is not a CalVer release tag (vYYYY.M.PATCH)" >&2
+            exit 1
+          fi
+          sed -i "s/^version = \".*\"/version = \"$version\"/" Cargo.toml
+          grep -q "^version = \"$version\"" Cargo.toml
+          echo "Cargo.toml version set to $version"
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -167,8 +192,12 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install system dependencies
-        run: .github/scripts/apt-install.sh libasound2-dev
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google-chrome*.sources
+          sudo apt-get update -o Acquire::Retries=3 || echo "::warning::apt-get update reported errors; installing with the indexes that were fetched"
+          sudo apt-get install -y libasound2-dev
 
+      # Not continue-on-error: a failed publish must show as a failed job.
+      # The GitHub release is created by a separate job and is unaffected.
       - name: Publish to crates.io
         run: cargo publish --allow-dirty --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        continue-on-error: true 

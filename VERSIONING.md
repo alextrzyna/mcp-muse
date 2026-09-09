@@ -41,7 +41,7 @@ Releases are **fully automated** via GitHub Actions:
    - Creates and pushes the git tag
    - Dispatches the release workflow for that tag (a tag pushed by the workflow's own token never fires the release workflow's tag trigger, so it is started explicitly)
 3. **Release workflow** (also runnable by hand from the Actions tab, or with `gh workflow run release.yml --ref vYYYY.M.PATCH -f tag=vYYYY.M.PATCH`):
-   - Stamps the tag's version into `Cargo.toml` before building (`.github/scripts/set-version-from-tag.sh`), because the protected `main` branch does not accept the workflow's version bump commit
+   - Stamps the tag's version into `Cargo.toml` before building, because the protected `main` branch does not accept the workflow's version bump commit (the release jobs check out the tag, so this logic lives inline in the workflow rather than in `.github/scripts`)
    - Builds binaries for all platforms (Linux, macOS, Windows)
    - Creates GitHub Release with binaries attached
    - Publishes to [crates.io](https://crates.io/crates/mcp-muse)
