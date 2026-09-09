@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::expressive::{Patch, PatchLibrary};
+use crate::expressive::{
+    FmAlgorithm, GrainSource, LfoTarget, LfoWave, Patch, PatchLibrary, PercussionKind, TableName,
+};
 use crate::midi::{
-    ExtendedSequence, MidiPlayer, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
+    ExtendedSequence, MidiPlayer, PitchMode, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
+    validate_tempo,
 };
 use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
@@ -171,12 +174,18 @@ fn handle_initialize(_params: Option<Value>, id: Option<Value>) -> JsonRpcRespon
     )
 }
 
+/// The accepted `pitch_mode` values, taken from the enum itself so the schema
+/// and the `list_sounds` catalog cannot drift from what serde will parse.
+fn pitch_modes() -> Vec<&'static str> {
+    PitchMode::ALL.iter().map(PitchMode::as_str).collect()
+}
+
 /// JSON schema for the `effects` chain, shared by `note_schema` and
 /// `patch_schema` so the two cannot drift apart.
 fn effects_schema() -> Value {
     json!({
         "type": "array",
-        "description": "🎛️ Effects chain applied in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]",
+        "description": "🎛️ Effects chain applied in order. Each entry is a flat object: {\"type\": \"reverb\"|\"delay\"|\"chorus\"|\"filter\"|\"compressor\"|\"distortion\", ...parameters, \"intensity\": 0-1}. Example: [{\"type\": \"reverb\", \"room_size\": 0.7, \"wet_level\": 0.4, \"intensity\": 0.6}, {\"type\": \"delay\", \"delay_time\": 0.25, \"feedback\": 0.3, \"intensity\": 0.5}]. Time Fracture (a pitch-shifting, tempo-wandering delay): [{\"type\": \"delay\", \"random_beats\": [0.5, 1.0], \"random_rate\": 0.5, \"pitch_intervals\": [7, 12], \"pitch_mode\": \"up_down\", \"feedback\": 0.5, \"intensity\": 0.6}]. The parameters below are listed together for readability, but only the ones belonging to the entry's own \"type\" are accepted: any other key is rejected with a -32602 naming it.",
         "items": {
             "type": "object",
             "properties": {
@@ -187,9 +196,17 @@ fn effects_schema() -> Value {
                 "dampening": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb: high-frequency damping 0=bright, 1=dark (default 0.3)"},
                 "wet_level": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "reverb/delay: wet amount (default 0.3)"},
                 "pre_delay": {"type": "number", "minimum": 0.0, "maximum": 0.2, "description": "reverb: seconds before the reverb starts (default 0.02)"},
-                "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds; 0.125=8th at 120 BPM, 0.25=quarter (default 0.25)"},
+                "delay_time": {"type": "number", "minimum": 0.01, "maximum": 2.0, "description": "delay: seconds, or beats of the sequence tempo when sync_tempo is true; 0.25 = quarter note at 120 BPM (default 0.25). The resulting delay is capped at 8 s"},
                 "feedback": {"type": "number", "minimum": 0.0, "maximum": 0.95, "description": "delay/chorus: repeat amount (delay default 0.4, chorus default 0.2)"},
-                "sync_tempo": {"type": "boolean", "description": "delay: reserved"},
+                "sync_tempo": {"type": "boolean", "description": "delay: when true, delay_time is in beats of the sequence tempo"},
+                "random_beats": {"type": "array", "items": {"type": "number", "minimum": 0, "maximum": 4}, "minItems": 2, "maxItems": 2,
+                    "description": "delay (Time Fracture): [min, max] delay in beats of the sequence tempo; replaces delay_time. Equal values = a fixed beat-synced delay"},
+                "random_rate": {"type": "number", "minimum": 0, "maximum": 10, "default": 0,
+                    "description": "delay (Time Fracture): how fast the delay time wanders between min and max, in Hz (0 = fixed at min)"},
+                "pitch_intervals": {"type": "array", "items": {"type": "number", "minimum": -12, "maximum": 12}, "maxItems": 12,
+                    "description": "delay (Time Fracture): semitone shifts for successive repeats, e.g. [7, 12] for a fifth-and-octave shimmer; rounded to whole semitones"},
+                "pitch_mode": {"type": "string", "enum": pitch_modes(), "default": "random",
+                    "description": "delay (Time Fracture): order the pitch_intervals are visited in"},
                 "rate": {"type": "number", "minimum": 0.1, "maximum": 8.0, "description": "chorus: LFO Hz (default 1.5)"},
                 "depth": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: modulation depth (default 0.3)"},
                 "stereo_width": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "chorus: reserved"},
@@ -215,7 +232,7 @@ fn patch_schema() -> Value {
     let env = |what: &str| {
         json!({
             "type": "object",
-            "description": format!("{what} envelope in seconds (0.001-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
+            "description": format!("{what} envelope in seconds (0-10) and sustain 0-1. Defaults: attack 0.01, decay 0.1, sustain 0.8, release 0.3"),
             "properties": {
                 "attack": {"type": "number", "minimum": 0, "maximum": 10},
                 "decay": {"type": "number", "minimum": 0, "maximum": 10},
@@ -228,7 +245,7 @@ fn patch_schema() -> Value {
     let wave = json!({"type": "string", "enum": ["sine", "saw", "square", "triangle", "noise"], "default": "saw"});
     json!({
         "type": "object",
-        "description": "A synth patch. Include at least one engine (subtractive or percussion); several may layer.",
+        "description": "A synth patch. Include at least one engine (subtractive, fm, wavetable, granular or percussion); several may layer. An optional lfo modulates one target.",
         "properties": {
             "name": {"type": "string", "description": "Patch name; notes reference it with \"synth\": \"<name>\""},
             "description": {"type": "string"},
@@ -254,6 +271,55 @@ fn patch_schema() -> Value {
                             "env_amount": {"type": "number", "minimum": -1, "maximum": 1, "default": 0, "description": "Filter envelope depth; 1 sweeps up four octaves, -1 down"},
                             "env": env("Filter")},
                         "additionalProperties": false},
+                    "env": env("Amplitude")
+                },
+                "additionalProperties": false
+            },
+            "fm": {
+                "type": "object",
+                "description": "Four-operator FM. Operator 1 (first entry) is always a carrier; a carrier's level is its volume, a modulator's level is its modulation depth (1 = about 4 radians). Bells: high non-integer ratios with fast-decaying modulators; basses: ratio 1-2 modulators with a short decay.",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "algorithm": {"type": "string", "enum": ["stack", "pairs", "fan_in", "parallel"], "default": "stack",
+                        "description": "stack: 4->3->2->1, one carrier. pairs: 3->1 and 4->2, carriers 1 and 2. fan_in: 2, 3, 4 all modulate 1. parallel: all carriers (additive)"},
+                    "feedback": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "Self-modulation of the last operator in radians (0 to 1); adds grit. A modulator's level 1 is 4 radians, so feedback is a gentler effect"},
+                    "operators": {
+                        "type": "array", "minItems": 1, "maxItems": 4,
+                        "description": "1 to 4 operators in order; missing operators are silent",
+                        "items": {"type": "object", "properties": {
+                            "ratio": {"type": "number", "minimum": 0.25, "maximum": 16, "default": 1, "description": "Frequency relative to the note (2 = one octave up, 3.5 = bell-like)"},
+                            "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                            "detune_cents": {"type": "number", "minimum": -100, "maximum": 100, "default": 0},
+                            "env": env("Operator")
+                        }, "additionalProperties": false}
+                    }
+                },
+                "additionalProperties": false
+            },
+            "wavetable": {
+                "type": "object",
+                "description": "One of eight band-limited tables, optionally morphed toward the next table in the list, through an amplitude envelope",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "table": {"type": "string", "enum": ["basic", "warm", "bright", "digital", "vocal", "pwm", "organ", "noise"], "default": "basic",
+                        "description": "basic: soft sine+; warm: odd harmonics; bright: saw-like; digital: inharmonic/metallic; vocal: formant peaks; pwm: stacked pulse widths; organ: drawbars; noise: dense harmonics with scattered phases"},
+                    "morph": {"type": "number", "minimum": 0, "maximum": 1, "default": 0, "description": "0 = the chosen table, 1 = the next table in the list (noise wraps to basic)"},
+                    "env": env("Amplitude")
+                },
+                "additionalProperties": false
+            },
+            "granular": {
+                "type": "object",
+                "description": "A cloud of short Hann-windowed grains read from a one-cycle source at the note's pitch; the first engine with true stereo. Long grains + low density = smooth; short grains + high density = dense texture.",
+                "properties": {
+                    "level": {"type": "number", "minimum": 0, "maximum": 1, "default": 1},
+                    "source": {"type": "string", "enum": ["harmonics", "noise", "formant", "inharmonic"], "default": "harmonics",
+                        "description": "harmonics: warm; noise: pitched buzz; formant: vowel-like; inharmonic: bell-like"},
+                    "grain_ms": {"type": "number", "minimum": 5, "maximum": 500, "default": 50, "description": "Grain length in ms"},
+                    "density": {"type": "number", "minimum": 1, "maximum": 50, "default": 10, "description": "Grains started per second"},
+                    "pitch_semitones": {"type": "number", "minimum": -24, "maximum": 24, "default": 0},
+                    "randomness": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.2, "description": "Random grain start position; higher = more chaotic"},
+                    "stereo_width": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "Random stereo placement per grain"},
                     "env": env("Amplitude")
                 },
                 "additionalProperties": false
@@ -287,6 +353,18 @@ fn patch_schema() -> Value {
                     "shape": {"type": "number", "minimum": 0, "maximum": 1, "description": "burst: 0 sharp, 1 smooth"}
                 },
                 "required": ["kind"],
+                "additionalProperties": false
+            },
+            "lfo": {
+                "type": "object",
+                "description": "One free-running LFO per patch routed to a single target. Depth 1 = cutoff ±2 octaves, pitch ±2 semitones, amplitude down to silence, morph ±0.5, grain density 0.5x-2x.",
+                "properties": {
+                    "rate": {"type": "number", "minimum": 0.1, "maximum": 20, "default": 1, "description": "Hz"},
+                    "depth": {"type": "number", "minimum": 0, "maximum": 1, "default": 0},
+                    "wave": {"type": "string", "enum": ["sine", "triangle", "saw", "square", "sample_hold"], "default": "sine"},
+                    "target": {"type": "string", "enum": ["off", "cutoff", "pitch", "amplitude", "morph", "grain_density"], "default": "off",
+                        "description": "cutoff: subtractive filter; pitch: every pitched engine (vibrato); amplitude: tremolo; morph: wavetable; grain_density: granular"}
+                },
                 "additionalProperties": false
             },
             "effects": effects_schema()
@@ -473,12 +551,16 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     let tools = json!([
         {
             "name": "define_synth",
-            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
+            "description": "Define a reusable synth patch for this session, then play it with \"synth\": \"<name>\" on notes in play_notes, define_sequence_pattern or play_sequence. Engines: subtractive (two oscillators, filter with envelope), fm (four operators, four algorithms), wavetable (eight band-limited tables with morph), granular (grain cloud with stereo width) and percussion (kick/snare/hihat/cymbal/zap/swoosh/chime/burst). An optional lfo modulates one target (cutoff/pitch/amplitude/morph/grain_density). An ordered effects chain applies once to all notes of the patch, so reverb and delay tails are shared.
 
 Examples:
 - Bass: {\"name\": \"rubber_bass\", \"category\": \"bass\", \"subtractive\": {\"osc1\": {\"wave\": \"saw\"}, \"osc2\": {\"wave\": \"square\", \"mix\": 0.3, \"detune_cents\": 6}, \"filter\": {\"type\": \"low_pass\", \"cutoff\": 500, \"resonance\": 0.4, \"slope\": 24, \"env_amount\": 0.7, \"env\": {\"attack\": 0.005, \"decay\": 0.25, \"sustain\": 0.1, \"release\": 0.2}}, \"env\": {\"attack\": 0.005, \"decay\": 0.3, \"sustain\": 0.6, \"release\": 0.15}}, \"effects\": [{\"type\": \"distortion\", \"drive\": 3, \"intensity\": 0.4}, {\"type\": \"compressor\", \"threshold\": -18, \"ratio\": 4, \"intensity\": 1}]}
 - Pad: {\"name\": \"glass_pad\", \"category\": \"pad\", \"level\": 0.7, \"subtractive\": {\"osc1\": {\"wave\": \"triangle\"}, \"osc2\": {\"wave\": \"saw\", \"mix\": 0.35, \"detune_cents\": 9}, \"filter\": {\"cutoff\": 900, \"env_amount\": 0.5, \"env\": {\"attack\": 1.2, \"decay\": 2, \"sustain\": 0.4, \"release\": 3}}, \"env\": {\"attack\": 0.9, \"decay\": 1, \"sustain\": 0.8, \"release\": 2.5}}, \"effects\": [{\"type\": \"chorus\", \"rate\": 0.5, \"depth\": 0.4, \"intensity\": 0.3}, {\"type\": \"reverb\", \"room_size\": 0.8, \"intensity\": 0.4}]}
 - Drum: {\"name\": \"tight_kick\", \"category\": \"drums\", \"percussion\": {\"kind\": \"kick\", \"frequency\": 50, \"punch\": 0.9, \"sustain\": 0.2}}
+- Bell: {\"name\": \"glass_bell\", \"category\": \"keys\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"attack\": 0.002, \"decay\": 1.5, \"sustain\": 0.2, \"release\": 2.5}}, {\"ratio\": 3.5, \"level\": 0.55, \"env\": {\"decay\": 0.6, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.7, \"intensity\": 0.35}]}
+- Organ: {\"name\": \"organ\", \"category\": \"keys\", \"wavetable\": {\"table\": \"organ\", \"env\": {\"attack\": 0.005, \"sustain\": 1, \"release\": 0.15}}}
+- Texture: {\"name\": \"cloud\", \"category\": \"pad\", \"level\": 0.6, \"granular\": {\"source\": \"formant\", \"grain_ms\": 120, \"density\": 15, \"pitch_semitones\": 7, \"randomness\": 0.7, \"stereo_width\": 0.9, \"env\": {\"attack\": 1.5, \"release\": 3}}, \"lfo\": {\"rate\": 0.2, \"depth\": 0.4, \"target\": \"grain_density\"}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.9, \"intensity\": 0.5}]}
+- Shimmer: {\"name\": \"shimmer\", \"category\": \"keys\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"decay\": 1.5, \"sustain\": 0.2, \"release\": 2}}, {\"ratio\": 3.5, \"level\": 0.5, \"env\": {\"decay\": 0.5, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"delay\", \"random_beats\": [0.75, 0.75], \"pitch_intervals\": [7, 12], \"pitch_mode\": \"up\", \"feedback\": 0.5, \"intensity\": 0.6}, {\"type\": \"reverb\", \"room_size\": 0.8, \"intensity\": 0.4}]}
 
 Call list_sounds with section \"synths\" to see the built-in patches, which double as worked examples.",
             "inputSchema": patch_schema()
@@ -507,8 +589,8 @@ Example: Define a 4-bar house beat once, then play it with variations throughout
                     "tempo": {
                         "type": "integer",
                         "description": "🎵 Default tempo for this pattern (can be overridden when referenced)",
-                        "minimum": 60,
-                        "maximum": 200,
+                        "minimum": 20,
+                        "maximum": 300,
                         "default": 120
                     },
                     "pattern_bars": {
@@ -651,8 +733,8 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
                     "tempo": {
                         "type": "integer",
                         "description": "🎵 Tempo in BPM for the entire sequence",
-                        "minimum": 60,
-                        "maximum": 200,
+                        "minimum": 20,
+                        "maximum": 300,
                         "default": 120
                     },
                     "beats_per_bar": {
@@ -718,6 +800,7 @@ Examples:
 - R2D2 happy: [{\"note_type\": \"r2d2\", \"r2d2_emotion\": \"Happy\", \"r2d2_intensity\": 0.8, \"r2d2_complexity\": 2, \"duration\": 1.0}]
 - Drum kick: [{\"synth\": \"tr_808_kick\", \"duration\": 0.5}]
 - Inline synth: [{\"synth\": {\"name\": \"blip\", \"subtractive\": {\"osc1\": {\"wave\": \"square\"}, \"env\": {\"release\": 0.05}}}, \"note\": 84, \"duration\": 0.1}]
+- Inline FM bell: [{\"synth\": {\"name\": \"glass_bell\", \"fm\": {\"algorithm\": \"stack\", \"operators\": [{\"ratio\": 1, \"env\": {\"attack\": 0.002, \"decay\": 1.5, \"sustain\": 0.2, \"release\": 2.5}}, {\"ratio\": 3.5, \"level\": 0.55, \"env\": {\"decay\": 0.6, \"sustain\": 0}}]}, \"effects\": [{\"type\": \"reverb\", \"room_size\": 0.7, \"intensity\": 0.35}]}, \"note\": 76, \"duration\": 0.3}]
 
 Pass \"mode\": \"layer\" to play over what is already sounding; the default replaces it.",
             "inputSchema": {
@@ -731,8 +814,8 @@ Pass \"mode\": \"layer\" to play over what is already sounding; the default repl
                     "tempo": {
                         "type": "integer",
                         "description": "Tempo in BPM (optional, defaults to 120)",
-                        "minimum": 60,
-                        "maximum": 200
+                        "minimum": 20,
+                        "maximum": 300
                     },
                     "beats_per_bar": {
                         "type": "integer",
@@ -847,22 +930,32 @@ fn handle_define_synth(
     if patch.subtractive.as_ref().is_some_and(|s| s.level > 0.0) {
         engines.push("subtractive");
     }
+    if patch.fm.as_ref().is_some_and(|f| f.level > 0.0) {
+        engines.push("fm");
+    }
+    if patch.wavetable.as_ref().is_some_and(|w| w.level > 0.0) {
+        engines.push("wavetable");
+    }
+    if patch.granular.as_ref().is_some_and(|g| g.level > 0.0) {
+        engines.push("granular");
+    }
     if let Some(p) = patch.percussion.as_ref().filter(|p| p.level > 0.0) {
         engines.push(p.kind.as_str());
     }
     let shadowed = PatchLibrary::new().get(&patch.name).is_some();
     let mut details = format!(
-        "🎛️ Defined synth '{}': {} engine(s) [{}], {} effect(s){}",
+        "🎛️ Defined synth '{}': {} engine(s) [{}], {} effect(s)",
         patch.name,
         engines.len(),
         engines.join(", "),
         patch.effects.iter().filter(|e| e.enabled).count(),
-        if shadowed {
-            " (shadows the built-in patch of the same name for this session)"
-        } else {
-            ""
-        }
     );
+    if let Some(lfo) = patch.lfo.as_ref().filter(|l| l.is_active()) {
+        details.push_str(&format!(" + lfo → {}", lfo.target.as_str()));
+    }
+    if shadowed {
+        details.push_str(" (shadows the built-in patch of the same name for this session)");
+    }
     if !patch.description.is_empty() {
         details.push_str(&format!("\n{}", patch.description));
     }
@@ -991,6 +1084,9 @@ fn handle_play_notes(
     if sequence.notes.is_empty() {
         return JsonRpcResponse::error(id, INVALID_PARAMS, "Note sequence cannot be empty");
     }
+    if let Err(e) = validate_tempo(sequence.tempo) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
+    }
     if let Err(e) = validate_notes(&sequence.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
@@ -1020,6 +1116,9 @@ fn handle_define_pattern(
     };
     if pattern.notes.is_empty() {
         return JsonRpcResponse::error(id, INVALID_PARAMS, "Pattern notes cannot be empty");
+    }
+    if let Err(e) = validate_tempo(pattern.tempo) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
     if let Err(e) = validate_notes(&pattern.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
@@ -1079,6 +1178,9 @@ fn handle_play_sequence(
             INVALID_PARAMS,
             "Sequence must contain either notes or pattern references",
         );
+    }
+    if let Err(e) = validate_tempo(extended.tempo) {
+        return JsonRpcResponse::error(id, INVALID_PARAMS, e);
     }
     if let Err(e) = validate_notes(&extended.notes) {
         return JsonRpcResponse::error(id, INVALID_PARAMS, e);
@@ -1190,7 +1292,48 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
                 out.push_str(&format!("- {} — {}\n", patch.name, patch.description));
             }
         }
-        out.push_str("\nPercussion kinds for inline patches: kick, snare, hihat, cymbal, zap, swoosh, chime, burst.\n\n");
+        let algorithms = FmAlgorithm::ALL
+            .iter()
+            .map(FmAlgorithm::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let tables = TableName::ALL
+            .iter()
+            .map(TableName::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let percussion_kinds = [
+            PercussionKind::Kick,
+            PercussionKind::Snare,
+            PercussionKind::Hihat,
+            PercussionKind::Cymbal,
+            PercussionKind::Zap,
+            PercussionKind::Swoosh,
+            PercussionKind::Chime,
+            PercussionKind::Burst,
+        ]
+        .iter()
+        .map(PercussionKind::as_str)
+        .collect::<Vec<_>>()
+        .join("/");
+        let sources = GrainSource::ALL
+            .iter()
+            .map(GrainSource::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let lfo_targets = LfoTarget::ALL
+            .iter()
+            .map(LfoTarget::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        let lfo_waves = LfoWave::ALL
+            .iter()
+            .map(LfoWave::as_str)
+            .collect::<Vec<_>>()
+            .join("/");
+        out.push_str(&format!(
+            "\nEngines for inline patches: subtractive, fm (algorithms {algorithms}), wavetable (tables {tables}), granular (sources {sources}), percussion (kinds {percussion_kinds}).\nOptional lfo targets: {lfo_targets} (waves {lfo_waves}).\n\n"
+        ));
     }
 
     if want("instruments") {
@@ -1230,7 +1373,11 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
         let mut names: Vec<&String> = library.get_preset_names();
         names.sort();
         out.push_str("# Effects\n\n## Effect types for the `effects` chain\n");
-        out.push_str("- reverb: room_size, dampening, wet_level, pre_delay\n- delay: delay_time, feedback, wet_level\n- chorus: rate, depth, feedback\n- filter: filter_type (LowPass/HighPass/BandPass/Notch/Peak/LowShelf/HighShelf), cutoff, resonance\n- compressor: threshold (dB), ratio, attack, release\n- distortion: drive, tone, output_level\n");
+        out.push_str(&format!(
+            "- reverb: room_size, dampening, wet_level, pre_delay\n- delay: delay_time, feedback, wet_level, sync_tempo; Time Fracture: random_beats [min, max], random_rate, pitch_intervals, pitch_mode ({})\n",
+            pitch_modes().join("/")
+        ));
+        out.push_str("- chorus: rate, depth, feedback\n- filter: filter_type (LowPass/HighPass/BandPass/Notch/Peak/LowShelf/HighShelf), cutoff, resonance\n- compressor: threshold (dB), ratio, attack, release\n- distortion: drive, tone, output_level\n");
         out.push_str(&format!("\n## effects_preset names ({})\n", names.len()));
         for name in names {
             out.push_str(&format!("- {}\n", name));
@@ -1392,6 +1539,119 @@ mod tests {
     }
 
     #[test]
+    fn effects_schema_describes_time_fracture_and_it_validates_through_define_synth() {
+        let props = &effects_schema()["items"]["properties"];
+        assert_eq!(props["random_beats"]["minItems"], 2);
+        assert_eq!(
+            props["pitch_mode"]["enum"],
+            json!(["random", "up", "down", "up_down"])
+        );
+        // Both the schema enum and the catalog come from `PitchMode::ALL`, so
+        // adding a mode cannot leave either behind.
+        assert_eq!(props["pitch_mode"]["enum"], json!(pitch_modes()));
+        let catalog = text(&handle_list_sounds(
+            &ServerState::new(),
+            json!({"section": "effects"}),
+            Some(json!(1)),
+        ));
+        assert!(
+            catalog.contains(&pitch_modes().join("/")),
+            "the effects catalog lists the pitch modes: {catalog}"
+        );
+        assert!(
+            props["delay_time"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("8 s"),
+            "delay_time documents the cap"
+        );
+        assert!(
+            effects_schema()["description"]
+                .as_str()
+                .unwrap()
+                .contains("-32602"),
+            "the flat property list says other keys are rejected"
+        );
+        assert_eq!(props["pitch_intervals"]["maxItems"], 12);
+        assert!(props["random_rate"].is_object());
+        assert!(
+            !props["sync_tempo"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("reserved")
+        );
+
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "shimmer", "subtractive": {},
+                "effects": [{"type": "delay", "random_beats": [0.5, 1.0], "random_rate": 0.5,
+                             "pitch_intervals": [7, 12], "pitch_mode": "up_down", "feedback": 0.5, "intensity": 0.6}]}),
+        );
+        assert!(r.error.is_none(), "{:?}", r.error);
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad", "subtractive": {},
+                "effects": [{"type": "delay", "random_beats": [0.5, 9.0]}]}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(r.error.as_ref().unwrap().message.contains("random_beats"));
+    }
+
+    #[test]
+    fn a_tempo_outside_the_supported_range_is_a_parameter_error() {
+        let notes = json!([{"note": 60, "duration": 0.1}]);
+        let mut state = ServerState::new();
+        for tempo in [10, 400] {
+            for (tool, args) in [
+                ("play_notes", json!({"notes": notes, "tempo": tempo})),
+                ("play_sequence", json!({"notes": notes, "tempo": tempo})),
+                (
+                    "define_sequence_pattern",
+                    json!({"name": "p", "notes": notes, "tempo": tempo}),
+                ),
+            ] {
+                let r = call(&mut state, tool, args);
+                let e = r
+                    .error
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{tool} accepted tempo {tempo}"));
+                assert_eq!(e.code, INVALID_PARAMS, "{tool}: {}", e.message);
+                assert!(
+                    e.message.contains("tempo")
+                        && e.message.contains("20")
+                        && e.message.contains("300"),
+                    "{tool}: {}",
+                    e.message
+                );
+            }
+        }
+        // The bounds themselves are accepted. `define_sequence_pattern` is the
+        // one tool that validates the tempo without opening an audio device.
+        for tempo in [20, 300] {
+            let r = call(
+                &mut state,
+                "define_sequence_pattern",
+                json!({"name": "ok", "notes": notes, "tempo": tempo}),
+            );
+            assert!(r.error.is_none(), "tempo {tempo}: {:?}", r.error);
+        }
+        // Every schema that advertises a tempo advertises the same range.
+        let tools = handle_tools_list(Some(json!(1))).result.unwrap()["tools"].clone();
+        let mut seen = 0;
+        for tool in tools.as_array().unwrap() {
+            if let Some(schema) = tool["inputSchema"]["properties"]["tempo"].as_object() {
+                assert_eq!(schema["minimum"], json!(20), "{}", tool["name"]);
+                assert_eq!(schema["maximum"], json!(300), "{}", tool["name"]);
+                seen += 1;
+            }
+        }
+        assert_eq!(seen, 3, "play_notes, play_sequence and the pattern tool");
+    }
+
+    #[test]
     fn list_sounds_synths_section_names_builtins_and_session_patches() {
         let mut state = ServerState::new();
         call(
@@ -1437,5 +1697,127 @@ mod tests {
         assert!(schema["properties"]["synth"].is_object());
         assert!(schema["properties"].get("synth_type").is_none());
         assert!(schema["properties"].get("preset_name").is_none());
+    }
+
+    #[test]
+    fn patch_schema_describes_fm_and_wavetable_and_they_validate_through_define_synth() {
+        let schema = patch_schema();
+        let fm = &schema["properties"]["fm"]["properties"];
+        assert_eq!(
+            fm["algorithm"]["enum"],
+            json!(["stack", "pairs", "fan_in", "parallel"])
+        );
+        assert_eq!(fm["operators"]["maxItems"], 4);
+        assert!(fm["operators"]["items"]["properties"]["ratio"].is_object());
+        let wt = &schema["properties"]["wavetable"]["properties"];
+        assert_eq!(
+            wt["table"]["enum"],
+            json!([
+                "basic", "warm", "bright", "digital", "vocal", "pwm", "organ", "noise"
+            ])
+        );
+        assert!(wt["morph"].is_object());
+
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bell", "fm": {"algorithm": "stack",
+                "operators": [{"ratio": 1}, {"ratio": 3.5, "level": 0.5}]}}),
+        );
+        assert!(r.error.is_none(), "{:?}", r.error);
+        assert!(text(&r).contains("fm"), "{}", text(&r));
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "org", "wavetable": {"table": "organ"}}),
+        );
+        assert!(r.error.is_none());
+        assert!(text(&r).contains("wavetable"));
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad", "fm": {"operators": [{"ratio": 99}]}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(
+            r.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("fm.operators[0].ratio")
+        );
+    }
+
+    #[test]
+    fn patch_schema_describes_lfo_and_granular_and_they_validate_through_define_synth() {
+        let schema = patch_schema();
+        let lfo = &schema["properties"]["lfo"]["properties"];
+        assert_eq!(
+            lfo["wave"]["enum"],
+            json!(["sine", "triangle", "saw", "square", "sample_hold"])
+        );
+        assert_eq!(
+            lfo["target"]["enum"],
+            json!([
+                "off",
+                "cutoff",
+                "pitch",
+                "amplitude",
+                "morph",
+                "grain_density"
+            ])
+        );
+        let g = &schema["properties"]["granular"]["properties"];
+        assert_eq!(
+            g["source"]["enum"],
+            json!(["harmonics", "noise", "formant", "inharmonic"])
+        );
+        for field in [
+            "grain_ms",
+            "density",
+            "pitch_semitones",
+            "randomness",
+            "stereo_width",
+            "env",
+            "level",
+        ] {
+            assert!(g[field].is_object(), "{field}");
+        }
+
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "cloud",
+                "granular": {"source": "formant", "stereo_width": 0.9},
+                "lfo": {"rate": 0.2, "depth": 0.4, "target": "grain_density"}}),
+        );
+        assert!(r.error.is_none(), "{:?}", r.error);
+        assert!(
+            text(&r).contains("granular") && text(&r).contains("lfo"),
+            "{}",
+            text(&r)
+        );
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad", "granular": {"density": 500}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(
+            r.error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("granular.density")
+        );
+        let r = call(
+            &mut state,
+            "define_synth",
+            json!({"name": "bad2", "subtractive": {}, "lfo": {"rate": 99}}),
+        );
+        assert_eq!(r.error.as_ref().unwrap().code, INVALID_PARAMS);
+        assert!(r.error.as_ref().unwrap().message.contains("lfo.rate"));
     }
 }

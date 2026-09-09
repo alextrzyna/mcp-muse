@@ -2,7 +2,7 @@
   "name": "jp_8_strings",
   "description": "Classic Jupiter-8 string ensemble with rich, warm analog character (Roland Jupiter-8)",
   "category": "pad",
-  "level": 0.65,
+  "level": 0.41,
   "subtractive": {
     "osc1": {"wave": "saw"},
     "osc2": {"wave": "saw", "mix": 0.5, "detune_cents": 11, "octave": 0},

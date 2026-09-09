@@ -1,0 +1,19 @@
+{
+  "name": "dx7_slap_bass",
+  "description": "Authentic DX7 Bass 1 preset - the famous 80s slap bass from Take On Me (Yamaha DX7 ROM 1A 15 Bass 1)",
+  "category": "bass",
+  "level": 0.8,
+  "fm": {
+    "algorithm": "stack",
+    "operators": [
+      {"ratio": 1.0, "level": 0.9, "env": {"attack": 0.001, "decay": 0.06, "sustain": 0.6, "release": 3.0}},
+      {"ratio": 2.0, "level": 0.3, "env": {"attack": 0.001, "decay": 0.04, "sustain": 0.2, "release": 2.5}}
+    ]
+  },
+  "effects": [
+    {"type": "filter", "filter_type": "low_pass", "cutoff": 1800, "resonance": 0.05, "intensity": 1.0},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.05},
+    {"type": "compressor", "threshold": -14.0, "ratio": 4.0, "attack": 0.001, "release": 0.03, "intensity": 0.6},
+    {"type": "filter", "filter_type": "high_pass", "cutoff": 80, "resonance": 0.3, "intensity": 0.4}
+  ]
+}

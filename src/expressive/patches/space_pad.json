@@ -2,7 +2,7 @@
   "name": "space_pad",
   "description": "Cosmic atmospheric pad with ethereal, spacious character (Ambient Electronic Music)",
   "category": "pad",
-  "level": 0.7,
+  "level": 0.35,
   "subtractive": {
     "osc1": {"wave": "saw"},
     "osc2": {"wave": "saw", "mix": 0.5, "detune_cents": 16, "octave": 0},

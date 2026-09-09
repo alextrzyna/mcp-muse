@@ -1,0 +1,18 @@
+{
+  "name": "shimmer_keys",
+  "description": "FM bell through a Time Fracture delay whose repeats climb a fifth then an octave, into a large reverb",
+  "category": "keys",
+  "level": 0.7,
+  "fm": {
+    "algorithm": "stack",
+    "operators": [
+      {"ratio": 1.0, "level": 1.0, "env": {"attack": 0.002, "decay": 1.5, "sustain": 0.2, "release": 2.0}},
+      {"ratio": 3.5, "level": 0.5, "env": {"attack": 0.001, "decay": 0.5, "sustain": 0.0, "release": 0.5}}
+    ]
+  },
+  "effects": [
+    {"type": "delay", "random_beats": [0.75, 0.75], "random_rate": 0.0, "pitch_intervals": [7, 12], "pitch_mode": "up",
+     "feedback": 0.5, "wet_level": 0.6, "intensity": 0.6},
+    {"type": "reverb", "room_size": 0.8, "dampening": 0.3, "wet_level": 0.5, "intensity": 0.4}
+  ]
+}

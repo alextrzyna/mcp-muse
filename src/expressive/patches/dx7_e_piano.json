@@ -1,0 +1,19 @@
+{
+  "name": "dx7_e_piano",
+  "description": "Authentic DX7 E.Piano 1 - the most famous electric piano of the 80s (Yamaha DX7 ROM 1A 11 E.Piano 1)",
+  "category": "keys",
+  "level": 0.8,
+  "fm": {
+    "algorithm": "pairs",
+    "operators": [
+      {"ratio": 1.0, "level": 0.7, "env": {"attack": 0.005, "decay": 0.3, "sustain": 0.6, "release": 3.0}},
+      {"ratio": 1.0, "level": 0.4, "detune_cents": 7, "env": {"attack": 0.01, "decay": 0.4, "sustain": 0.5, "release": 2.5}},
+      {"ratio": 14.0, "level": 0.3, "env": {"attack": 0.001, "decay": 0.1, "sustain": 0.2, "release": 1.0}}
+    ]
+  },
+  "effects": [
+    {"type": "filter", "filter_type": "low_pass", "cutoff": 2800, "resonance": 0.02, "intensity": 1.0},
+    {"type": "reverb", "room_size": 0.5, "dampening": 0.3, "wet_level": 0.6, "intensity": 0.15},
+    {"type": "reverb", "room_size": 0.4, "dampening": 0.4, "wet_level": 0.2, "intensity": 0.5}
+  ]
+}
