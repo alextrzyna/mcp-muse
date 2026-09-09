@@ -27,6 +27,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 zip = "8"
 rand = "0.10"
 sha2 = "0.11"
+hound = "3.5"
 
 [dev-dependencies]
 midly = "0.5"
