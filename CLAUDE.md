@@ -121,5 +121,5 @@ Cursor MCP config, stores an optional custom SoundFont path.
 - **Unified playback**: every audio type goes through `MidiPlayer::play` and the one `MidiEngine`.
 - **Effects are stateful**: one instance per synth patch render (shared across every note of that patch in the call), one per R2D2 note, and one per MIDI bus. Do not reintroduce per-sample allocation or effect-count caps; the old "max 3 effects" and "2x gain compensation" rules were workarounds for stateless effects and are gone.
 - **Stereo throughout** the mixer; mono sources are centered.
-- **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call.
+- **One engine per process**: `ServerState` owns one `MidiPlayer`, which owns the stream and the single `MidiEngine`; never create a synthesizer per call; the one exception is `export_audio`, which builds a private engine for an offline render (see Export above).
 - **Headroom is measured, not assumed**: the library test renders each category's demo phrase (a chord for pads) and a held full-velocity note and asserts a 1.4 pre-bus ceiling below the limiter's 1.5; set levels with `cargo test print_builtin_headroom_survey -- --ignored --nocapture`.

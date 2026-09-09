@@ -345,7 +345,7 @@ Preset names map to the built-in patch of the same name in snake_case
 ```
 
 - `split: "mixdown"` (default) writes `<path>/<name>.wav`, soft-clipped like playback.
-- `split: "stems"` writes `<path>/<name>/<source>.wav`, one per MIDI channel (`ch09_drums`, `ch00_acoustic_grand_piano`), per synth patch (`synth_minimoog_bass`) and one `r2d2`, with every effect baked in so they sum back to the mix.
+- `split: "stems"` writes `<path>/<name>/<source>.wav`, one per MIDI channel (`ch09_drums`, `ch00_acoustic_grand_piano`), per synth patch (`synth_minimoog_bass`) and one `r2d2`, with every effect baked in so they sum back to the mix. MIDI channel stems each carry their own copy of the MIDI bus chain, so a bus with a compressor, distortion or Time Fracture delay does not sum back exactly; synth and R2D2 stems always do.
 - `split: "tracks"` is the same split with the MIDI bus, patch and R2D2 effect chains bypassed, for mixing elsewhere.
 
 Every file in an export has the same length, so they line up at zero in a DAW. `bit_depth` is 16, 24 (default) or 32 (float, never clamps); existing files are kept unless `"overwrite": true`.

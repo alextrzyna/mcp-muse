@@ -5,7 +5,7 @@ Technical documentation for the `mcp-muse` MCP server.
 ## Overview
 
 `mcp-muse` implements the Model Context Protocol over stdio using JSON-RPC
-2.0. It exposes seven tools that let an AI agent play General MIDI music,
+2.0. It exposes eight tools that let an AI agent play General MIDI music,
 R2D2-style expressions and agent-defined synth patches through the local
 audio device.
 
@@ -15,7 +15,7 @@ audio device.
 |--------|-------------|
 | `initialize` | Handshake; returns capabilities and the crate version |
 | `ping` | Returns `{}` |
-| `tools/list` | Lists the seven tools with JSON schemas |
+| `tools/list` | Lists the eight tools with JSON schemas |
 | `tools/call` | Executes a tool |
 | `resources/list` | Empty list |
 | `prompts/list` | Empty list |
@@ -167,6 +167,54 @@ patch or instrument name.
 ### stop_playback
 
 Stops every active playback and reports how many were stopped.
+
+### export_audio
+
+Renders a composition offline and writes it to disk as WAV; it never plays
+audio and never needs an audio device (unlike the other tools, it works
+even with no SoundFont, as long as the sequence has no MIDI notes). Takes
+`notes`, `patterns`, `tempo`, `beats_per_bar` exactly as `play_sequence`
+(there is no `mode`: an export is always a clean render). Output options:
+
+| Field | Description |
+|-------|--------------|
+| `path` | Absolute directory to write into (required), created if missing |
+| `name` | Base file or folder name, default `"mix"`; letters, digits, `_` and `-` are kept, anything else becomes `_` |
+| `split` | `"mixdown"` (default), `"stems"` or `"tracks"` |
+| `bit_depth` | `16`, `24` (default) or `32`; `32` is IEEE float and never clamps |
+| `overwrite` | Default `false`; without it an existing target file is an `isError` result listing the collisions |
+
+File layout: `split: "mixdown"` writes `<path>/<name>.wav`, soft-clipped
+like playback. `split: "stems"` and `split: "tracks"` write
+`<path>/<name>/<source>.wav`, one file per sound source, not soft-clipped:
+`ch<NN>_<gm name>` per MIDI channel with notes (`ch09_drums` for the drum
+channel), `synth_<patch key>` per synth patch group, and `r2d2` for all
+R2D2 notes summed. Every file in one export has the same length (the
+composition's duration including effect tails), so they line up at zero in
+a DAW. `stems` keeps every effect chain so the sources sum back to the mix;
+`tracks` bypasses the MIDI bus, patch and R2D2 effect chains. MIDI channel
+stems each carry their own copy of the MIDI bus chain, so a bus with a
+compressor, distortion or Time Fracture delay does not sum back exactly;
+synth and R2D2 stems always do.
+
+Response: tool text listing each written path on its own line, then
+`Duration X s (including effect tails), rendered in Y s.`; when a 16 or
+24-bit file peaked above 0 dBFS the response names those files and
+suggests `bit_depth: 32`; for `stems` with a non-linear bus chain (see
+above) the response adds a warning line that the stems will not sum back
+to the mixdown exactly.
+
+Errors: a malformed request, a relative or missing `path`, an out-of-range
+`bit_depth` or `split`, or a `name` that is empty after sanitizing are
+`-32602`. An undefined pattern or synth name, existing files without
+`overwrite`, a missing SoundFont when the sequence has MIDI notes, or a
+write failure are normal results with `"isError": true`.
+
+```json
+{"patterns": [{"pattern_name": "drums", "start_bar": 1, "repeat_count": 4}],
+ "notes": [{"synth": "gritty_bass", "note": 36, "musical_time": "1.1.0", "musical_duration": "1/4"}],
+ "path": "/Users/me/Music/demo", "name": "take1", "split": "stems", "bit_depth": 24}
+```
 
 ## Server Capabilities
 

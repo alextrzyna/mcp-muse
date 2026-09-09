@@ -4,7 +4,9 @@ use serde_json::{Value, json};
 use crate::expressive::{
     FmAlgorithm, GrainSource, LfoTarget, LfoWave, Patch, PatchLibrary, PercussionKind, TableName,
 };
-use crate::midi::export::{BitDepth, ExportReport, ExportRequest, Split, export, sanitize_name};
+use crate::midi::export::{
+    BitDepth, ExportReport, ExportRequest, Split, bus_chain_is_nonlinear, export, sanitize_name,
+};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PitchMode, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
     validate_tempo,
@@ -842,7 +844,7 @@ Pass \"mode\": \"layer\" to play over what is already sounding; the default repl
         },
         {
             "name": "export_audio",
-            "description": "Save a composition to disk as WAV instead of playing it. Takes the same notes, patterns, tempo and beats_per_bar as play_sequence and renders offline (nothing is heard, live playback is untouched). split selects what is written: \"mixdown\" (default) is one stereo file; \"stems\" is one file per sound source (each MIDI channel, each synth patch, all R2D2 together) with every effect baked in so they sum back to the mix; \"tracks\" is the same split with the MIDI bus, patch and R2D2 effect chains bypassed, for mixing elsewhere. Every file in one export has the same length so they line up at zero in a DAW.
+            "description": "Save a composition to disk as WAV instead of playing it. Takes the same notes, patterns, tempo and beats_per_bar as play_sequence and renders offline (nothing is heard, live playback is untouched). split selects what is written: \"mixdown\" (default) is one stereo file; \"stems\" is one file per sound source (each MIDI channel, each synth patch, all R2D2 together) with every effect baked in so they sum back to the mix; \"tracks\" is the same split with the MIDI bus, patch and R2D2 effect chains bypassed, for mixing elsewhere. Every file in one export has the same length so they line up at zero in a DAW. MIDI channel stems each carry their own copy of the MIDI bus chain, so a bus with a compressor, distortion or Time Fracture delay does not sum back exactly; synth and R2D2 stems always do.
 
 Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repeat_count\": 4}], \"path\": \"/Users/me/Music/demo\", \"name\": \"take1\", \"split\": \"stems\"} writes /Users/me/Music/demo/take1/ch09_drums.wav and friends.",
             "inputSchema": {
@@ -1365,6 +1367,7 @@ fn handle_export_audio(
         Err(response) => return response,
     };
 
+    let bus_warning = options.split == Split::Stems && bus_chain_is_nonlinear(&sequence);
     let request = ExportRequest {
         sequence,
         dir,
@@ -1376,7 +1379,10 @@ fn handle_export_audio(
     match export(request, &state.synths) {
         Ok(report) => {
             tracing::info!("Export finished ({}): {}", options.split.as_str(), summary);
-            JsonRpcResponse::tool_text(id, export_finished_text(&report, options.split, bit_depth))
+            JsonRpcResponse::tool_text(
+                id,
+                export_finished_text(&report, options.split, bit_depth, bus_warning),
+            )
         }
         Err(e) => {
             tracing::error!("Export failed: {}", e);
@@ -1385,13 +1391,24 @@ fn handle_export_audio(
     }
 }
 
-fn export_finished_text(report: &ExportReport, split: Split, bit_depth: BitDepth) -> String {
+fn export_finished_text(
+    report: &ExportReport,
+    split: Split,
+    bit_depth: BitDepth,
+    bus_warning: bool,
+) -> String {
     let what = match split {
         Split::Mixdown => "stereo mixdown",
         Split::Stems => "stems",
         Split::Tracks => "dry tracks",
     };
-    let mut out = format!("💾 Exported {} {}:\n", report.files.len(), what);
+    let dir = report
+        .files
+        .first()
+        .and_then(|f| f.path.parent())
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+    let mut out = format!("💾 Exported {} {} to {}:\n", report.files.len(), what, dir);
     for file in &report.files {
         out.push_str(&format!("  {}\n", file.path.display()));
     }
@@ -1400,6 +1417,11 @@ fn export_finished_text(report: &ExportReport, split: Split, bit_depth: BitDepth
         report.duration.as_secs_f64(),
         report.render_time.as_secs_f64()
     ));
+    if bus_warning {
+        out.push_str(
+            "\n⚠️ MIDI channel stems each ran their own copy of the bus chain (compressor, distortion or Time Fracture delay), so they will not sum back to the mixdown exactly.",
+        );
+    }
     if bit_depth != BitDepth::Float32 {
         let hot: Vec<String> = report
             .files
@@ -2035,8 +2057,9 @@ mod tests {
             duration: Duration::from_secs_f64(3.3),
             render_time: Duration::from_millis(400),
         };
-        let t = export_finished_text(&report, Split::Stems, BitDepth::Int24);
+        let t = export_finished_text(&report, Split::Stems, BitDepth::Int24, false);
         assert!(t.contains("2 stems"), "{}", t);
+        assert!(t.contains("2 stems to /tmp/x:"), "{}", t);
         assert!(t.contains("/tmp/x/a.wav"), "{}", t);
         assert!(t.contains("Duration 3.3 s"), "{}", t);
         let clamped = t.lines().last().unwrap();
@@ -2051,8 +2074,30 @@ mod tests {
             "quiet files are not listed as clamped: {}",
             t
         );
-        let f = export_finished_text(&report, Split::Stems, BitDepth::Float32);
+        let f = export_finished_text(&report, Split::Stems, BitDepth::Float32, false);
         assert!(!f.contains("Clamped"), "float never clamps: {}", f);
+    }
+
+    #[test]
+    fn export_audio_warns_when_the_bus_chain_is_nonlinear() {
+        let report = ExportReport {
+            files: vec![ExportedFile {
+                path: "/tmp/x/ch00_flute.wav".into(),
+                peak: 0.5,
+            }],
+            duration: Duration::from_secs_f64(1.0),
+            render_time: Duration::from_millis(50),
+        };
+        let quiet = export_finished_text(&report, Split::Stems, BitDepth::Int24, false);
+        assert!(!quiet.contains("⚠️ MIDI channel stems"), "{}", quiet);
+        let warned = export_finished_text(&report, Split::Stems, BitDepth::Int24, true);
+        assert!(
+            warned.contains(
+                "⚠️ MIDI channel stems each ran their own copy of the bus chain (compressor, distortion or Time Fracture delay), so they will not sum back to the mixdown exactly."
+            ),
+            "{}",
+            warned
+        );
     }
 
     #[test]

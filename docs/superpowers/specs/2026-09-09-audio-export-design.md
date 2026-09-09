@@ -36,7 +36,9 @@ elsewhere later.
   device (the headroom tests do exactly this). A private engine with its
   own OxiSynth is built per export: loading the SoundFont takes about
   70 ms in release, and a fresh synthesizer makes every render
-  deterministic and free of live-playback state. This is a deliberate,
+  deterministic and free of live-playback state, except a Time Fracture
+  delay on the MIDI bus, which reseeds its randomness per stem (see
+  "Files written" below). This is a deliberate,
   narrow exception to "one engine per process": that rule guards the
   live audio path, where a synthesizer per call lost state between calls.
   (Alternatives rejected: recording the live engine, which needs a device
@@ -96,6 +98,16 @@ Every file in one export has the same length: the composition's reported
 duration including tails, rounded up to whole frames, zero-padded. Files
 therefore line up at zero on a DAW timeline. Tracks are the same length as
 stems would be even though their tails are shorter.
+
+Each MIDI channel stem renders through its own instance of the MIDI bus
+chain (patch and R2D2 stems always render through one shared instance per
+source). A compressor or distortion on the bus therefore acts per channel
+instead of on the summed bus, and a Time Fracture delay (`random_beats` or
+`pitch_intervals` on the `Delay` effect) seeds its randomness independently
+per instance. So when the bus chain carries one of those effects, MIDI
+channel stems do not sum back to the mixdown exactly and a Time Fracture
+delay's repeats are not the same take across stems or across exports. The
+tool response names this when it applies (see "Response" below).
 
 ## 3. Response
 

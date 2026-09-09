@@ -1,8 +1,7 @@
 //! Offline export of a composition to WAV files: a stereo mixdown, wet stems
 //! or dry tracks. Design: docs/superpowers/specs/2026-09-09-audio-export-design.md.
 
-use crate::expressive::Patch;
-use crate::midi::SimpleSequence;
+use crate::expressive::{EffectsPresetLibrary, Patch};
 use crate::midi::engine::{
     CHUNK_FRAMES, EngineCommand, LEAD_FRAMES, MidiEngine, PlayCommand, PlayMode, SAMPLE_RATE,
     find_soundfont, load_synth, soft_clip,
@@ -10,6 +9,7 @@ use crate::midi::engine::{
 use crate::midi::gm_names::GM_INSTRUMENTS;
 use crate::midi::parser::MidiNote;
 use crate::midi::translate::{Effects, TranslatedParts, Translator, midi_events};
+use crate::midi::{EffectConfig, EffectType, SimpleSequence};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -170,11 +170,11 @@ pub(crate) fn export_with(
 
     let targets = plan_targets(&request.dir, &name, request.split, &parts)?;
     check_collisions(&targets, request.overwrite)?;
-    for target in &targets {
-        if let Some(parent) = target.path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
-        }
+    if request.dir.is_file() {
+        return Err(format!(
+            "path {} exists and is not a directory",
+            request.dir.display()
+        ));
     }
 
     let synth = if parts.midi.is_empty() {
@@ -183,6 +183,13 @@ pub(crate) fn export_with(
         Some(load_synth(&soundfont?)?)
     };
     let (mut engine, _handle) = MidiEngine::new(synth);
+
+    for target in &targets {
+        if let Some(parent) = target.path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create {}: {}", parent.display(), e))?;
+        }
+    }
 
     let mut files = Vec::with_capacity(targets.len());
     match request.split {
@@ -318,14 +325,71 @@ fn sources(parts: &TranslatedParts) -> Vec<(String, Source)> {
     out
 }
 
+/// Dedupe against the set of final names actually assigned, not against the
+/// original names: for each source in order, if its name is already taken
+/// (by an earlier source's original name or by an earlier suffix this
+/// function chose), append `_2`, `_3`, ... until a free name is found. This
+/// keeps the first occurrence of a name stable and guarantees every
+/// returned name is distinct, even when a suffixed name collides with a
+/// later source's own real name.
 fn dedupe_names(sources: &mut [(String, Source)]) {
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (name, _) in sources.iter_mut() {
-        let count = seen.entry(name.clone()).or_insert(0);
-        *count += 1;
-        if *count > 1 {
-            *name = format!("{}_{}", name, count);
+        if used.insert(name.clone()) {
+            continue;
         }
+        let mut n = 2;
+        loop {
+            let candidate = format!("{}_{}", name, n);
+            if used.insert(candidate.clone()) {
+                *name = candidate;
+                break;
+            }
+            n += 1;
+        }
+    }
+}
+
+/// True when the MIDI bus chain of this sequence has an effect that does
+/// not commute with summing (compressor, distortion, or a Time Fracture
+/// delay with randomised time or pitch), so per-channel stems cannot sum
+/// back to the mix exactly. Mirrors `Translator::translate_parts`: the bus
+/// chain is the first MIDI note's (not r2d2, not `is_synthesis()`) effects,
+/// with its `effects_preset` (if any) appended.
+pub fn bus_chain_is_nonlinear(sequence: &SimpleSequence) -> bool {
+    let library = EffectsPresetLibrary::new();
+    let chain = sequence
+        .notes
+        .iter()
+        .filter(|n| !n.is_r2d2() && !n.is_synthesis())
+        .find_map(|n| {
+            let mut effects = n.effects.clone().unwrap_or_default();
+            if let Some(preset) = &n.effects_preset
+                && let Some(preset_effects) = library.get_preset(preset)
+            {
+                effects.extend(preset_effects.clone());
+            }
+            if effects.is_empty() {
+                None
+            } else {
+                Some(effects)
+            }
+        });
+    let Some(chain) = chain else {
+        return false;
+    };
+    chain.iter().any(effect_is_nonlinear)
+}
+
+fn effect_is_nonlinear(config: &EffectConfig) -> bool {
+    match &config.effect {
+        EffectType::Compressor { .. } | EffectType::Distortion { .. } => true,
+        EffectType::Delay {
+            random_beats,
+            pitch_intervals,
+            ..
+        } => random_beats.is_some() || !pitch_intervals.is_empty(),
+        EffectType::Reverb { .. } | EffectType::Chorus { .. } | EffectType::Filter { .. } => false,
     }
 }
 
@@ -600,6 +664,27 @@ mod tests {
         let mut again = req();
         again.overwrite = true;
         export_with(again, &HashMap::new(), Err("x".into())).unwrap();
+    }
+
+    #[test]
+    fn a_dir_that_is_already_a_regular_file_is_reported_not_a_directory() {
+        let dir = tmp_dir("notadir");
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        std::fs::write(&dir, b"not a directory").unwrap();
+        let err = export_with(
+            request(
+                vec![sine_note(0.0, 0.1, 0.5)],
+                &dir,
+                "mix",
+                Split::Mixdown,
+                BitDepth::Int24,
+            ),
+            &HashMap::new(),
+            Err("x".into()),
+        )
+        .unwrap_err();
+        assert!(err.contains("not a directory"), "{}", err);
+        let _ = std::fs::remove_file(&dir);
     }
 
     #[test]
@@ -914,5 +999,100 @@ mod tests {
             rms_left(&drums, 0.0, 0.2) > 0.01,
             "the snare hit is on the drum stem"
         );
+    }
+
+    #[test]
+    fn dedupe_suffixes_never_collide_with_a_real_name() {
+        let mut sources: Vec<(String, Source)> = vec![
+            ("synth_blip".to_string(), Source::Patch(0)),
+            ("synth_blip".to_string(), Source::Patch(1)),
+            ("synth_blip_2".to_string(), Source::Patch(2)),
+        ];
+        dedupe_names(&mut sources);
+        let names: Vec<&str> = sources.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["synth_blip", "synth_blip_2", "synth_blip_2_2"]);
+        let distinct: std::collections::HashSet<&str> = names.iter().copied().collect();
+        assert_eq!(distinct.len(), names.len(), "all names must be distinct");
+    }
+
+    fn seq(notes: Vec<SimpleNote>) -> SimpleSequence {
+        SimpleSequence {
+            notes,
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    fn with_effects(mut note: SimpleNote, effects: Vec<serde_json::Value>) -> SimpleNote {
+        note.effects = Some(
+            effects
+                .into_iter()
+                .map(|v| serde_json::from_value(v).unwrap())
+                .collect(),
+        );
+        note
+    }
+
+    #[test]
+    fn bus_chain_is_nonlinear_is_false_with_no_notes_or_a_linear_chain() {
+        assert!(
+            !bus_chain_is_nonlinear(&seq(Vec::new())),
+            "no MIDI notes at all"
+        );
+        assert!(
+            !bus_chain_is_nonlinear(&seq(vec![midi_note(0, 60, Some(0))])),
+            "no effects"
+        );
+        let reverb = with_effects(
+            midi_note(0, 60, Some(0)),
+            vec![serde_json::json!({"type": "reverb"})],
+        );
+        assert!(
+            !bus_chain_is_nonlinear(&seq(vec![reverb])),
+            "reverb commutes with summing"
+        );
+        let plain_delay = with_effects(
+            midi_note(0, 60, Some(0)),
+            vec![serde_json::json!({"type": "delay", "delay_time": 0.3})],
+        );
+        assert!(
+            !bus_chain_is_nonlinear(&seq(vec![plain_delay])),
+            "a plain delay (no Time Fracture) commutes with summing"
+        );
+    }
+
+    #[test]
+    fn bus_chain_is_nonlinear_is_true_for_compressor_distortion_and_fracture_delay() {
+        let compressor = with_effects(
+            midi_note(0, 60, Some(0)),
+            vec![serde_json::json!({"type": "compressor"})],
+        );
+        assert!(bus_chain_is_nonlinear(&seq(vec![compressor])));
+
+        let distortion = with_effects(
+            midi_note(0, 60, Some(0)),
+            vec![serde_json::json!({"type": "distortion"})],
+        );
+        assert!(bus_chain_is_nonlinear(&seq(vec![distortion])));
+
+        let random_beats_delay = with_effects(
+            midi_note(0, 60, Some(0)),
+            vec![serde_json::json!({"type": "delay", "random_beats": [0.5, 1.0]})],
+        );
+        assert!(bus_chain_is_nonlinear(&seq(vec![random_beats_delay])));
+
+        let pitch_fracture_delay = with_effects(
+            midi_note(0, 60, Some(0)),
+            vec![serde_json::json!({"type": "delay", "pitch_intervals": [3.0, 7.0]})],
+        );
+        assert!(bus_chain_is_nonlinear(&seq(vec![pitch_fracture_delay])));
+    }
+
+    #[test]
+    fn bus_chain_is_nonlinear_expands_effects_preset() {
+        // "studio" (src/expressive/effects_presets.rs) opens with a compressor.
+        let mut note = midi_note(0, 60, Some(0));
+        note.effects_preset = Some("studio".to_string());
+        assert!(bus_chain_is_nonlinear(&seq(vec![note])));
     }
 }
