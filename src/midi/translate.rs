@@ -330,6 +330,8 @@ impl Translator {
         for (i, note) in processed_notes.into_iter().enumerate() {
             // A negative start time would panic in `Duration`; treat it as 0.
             let start = Duration::from_secs_f64(note.start_time.unwrap_or(0.0).max(0.0));
+            note.validate_midi_out()
+                .map_err(|e| format!("Note {}: {}", i + 1, e))?;
             if let Some(reference) = note.synth.as_ref() {
                 note.validate_synth()
                     .map_err(|e| format!("Note {}: {}", i + 1, e))?;
@@ -420,8 +422,6 @@ impl Translator {
                     samples.into_iter().map(|s| [s, s]).collect(),
                 ));
             } else if let Some(key) = note.note {
-                note.validate_midi_out()
-                    .map_err(|e| format!("Note {}: {}", i + 1, e))?;
                 let port = match (&note.midi_out, outputs.as_deref_mut()) {
                     (None, _) => None,
                     (Some(name), Some(resolve)) => {

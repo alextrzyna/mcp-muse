@@ -8,7 +8,9 @@
 
 use crate::midi::engine::EventKind;
 use midir::{MidiOutput, MidiOutputConnection, MidiOutputPort};
+use std::collections::HashSet;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -16,8 +18,24 @@ use std::time::Duration;
 pub const VIRTUAL_PORT_NAME: &str = "mcp-muse";
 const CLIENT_NAME: &str = "mcp-muse";
 const MIDI_CHANNELS: u8 = 16;
+const SUSTAIN: u8 = 64;
 const ALL_SOUND_OFF: u8 = 120;
+const RESET_ALL_CONTROLLERS: u8 = 121;
 const ALL_NOTES_OFF: u8 = 123;
+/// What every reset sends on each channel of every open port, in order:
+/// release the pedal first (receivers ignore All Notes Off while it is
+/// held), clear the other controllers, then silence.
+const RESET_CONTROLLERS: [u8; 4] = [SUSTAIN, RESET_ALL_CONTROLLERS, ALL_NOTES_OFF, ALL_SOUND_OFF];
+
+/// Ports that failed to send; the sender thread marks them, `resolve` reopens them.
+type DeadPorts = Arc<Mutex<HashSet<PortId>>>;
+
+/// Whether a port name is this process's own virtual port. CoreMIDI shows
+/// it as `mcp-muse`; ALSA formats it as `mcp-muse:mcp-muse <client>:<port>`.
+pub fn is_own_port(name: &str) -> bool {
+    name == VIRTUAL_PORT_NAME
+        || name.starts_with(&format!("{VIRTUAL_PORT_NAME}:{VIRTUAL_PORT_NAME} "))
+}
 
 /// Index of an opened port in `ExternalMidi::opened`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -115,7 +133,7 @@ pub enum ExternalMessage {
         bytes: [u8; 3],
         len: usize,
     },
-    /// CC 123 and CC 120 on every channel of every open port.
+    /// `RESET_CONTROLLERS` on every channel of every open port.
     AllNotesOff,
     Open {
         port: PortId,
@@ -158,6 +176,7 @@ pub struct ExternalMidi {
     sender: ExternalSender,
     /// Opened port names; index is the `PortId`.
     opened: Vec<String>,
+    dead: DeadPorts,
     virtual_port: Result<(), String>,
 }
 
@@ -173,15 +192,18 @@ impl ExternalMidi {
     /// errors.
     pub fn new() -> Self {
         let (tx, rx) = channel();
+        let dead: DeadPorts = Arc::default();
+        let marked = Arc::clone(&dead);
         if let Err(e) = thread::Builder::new()
             .name("mcp-muse midi out".into())
-            .spawn(move || run_sender(rx))
+            .spawn(move || run_sender(rx, marked))
         {
             tracing::warn!("Could not start the external MIDI sender: {}", e);
         }
         let mut external = Self {
             sender: ExternalSender(tx),
             opened: Vec::new(),
+            dead,
             virtual_port: Err("not created".into()),
         };
         external.virtual_port = external.create_virtual_port();
@@ -230,18 +252,36 @@ impl ExternalMidi {
         }
     }
 
-    /// Find a port by name, opening a destination on first use.
+    /// Find a port by name, opening a destination on first use and
+    /// reopening one whose earlier sends failed (unplugged, then back).
     pub fn resolve(&mut self, name: &str) -> Result<PortId, String> {
         let available = destinations().unwrap_or_default();
         let names: Vec<String> = available.iter().map(|(n, _)| n.clone()).collect();
         match resolve_name(name, &self.opened, &names) {
-            Ok(Resolved::Opened(id)) => Ok(id),
+            Ok(Resolved::Opened(id)) => {
+                if self.dead.lock().map(|d| d.contains(&id)).unwrap_or(false) {
+                    let port_name = self.opened[id.0 as usize].clone();
+                    let (_, port) = available
+                        .iter()
+                        .find(|(n, _)| n.eq_ignore_ascii_case(&port_name))
+                        .ok_or_else(|| {
+                            format!("MIDI output '{}' is not connected right now", port_name)
+                        })?;
+                    let connection = connect(&port_name, port)?;
+                    self.sender.send(ExternalMessage::Open {
+                        port: id,
+                        connection,
+                    });
+                    if let Ok(mut dead) = self.dead.lock() {
+                        dead.remove(&id);
+                    }
+                    tracing::info!("Reopened MIDI output '{}'", port_name);
+                }
+                Ok(id)
+            }
             Ok(Resolved::Available(i)) => {
                 let (port_name, port) = &available[i];
-                let output = MidiOutput::new(CLIENT_NAME).map_err(|e| e.to_string())?;
-                let connection = output
-                    .connect(port, VIRTUAL_PORT_NAME)
-                    .map_err(|e| format!("Could not open MIDI output '{}': {}", port_name, e))?;
+                let connection = connect(port_name, port)?;
                 tracing::info!("Opened MIDI output '{}'", port_name);
                 Ok(self.add(port_name.clone(), connection))
             }
@@ -268,6 +308,18 @@ impl ExternalMidi {
     pub fn opened(&self) -> &[String] {
         &self.opened
     }
+
+    #[cfg(test)]
+    fn mark_dead(&self, port: PortId) {
+        self.dead.lock().unwrap().insert(port);
+    }
+}
+
+fn connect(name: &str, port: &MidiOutputPort) -> Result<MidiOutputConnection, String> {
+    let output = MidiOutput::new(CLIENT_NAME).map_err(|e| e.to_string())?;
+    output
+        .connect(port, VIRTUAL_PORT_NAME)
+        .map_err(|e| format!("Could not open MIDI output '{}': {}", name, e))
 }
 
 impl Drop for ExternalMidi {
@@ -290,21 +342,21 @@ fn destinations() -> Result<Vec<(String, MidiOutputPort)>, String> {
         .into_iter()
         .filter_map(|port| {
             let name = output.port_name(&port).ok()?;
-            (name != VIRTUAL_PORT_NAME).then_some((name, port))
+            (!is_own_port(&name)).then_some((name, port))
         })
         .collect())
 }
 
 /// The sender thread: owns the connections and forwards bytes. A port
-/// whose `send` fails (unplugged) is dropped and logged once; `resolve`
-/// reopens it if it comes back.
-fn run_sender(rx: Receiver<ExternalMessage>) {
+/// whose `send` fails (unplugged) is dropped, logged once and marked in
+/// `dead`; `resolve` reopens it if it comes back.
+fn run_sender(rx: Receiver<ExternalMessage>, dead: DeadPorts) {
     let mut ports: Vec<Option<MidiOutputConnection>> = Vec::new();
     let all_notes_off = |ports: &mut Vec<Option<MidiOutputConnection>>| {
         for slot in ports.iter_mut() {
             let Some(connection) = slot else { continue };
             for channel in 0..MIDI_CHANNELS {
-                for controller in [ALL_NOTES_OFF, ALL_SOUND_OFF] {
+                for controller in RESET_CONTROLLERS {
                     let _ = connection.send(&[0xB0 | channel, controller, 0]);
                 }
             }
@@ -321,6 +373,9 @@ fn run_sender(rx: Receiver<ExternalMessage>) {
                 {
                     tracing::warn!("MIDI output {} failed, closing it: {}", port.0, e);
                     *slot = None;
+                    if let Ok(mut dead) = dead.lock() {
+                        dead.insert(port);
+                    }
                 }
             }
             Ok(ExternalMessage::AllNotesOff) => all_notes_off(&mut ports),
@@ -443,7 +498,7 @@ mod tests {
         // connection installed, sends to an unknown port are ignored and
         // the thread still answers a sync and exits cleanly.
         let (tx, rx) = channel();
-        let handle = thread::spawn(move || run_sender(rx));
+        let handle = thread::spawn(move || run_sender(rx, Arc::default()));
         tx.send(ExternalMessage::Send {
             port: PortId(7),
             bytes: [0x90, 60, 100],
@@ -473,13 +528,96 @@ mod tests {
             .filter_map(|p| input.port_name(p).ok())
             .collect();
         assert!(
-            sources.iter().any(|n| n == VIRTUAL_PORT_NAME),
+            sources.iter().any(|n| is_own_port(n)),
             "virtual port missing from {sources:?}"
         );
         let outputs = external.outputs();
         assert!(outputs.virtual_port.is_ok());
-        assert!(!outputs.destinations.iter().any(|n| n == VIRTUAL_PORT_NAME));
+        assert!(!outputs.destinations.iter().any(|n| is_own_port(n)));
         assert_eq!(external.opened(), [VIRTUAL_PORT_NAME.to_string()]);
+    }
+
+    #[test]
+    fn own_port_is_recognised_under_coremidi_and_alsa_names() {
+        assert!(is_own_port("mcp-muse"));
+        assert!(is_own_port("mcp-muse:mcp-muse 128:0"));
+        assert!(!is_own_port("mcp-muse test dest"));
+        assert!(!is_own_port("IAC Driver Bus 1"));
+    }
+
+    /// A real destination on this machine: bytes, the reset set and a
+    /// reopen after the sender thread gave the port up all arrive.
+    #[cfg(unix)]
+    #[test]
+    fn a_resolved_destination_receives_notes_resets_and_survives_a_reopen() {
+        use midir::os::unix::VirtualInput;
+        let Ok(input) = midir::MidiInput::new("mcp-muse test") else {
+            return;
+        };
+        let (tx, rx) = channel::<Vec<u8>>();
+        let dest_name = format!("mcp-muse test dest {}", std::process::id());
+        let _destination = input
+            .create_virtual(
+                &dest_name,
+                move |_, message, _| {
+                    let _ = tx.send(message.to_vec());
+                },
+                (),
+            )
+            .expect("virtual destination");
+        let mut external = ExternalMidi::new();
+        // The new destination can take a moment to show up in the list.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        let id = loop {
+            match external.resolve(&dest_name) {
+                Ok(id) => break id,
+                Err(e) if std::time::Instant::now() < deadline => {
+                    eprintln!("waiting for destination: {e}");
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => panic!("{e}"),
+            }
+        };
+        assert_ne!(id, PortId(0), "the virtual port keeps id 0");
+        assert!(!external.outputs().destinations.is_empty());
+
+        let collect = |until: &[u8]| -> Vec<Vec<u8>> {
+            let mut seen = Vec::new();
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while std::time::Instant::now() < deadline {
+                if let Ok(m) = rx.recv_timeout(Duration::from_millis(100)) {
+                    let done = m == until;
+                    seen.push(m);
+                    if done {
+                        break;
+                    }
+                }
+            }
+            seen
+        };
+        external.sender().send(ExternalMessage::Send {
+            port: id,
+            bytes: [0x93, 60, 100],
+            len: 3,
+        });
+        external.sender().send(ExternalMessage::AllNotesOff);
+        let seen = collect(&[0xBF, ALL_SOUND_OFF, 0]);
+        assert!(seen.contains(&vec![0x93, 60, 100]), "{seen:?}");
+        for controller in RESET_CONTROLLERS {
+            assert!(seen.contains(&vec![0xB0, controller, 0]), "{seen:?}");
+        }
+
+        // The sender thread gave the port up; the next resolve reopens it.
+        external.mark_dead(id);
+        assert_eq!(external.resolve(&dest_name), Ok(id));
+        assert!(!external.dead.lock().unwrap().contains(&id));
+        external.sender().send(ExternalMessage::Send {
+            port: id,
+            bytes: [0x83, 60, 0],
+            len: 3,
+        });
+        let seen = collect(&[0x83, 60, 0]);
+        assert!(seen.contains(&vec![0x83, 60, 0]), "{seen:?}");
     }
 
     #[cfg(unix)]

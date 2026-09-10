@@ -52,16 +52,19 @@ one it wants.
 - **External events ride the engine's sample clock.** They are scheduled
   in the same event heap as internal MIDI events and applied at their
   exact frame; the audio thread forwards each one over a channel to a
-  small sender thread that owns the `midir` connections. Internal and
-  external notes therefore stay aligned to within the audio device's
-  output latency, and replace, layer, and `stop_playback` keep their
+  small sender thread that owns the `midir` connections. External notes
+  therefore lead the audible internal audio by one buffer plus the
+  device's output latency, with one buffer of jitter (about 23 ms at
+  1024 frames), and replace, layer, and `stop_playback` keep their
   meaning without a second scheduler. (Alternative rejected: a wall-clock
   scheduler thread, which would be a second clock to keep in step and a
   second set of replace/stop semantics.)
-- **Replace and stop silence the outside too.** Every reset sends CC 123
-  (all notes off) and CC 120 (all sound off) on all sixteen channels of
-  every open port, so a DAW never keeps a note hanging. The sender
-  thread does the same when the server exits.
+- **Replace and stop silence the outside too.** Every reset sends CC 64
+  (sustain off, first, because receivers ignore All Notes Off while the
+  pedal is held), CC 121 (reset all controllers), CC 123 (all notes off)
+  and CC 120 (all sound off) on all sixteen channels of every open port,
+  so a DAW never keeps a note hanging. The sender thread does the same
+  when the server exits.
 - **External notes are never remapped.** The layer-mode channel
   allocation (issue #98) exists because OxiSynth shares sixteen channels
   across playbacks. A DAW routes by channel, so an external note's
@@ -131,6 +134,11 @@ substring is an error listing the candidates.
   connection to the sender thread.
 - `pub fn sender(&self) -> ExternalSender` — a cloneable handle the
   engine keeps.
+- `is_own_port(name)` recognises the virtual port under its CoreMIDI
+  name and ALSA's `mcp-muse:mcp-muse <client>:<port>` form.
+- A shared set of dead ports: the sender thread marks a port whose send
+  failed, and `resolve` reconnects it under the same `PortId` when it is
+  back.
 - `pub fn encode(kind: &EventKind) -> ([u8; 3], usize)` — MIDI bytes for
   note on/off, control change, program change (pure, tested).
 - Sender thread: `loop { match rx.recv() { Send{port, bytes} => conn.send, AllNotesOff => for every port, 16 channels × CC 123, CC 120, Open(id, conn) => push } }`.
@@ -152,16 +160,17 @@ substring is an error listing the candidates.
 - `TranslatedParts.external: Vec<(PortId, Vec<MidiNote>)>`, grouped by
   resolved port; `into_command` runs `midi_events` per group with
   `default_program: None`.
-- `translate_parts` takes an `Option<&mut ExternalMidi>`. Playback passes
-  the server's; export passes `None` and gets an error for any
-  `midi_out` note.
+- `translate_parts` takes a `PortResolver` (an optional closure from name
+  to `PortId`, so translator tests need no MIDI backend). Playback passes
+  one over the server's `ExternalMidi`; export passes `None` and gets an
+  error for any `midi_out` note.
 - The SoundFont check applies only to notes bound for the internal synth.
 - Duration: external notes count toward `note_end` like internal ones,
   so the reported duration and `playback_ends` cover them.
 
 ### `src/midi/player.rs` and `src/server/mcp.rs`
 
-- `MidiPlayer::new(sender: ExternalSender)`; `play(..., &mut ExternalMidi)`.
+- `MidiPlayer::new(Option<ExternalSender>)`; `play_with(..., Option<&mut ExternalMidi>)` (`play` keeps its shape for demos and tests).
 - `ServerState` gains `external: ExternalMidi`, created in `new()`.
 - `handle_list_sounds` renders the section from `outputs()`.
 - `validate_notes` adds the effects-on-`midi_out` check.

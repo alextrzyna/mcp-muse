@@ -1096,8 +1096,8 @@ fn describe_sources(notes: &[SimpleNote]) -> String {
         .filter_map(|n| n.midi_out.as_deref())
         .map(str::trim)
         .collect();
-    outputs.sort_unstable();
-    outputs.dedup();
+    outputs.sort_unstable_by_key(|n| n.to_lowercase());
+    outputs.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     if !outputs.is_empty() {
         parts.push(format!("external MIDI ({})", outputs.join(", ")));
     }
@@ -1991,7 +1991,7 @@ mod tests {
 
         let notes: Vec<SimpleNote> = serde_json::from_value(json!([
             {"note": 60, "midi_out": "mcp-muse"},
-            {"note": 62, "midi_out": " mcp-muse"},
+            {"note": 62, "midi_out": " MCP-Muse"},
             {"note": 64, "midi_out": "IAC Driver Bus 1"},
             {"note": 36, "channel": 9}
         ]))

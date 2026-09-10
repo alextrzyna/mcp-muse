@@ -1410,7 +1410,7 @@ mod external_tests {
     #[test]
     fn an_external_event_is_sent_when_its_frame_is_rendered_not_before() {
         let (mut engine, rx) = engine_with_sender();
-        // Replace sends an all-notes-off first; drain it.
+        // Layer: no reset, so the channel only ever carries the note's bytes.
         engine.apply(EngineCommand::Play(PlayCommand {
             external: note(3, 2, 3000),
             mode: PlayMode::Layer,

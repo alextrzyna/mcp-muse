@@ -21,23 +21,26 @@ fn a_midi_out_note_arrives_on_the_virtual_port() {
     // time, and only ours sends the distinctive note below.
     let (tx, rx) = channel::<Vec<u8>>();
     let mut connections = Vec::new();
+    // ALSA names the port `mcp-muse:mcp-muse <client>:<port>`; CoreMIDI
+    // just `mcp-muse`. A port can vanish between listing and connecting
+    // when another test's server exits, so a failed connect is skipped.
     for port in probe.ports() {
-        if probe.port_name(&port).ok().as_deref() != Some("mcp-muse") {
+        let name = probe.port_name(&port).unwrap_or_default();
+        if name != "mcp-muse" && !name.starts_with("mcp-muse:mcp-muse ") {
             continue;
         }
         let input = MidiInput::new("mcp-muse itest").unwrap();
         let tx = tx.clone();
-        let connection = input
-            .connect(
-                &port,
-                "in",
-                move |_stamp, message, _| {
-                    let _ = tx.send(message.to_vec());
-                },
-                (),
-            )
-            .expect("connect to the virtual port");
-        connections.push(connection);
+        if let Ok(connection) = input.connect(
+            &port,
+            "in",
+            move |_stamp, message, _| {
+                let _ = tx.send(message.to_vec());
+            },
+            (),
+        ) {
+            connections.push(connection);
+        }
     }
     assert!(
         !connections.is_empty(),
