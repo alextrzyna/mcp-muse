@@ -10,6 +10,7 @@
 
 use crate::expressive::{DEFAULT_TEMPO, EffectsChain};
 use crate::midi::EffectConfig;
+use crate::midi::external::{ExternalMessage, ExternalSender, PortId, encode};
 use oxisynth::{MidiEvent, SoundFont, Synth};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
@@ -125,6 +126,9 @@ impl EventKind {
 pub struct PlayCommand {
     /// MIDI events in time order (stable: setup before note-on at equal offsets).
     pub events: Vec<(u64, EventKind)>,
+    /// MIDI events for ports on this machine, keyed by the opened port.
+    /// Their channels reach the port as given (a DAW routes by channel).
+    pub external: Vec<(u64, PortId, EventKind)>,
     /// Pre-rendered stereo buffers (R2D2, synthesis) already at bus level.
     pub buffers: Vec<(u64, Vec<[f32; 2]>)>,
     /// MIDI bus effects chain for this call, if any note specified one.
@@ -138,6 +142,7 @@ impl Default for PlayCommand {
     fn default() -> Self {
         Self {
             events: Vec::new(),
+            external: Vec::new(),
             buffers: Vec::new(),
             midi_effects: None,
             mode: PlayMode::default(),
@@ -232,10 +237,20 @@ pub fn load_synth(path: &Path) -> Result<Synth, String> {
     Ok(synth)
 }
 
+/// Where a scheduled event goes when its frame comes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    /// The internal OxiSynth.
+    Synth,
+    /// An opened external port, through the sender thread.
+    External(PortId),
+}
+
 struct ScheduledEvent {
     at: u64,
     seq: u64,
     kind: EventKind,
+    target: Target,
 }
 
 // `BinaryHeap` is a max-heap; invert the ordering so the earliest event
@@ -302,6 +317,8 @@ pub struct MidiEngine {
     channels: [Option<ChannelOwner>; MIDI_CHANNELS],
     /// Id handed to the next scheduled playback.
     next_playback: u64,
+    /// Handle to the external MIDI sender thread, when the process has one.
+    external: Option<ExternalSender>,
 }
 
 impl MidiEngine {
@@ -322,8 +339,15 @@ impl MidiEngine {
             fade_pos: 0,
             channels: [None; MIDI_CHANNELS],
             next_playback: 0,
+            external: None,
         };
         (engine, EngineHandle { clock, sender })
+    }
+
+    /// Forward external events (and all-notes-off on every reset) to the
+    /// sender thread. Without this, external events are dropped.
+    pub fn set_external(&mut self, sender: ExternalSender) {
+        self.external = Some(sender);
     }
 
     /// Apply a command now (tests call this directly; the audio thread calls
@@ -361,7 +385,10 @@ impl MidiEngine {
         let mut events = play.events;
         self.allocate_channels(playback, start, &mut events);
         for (offset, kind) in events {
-            self.push_event(start + offset, kind);
+            self.push_event(start + offset, kind, Target::Synth);
+        }
+        for (offset, port, kind) in play.external {
+            self.push_event(start + offset, kind, Target::External(port));
         }
         for (offset, samples) in play.buffers {
             self.buffers.push(ScheduledBuffer {
@@ -379,10 +406,15 @@ impl MidiEngine {
         );
     }
 
-    fn push_event(&mut self, at: u64, kind: EventKind) {
+    fn push_event(&mut self, at: u64, kind: EventKind, target: Target) {
         let seq = self.next_seq;
         self.next_seq += 1;
-        self.events.push(ScheduledEvent { at, seq, kind });
+        self.events.push(ScheduledEvent {
+            at,
+            seq,
+            kind,
+            target,
+        });
     }
 
     fn set_bus_effects(&mut self, tempo: u32, effects: &[EffectConfig]) {
@@ -498,6 +530,7 @@ impl MidiEngine {
                     controller,
                     value,
                 },
+                Target::Synth,
             );
         }
     }
@@ -539,9 +572,19 @@ impl MidiEngine {
         self.buffers.clear();
         self.channels = [None; MIDI_CHANNELS];
         self.set_bus_effects(DEFAULT_TEMPO, &[]);
+        if let Some(external) = &self.external {
+            external.send(ExternalMessage::AllNotesOff);
+        }
     }
 
-    fn apply_event(&mut self, kind: EventKind) {
+    fn apply_event(&mut self, kind: EventKind, target: Target) {
+        if let Target::External(port) = target {
+            if let Some(external) = &self.external {
+                let (bytes, len) = encode(&kind);
+                external.send(ExternalMessage::Send { port, bytes, len });
+            }
+            return;
+        }
         let Some(synth) = &mut self.synth else { return };
         let event = match kind {
             EventKind::NoteOn {
@@ -617,7 +660,7 @@ impl MidiEngine {
         while pos < frames {
             while self.events.peek().is_some_and(|e| e.at <= self.clock) {
                 let event = self.events.pop().expect("peeked");
-                self.apply_event(event.kind);
+                self.apply_event(event.kind, event.target);
             }
             let remaining = (frames - pos) as u64;
             let until_next = self
@@ -1311,5 +1354,165 @@ pub(crate) mod tests {
             source.by_ref().take(10 * CHUNK_FRAMES).count() == 10 * CHUNK_FRAMES,
             "must not end"
         );
+    }
+}
+
+#[cfg(test)]
+mod external_tests {
+    //! External events leave through the sender at their exact frame and
+    //! are never remapped; every reset silences the ports.
+    use super::tests::render_all;
+    use super::*;
+    use std::sync::mpsc::Receiver;
+
+    fn engine_with_sender() -> (MidiEngine, Receiver<ExternalMessage>) {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        let (sender, rx) = ExternalSender::for_test();
+        engine.set_external(sender);
+        (engine, rx)
+    }
+
+    fn note(port: u16, channel: u8, at: u64) -> Vec<(u64, PortId, EventKind)> {
+        vec![
+            (
+                at,
+                PortId(port),
+                EventKind::NoteOn {
+                    channel,
+                    key: 60,
+                    velocity: 100,
+                },
+            ),
+            (
+                at + 100,
+                PortId(port),
+                EventKind::NoteOff { channel, key: 60 },
+            ),
+        ]
+    }
+
+    /// Every `Send` received so far, as (port, bytes).
+    fn sent(rx: &Receiver<ExternalMessage>) -> Vec<(u16, Vec<u8>)> {
+        rx.try_iter()
+            .filter_map(|m| match m {
+                ExternalMessage::Send { port, bytes, len } => Some((port.0, bytes[..len].to_vec())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn all_notes_off_count(rx: &Receiver<ExternalMessage>) -> usize {
+        rx.try_iter()
+            .filter(|m| matches!(m, ExternalMessage::AllNotesOff))
+            .count()
+    }
+
+    #[test]
+    fn an_external_event_is_sent_when_its_frame_is_rendered_not_before() {
+        let (mut engine, rx) = engine_with_sender();
+        // Replace sends an all-notes-off first; drain it.
+        engine.apply(EngineCommand::Play(PlayCommand {
+            external: note(3, 2, 3000),
+            mode: PlayMode::Layer,
+            ..Default::default()
+        }));
+        // LEAD_FRAMES + 3000 = 5048: chunks 0..4 (frames 0-5119) cover the
+        // note-on but not the note-off at 5148.
+        render_all(&mut engine, 4 * CHUNK_FRAMES);
+        assert!(sent(&rx).is_empty(), "nothing before the scheduled frame");
+        render_all(&mut engine, CHUNK_FRAMES);
+        assert_eq!(sent(&rx), vec![(3, vec![0x92, 60, 100])]);
+        render_all(&mut engine, CHUNK_FRAMES);
+        assert_eq!(sent(&rx), vec![(3, vec![0x82, 60, 0])]);
+    }
+
+    #[test]
+    fn replace_and_stop_send_all_notes_off_and_clear_pending_external_events() {
+        let (mut engine, rx) = engine_with_sender();
+        engine.apply(EngineCommand::Play(PlayCommand {
+            external: note(0, 0, 44_100),
+            mode: PlayMode::Replace,
+            ..Default::default()
+        }));
+        assert_eq!(all_notes_off_count(&rx), 1);
+        engine.apply(EngineCommand::Stop);
+        assert_eq!(all_notes_off_count(&rx), 1);
+        render_all(&mut engine, 50 * CHUNK_FRAMES);
+        assert!(sent(&rx).is_empty(), "the stopped note never went out");
+    }
+
+    #[test]
+    fn a_layered_external_note_keeps_its_channel_while_a_synth_note_is_remapped() {
+        let (mut engine, rx) = engine_with_sender();
+        // A: a synth note on channel 2 that is still sounding.
+        engine.apply(EngineCommand::Play(PlayCommand {
+            events: vec![
+                (
+                    0,
+                    EventKind::NoteOn {
+                        channel: 2,
+                        key: 60,
+                        velocity: 100,
+                    },
+                ),
+                (
+                    88_200,
+                    EventKind::NoteOff {
+                        channel: 2,
+                        key: 60,
+                    },
+                ),
+            ],
+            mode: PlayMode::Replace,
+            ..Default::default()
+        }));
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        // B: a synth note and an external note, both on logical channel 2.
+        engine.apply(EngineCommand::Play(PlayCommand {
+            events: vec![(
+                0,
+                EventKind::NoteOn {
+                    channel: 2,
+                    key: 64,
+                    velocity: 100,
+                },
+            )],
+            external: note(0, 2, 0),
+            mode: PlayMode::Layer,
+            ..Default::default()
+        }));
+        let synth_channel = engine
+            .events
+            .iter()
+            .find_map(|e| match (e.target, &e.kind) {
+                (
+                    Target::Synth,
+                    EventKind::NoteOn {
+                        channel, key: 64, ..
+                    },
+                ) => Some(*channel),
+                _ => None,
+            })
+            .expect("B's synth note");
+        assert_ne!(synth_channel, 2, "the synth note moves off A's channel");
+        render_all(&mut engine, 3 * CHUNK_FRAMES);
+        let first = sent(&rx).into_iter().next().expect("external note-on");
+        assert_eq!(
+            first,
+            (0, vec![0x92, 60, 100]),
+            "external channel untouched"
+        );
+    }
+
+    #[test]
+    fn without_a_sender_external_events_are_dropped_and_rendering_continues() {
+        let (mut engine, _handle) = MidiEngine::new(None);
+        engine.apply(EngineCommand::Play(PlayCommand {
+            external: note(0, 0, 0),
+            mode: PlayMode::Replace,
+            ..Default::default()
+        }));
+        render_all(&mut engine, 4 * CHUNK_FRAMES);
+        assert!(engine.events.is_empty());
     }
 }

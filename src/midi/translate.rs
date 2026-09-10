@@ -151,6 +151,7 @@ impl TranslatedParts {
         buffers.extend(self.patches.into_iter().map(|p| (p.start, p.samples)));
         PlayCommand {
             events: midi_events(&self.midi),
+            external: Vec::new(),
             buffers,
             midi_effects: self.midi_effects,
             mode,

@@ -222,6 +222,7 @@ pub(crate) fn export_with(
                             &mut engine,
                             PlayCommand {
                                 events: midi_events(&notes),
+                                external: Vec::new(),
                                 buffers: Vec::new(),
                                 midi_effects: parts.midi_effects.clone(),
                                 mode: PlayMode::Replace,
