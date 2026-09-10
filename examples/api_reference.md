@@ -58,6 +58,7 @@ Note fields (all optional unless noted):
 | MIDI | `note` (0-127), `velocity`, `channel` (9 = drums), `instrument` (GM program), `reverb`, `chorus`, `volume`, `pan`, `balance`, `expression`, `sustain` (all 0-127) |
 | R2D2 | `note_type: "r2d2"`, `r2d2_emotion` (required), `r2d2_intensity` 0-1 (required), `r2d2_complexity` 1-5 (required), `r2d2_pitch_range` `[min_hz, max_hz]` |
 | Synth | `synth`: a patch name (`"minimoog_bass"`, `"tr_808_kick"`, ... — see `list_sounds` section `synths`) or an inline patch object with the same shape as `define_synth`. Pitch comes from `note`; percussion patches ignore it |
+| External | `midi_out`: the name of a MIDI output on this machine (`"mcp-muse"`, the server's virtual port, or a destination from `list_sounds` section `midi_outputs`; case-insensitive, a unique substring is enough). The note goes out as MIDI with its channel and controllers; a program change is sent only when `instrument` is given. Cannot be combined with `synth`, `note_type: "r2d2"`, `effects` or `effects_preset` (`-32602`); an unknown output name is a tool error listing the outputs |
 | Effects | `effects` (array of `{type, ...params, intensity, enabled}`), `effects_preset` (name). MIDI and R2D2 notes only — a synth note takes its effects from its patch's own `effects` chain |
 
 `start_time` and `duration` are capped at 300 seconds each.
@@ -161,8 +162,11 @@ an out-of-range value is `-32602` and names the field.
 ### list_sounds
 
 Returns a text catalog. Optional `section`: `all` (default), `synths`,
-`instruments`, `drums`, `r2d2`, `effects`. Use it before guessing a synth
-patch or instrument name.
+`instruments`, `drums`, `r2d2`, `effects`, `midi_outputs`. Use it before
+guessing a synth patch, instrument or output name. `midi_outputs` lists the
+server's virtual port (`mcp-muse`, published while the server runs on macOS
+and Linux), every other MIDI destination on the machine, and the DAW setup
+steps.
 
 ### stop_playback
 

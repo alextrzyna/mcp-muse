@@ -53,7 +53,7 @@ An agent talks to MCP-Muse through eight tools:
 | `play_sequence` | Play patterns with transposition, repeats, bar placement and per-note overrides, plus loose notes |
 | `list_patterns` | List the session's patterns |
 | `define_synth` | Store a validated synth patch for the session; notes reference it by name |
-| `list_sounds` | Catalog of built-in patches, GM instruments, drum keys, R2D2 emotions and effect presets |
+| `list_sounds` | Catalog of built-in patches, GM instruments, drum keys, R2D2 emotions, effect presets and the MIDI outputs on this machine |
 | `stop_playback` | Silence everything |
 | `export_audio` | Render a composition offline to WAV as a stereo mixdown, wet stems or dry tracks |
 
@@ -63,6 +63,7 @@ Sound sources:
 - **44 built-in synth patches** across bass (12), pad (15), keys (5), drums (5), fx (5) and lead (2): Minimoog and Jupiter basses, TB-303 acid, DX7 electric piano, JP-8 strings, TR-808 and TR-909 percussion, granular clouds, shimmer keys and more.
 - **Agent-defined patches**: subtractive, FM, wavetable, granular and percussion engines with envelopes, a filter, an LFO and an effects chain, defined once with `define_synth` or passed inline on a note.
 - **9 R2D2 emotions** rendered by ring-modulation synthesis with pitch contours.
+- **Instruments installed on your machine**, played over MIDI: the server publishes a virtual MIDI port that Bitwig Studio or any other DAW, software synth or hardware interface can listen to, and a note's `midi_out` sends it there instead of the built-in synth.
 
 Around them:
 
@@ -195,6 +196,22 @@ Every playback tool returns immediately with the expected duration including eff
 
 `play_notes` and `play_sequence` take `"mode": "replace"` (default) or `"mode": "layer"`. Replace fades what is playing over 6 ms, resets the synthesizer and starts fresh. Layer mixes the new call on top: it gets its own MIDI channels, so its program changes, pan, volume and sustain do not touch what is already sounding (drums always share channel 9), and if it specifies effects it swaps the MIDI bus chain immediately. `stop_playback` is a replace with nothing scheduled.
 
+### Playing instruments in Bitwig or another DAW
+
+A DAW's own instruments (Bitwig's Polymer, Phase-4, the Grid and the rest) cannot be loaded by any other program, so MCP-Muse plays them the way a keyboard would: over MIDI. While the server runs it publishes a virtual MIDI port named `mcp-muse` (macOS and Linux; on Windows use a loopback driver such as loopMIDI and send to its port). Any note with `"midi_out": "mcp-muse"` goes out on that port instead of the built-in synthesizer, keeping its channel, velocity, timing and controllers, so internal drums and a lead played by Bitwig can share one call and stay in time.
+
+One-time setup in Bitwig: *Settings > Controllers > Add Controller > Generic > MIDI Keyboard*, and choose `mcp-muse` as the MIDI input. Notes then play on the selected or armed instrument track. To drive several tracks at once, set each track's input chooser to `mcp-muse` and one channel (channel 0 here is channel 1 in Bitwig), then arm them all. Bitwig remembers the controller, so it reconnects whenever the server is running.
+
+```json
+{"notes": [
+  {"note": 36, "channel": 9, "start_time": 0.0, "duration": 0.2},
+  {"note": 60, "channel": 0, "start_time": 0.0, "duration": 1.0, "midi_out": "mcp-muse"},
+  {"note": 67, "channel": 1, "start_time": 0.5, "duration": 1.0, "midi_out": "mcp-muse"}
+]}
+```
+
+`list_sounds` with `{"section": "midi_outputs"}` lists the virtual port and every other MIDI destination on the machine (an IAC bus, a hardware synth); `midi_out` takes any of those names, case-insensitively, or a unique part of one. A `midi_out` note sends a program change only when `instrument` is given, so a hardware synth keeps its preset; `effects` and `effects_preset` are rejected on it because the receiving instrument makes the sound, and `export_audio` refuses it for the same reason. Replace mode and `stop_playback` send all-notes-off to every open port, so nothing is left hanging in the DAW. `cargo run -- test-midi-out` repeats a scale on the port until Ctrl-C, for checking the routing.
+
 ### Musical time and patterns
 
 Notes can be placed with `musical_time` and `musical_duration` instead of seconds; both are converted with the sequence's `tempo` (20 to 300 BPM) and `beats_per_bar` (2 to 8). A pattern defined once can be placed on any bar, transposed, repeated and re-voiced:
@@ -242,6 +259,7 @@ Notes can be placed with `musical_time` and `musical_duration` instead of second
 | `volume`, `pan`, `balance`, `expression`, `sustain` | MIDI controllers, 0 to 127 |
 | `reverb`, `chorus` | the synthesizer's own send levels, 0 to 127 |
 | `effects`, `effects_preset` | a bus effects chain for the call (see Effects) |
+| `midi_out` | send the note to a MIDI output on this machine instead (`"mcp-muse"` or a name from `list_sounds`); see Playing instruments in Bitwig |
 
 GM families by program number: 0 pianos, 8 chromatic percussion, 16 organs, 24 guitars, 32 basses, 40 strings, 48 ensembles, 56 brass, 64 reeds, 72 pipes (73 is the flute), 80 synth leads (80 is the square lead), 88 synth pads, 96 synth effects, 104 ethnic, 112 percussive, 120 sound effects. `list_sounds` with `{"section": "instruments"}` prints all 128 names; `{"section": "drums"}` prints the drum keys.
 
@@ -469,7 +487,7 @@ Curious discovery: a synth pad, an inquisitive R2D2 and a flute answer:
 
 ## How it works
 
-One `MidiEngine` per process runs as a never-ending source on the audio mixer: a single OxiSynth instance with the SoundFont loaded once, a queue of MIDI events keyed to a 44.1 kHz sample clock (applied at their exact frame), the pre-rendered synth and R2D2 buffers, and the MIDI bus effects chain. A play call is translated on the tool thread: musical time becomes seconds, synth notes are grouped by patch and rendered into one stereo buffer each (voices summed, LFO applied, effects chain, peak limiter), R2D2 notes are rendered with their chains, and MIDI notes become time-ordered events. The engine mixes the buses, soft-clips, and emits stereo. `export_audio` drives a private engine the same way without a device, one pass for a mixdown or one pass per MIDI channel for splits.
+One `MidiEngine` per process runs as a never-ending source on the audio mixer: a single OxiSynth instance with the SoundFont loaded once, a queue of MIDI events keyed to a 44.1 kHz sample clock (applied at their exact frame), the pre-rendered synth and R2D2 buffers, and the MIDI bus effects chain. A play call is translated on the tool thread: musical time becomes seconds, synth notes are grouped by patch and rendered into one stereo buffer each (voices summed, LFO applied, effects chain, peak limiter), R2D2 notes are rendered with their chains, and MIDI notes become time-ordered events. The engine mixes the buses, soft-clips, and emits stereo. Notes with `midi_out` sit in the same event queue with a port as their target; at their frame the audio thread hands the bytes to a small sender thread that owns the `midir` connections, so external and internal notes stay aligned. `export_audio` drives a private engine the same way without a device, one pass for a mixdown or one pass per MIDI channel for splits.
 
 Design notes live in [`CLAUDE.md`](CLAUDE.md) and the specs under [`docs/superpowers/specs`](docs/superpowers/specs); the detailed tool reference is [`examples/api_reference.md`](examples/api_reference.md).
 
@@ -483,6 +501,7 @@ cargo fmt
 cargo run -- test-synths                                 # hear every built-in patch
 cargo run -- test-drums                                  # a bar of 808/909 percussion
 cargo run -- test-effects                                # a chord dry, with reverb, with delay
+cargo run -- test-midi-out [name]                        # a scale on a MIDI output (default: the mcp-muse virtual port) until Ctrl-C
 ```
 
 DSP is tested by rendering to buffers and measuring (Goertzel power, RMS, zero-crossing rate, exact sums), never by ear; the library test renders every built-in patch and asserts its headroom.
@@ -494,6 +513,8 @@ Versions use [CalVer](https://calver.org/) (`YYYY.MM.PATCH`). Merging to `main` 
 **No sound**: check the system output device and volume, then the log (`~/Library/Application Support/mcp-muse/mcp-muse.log.<date>` on macOS, `~/.local/share/mcp-muse/` on Linux, `%APPDATA%\mcp-muse\` on Windows) for "Audio output unavailable".
 
 **MIDI notes fail with "MIDI notes need a SoundFont"**: run `mcp-muse setup` again, or check the custom SoundFont path in `config.json`. Synth patches and R2D2 work without a SoundFont.
+
+**Bitwig does not list `mcp-muse` as a MIDI input**: the port exists only while the server runs, so start the host (or `cargo run -- test-midi-out`) first, then open Bitwig's controller settings. On Linux the ALSA sequencer must be available; on Windows install a loopback driver and name its port in `midi_out`.
 
 **The host does not show the tools**: restart the host after registering, check the binary path in the config, and confirm the binary answers on its own:
 
