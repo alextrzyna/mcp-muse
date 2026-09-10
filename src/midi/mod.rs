@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod export;
+pub mod external;
 pub mod gm_names;
 pub mod parser;
 pub mod player;
