@@ -264,6 +264,7 @@ impl ExternalMidi {
     }
 
     /// Names of the ports opened so far (the virtual port first when it exists).
+    #[cfg(test)]
     pub fn opened(&self) -> &[String] {
         &self.opened
     }

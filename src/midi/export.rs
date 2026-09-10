@@ -154,17 +154,24 @@ pub(crate) fn export_with(
     }
 
     let translator = Translator::new(soundfont.clone().map(|_| ()));
-    let wet =
-        translator.translate_parts(request.sequence.clone(), session_patches, Effects::Wet)?;
+    let wet = translator.translate_parts(
+        request.sequence.clone(),
+        session_patches,
+        Effects::Wet,
+        None,
+    )?;
     if wet.midi.is_empty() && wet.patches.is_empty() && wet.r2d2.is_empty() {
         return Err("Nothing to export: the sequence has no notes".to_string());
     }
     let duration = wet.duration;
     let frames = (duration.as_secs_f64() * SAMPLE_RATE as f64).ceil() as usize;
     let parts = match request.split {
-        Split::Tracks => {
-            translator.translate_parts(request.sequence.clone(), session_patches, Effects::Dry)?
-        }
+        Split::Tracks => translator.translate_parts(
+            request.sequence.clone(),
+            session_patches,
+            Effects::Dry,
+            None,
+        )?,
         Split::Mixdown | Split::Stems => wet,
     };
 
@@ -221,7 +228,7 @@ pub(crate) fn export_with(
                         render_offline(
                             &mut engine,
                             PlayCommand {
-                                events: midi_events(&notes),
+                                events: midi_events(&notes, Some(0)),
                                 external: Vec::new(),
                                 buffers: Vec::new(),
                                 midi_effects: parts.midi_effects.clone(),
@@ -733,6 +740,7 @@ mod tests {
     ) -> TranslatedParts {
         TranslatedParts {
             midi,
+            external: Vec::new(),
             midi_effects: None,
             patches: patch_names
                 .iter()

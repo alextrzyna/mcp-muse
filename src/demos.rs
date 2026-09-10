@@ -27,7 +27,7 @@ fn patch_notes(name: &str, notes: &[(u8, f64, f64)]) -> SimpleSequence {
 
 /// Every built-in patch, one short phrase each, grouped by category.
 pub fn test_synths() -> Result<(), Box<dyn std::error::Error>> {
-    let mut player = MidiPlayer::new()?;
+    let mut player = MidiPlayer::new(None)?;
     let library = PatchLibrary::new();
     let none = HashMap::new();
     for (category, patches) in library.catalog() {
@@ -51,7 +51,7 @@ pub fn test_synths() -> Result<(), Box<dyn std::error::Error>> {
 
 /// A bar of 808/909 drums from the percussion patches.
 pub fn test_drums() -> Result<(), Box<dyn std::error::Error>> {
-    let mut player = MidiPlayer::new()?;
+    let mut player = MidiPlayer::new(None)?;
     let none = HashMap::new();
     let mut notes = Vec::new();
     for beat in 0..4 {
@@ -83,7 +83,7 @@ pub fn test_drums() -> Result<(), Box<dyn std::error::Error>> {
 
 /// A MIDI piano chord dry, then with reverb, then with a delay chain.
 pub fn test_effects() -> Result<(), Box<dyn std::error::Error>> {
-    let mut player = MidiPlayer::new()?;
+    let mut player = MidiPlayer::new(None)?;
     let none = HashMap::new();
     let chord = |effects: Option<Vec<crate::midi::EffectConfig>>| SimpleSequence {
         notes: [60u8, 64, 67]
@@ -122,4 +122,51 @@ pub fn test_effects() -> Result<(), Box<dyn std::error::Error>> {
         sleep(duration);
     }
     Ok(())
+}
+
+/// A C major scale sent to a MIDI output on this machine, repeated until
+/// Ctrl-C so a DAW can be routed to the port while it exists. The default
+/// output is the server's own virtual port.
+pub fn test_midi_out(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::midi::external::{ExternalMidi, VIRTUAL_PORT_NAME};
+
+    let mut external = ExternalMidi::new();
+    let outputs = external.outputs();
+    println!("MIDI outputs on this machine:");
+    match &outputs.virtual_port {
+        Ok(()) => println!("- {} (this process's virtual port)", VIRTUAL_PORT_NAME),
+        Err(e) => println!("- no virtual port: {}", e),
+    }
+    for destination in &outputs.destinations {
+        println!("- {}", destination);
+    }
+    let name = name.unwrap_or_else(|| VIRTUAL_PORT_NAME.to_string());
+
+    let mut player = MidiPlayer::new(Some(external.sender()))?;
+    let none = HashMap::new();
+    let seq = SimpleSequence {
+        notes: [60u8, 62, 64, 65, 67, 69, 71, 72]
+            .iter()
+            .enumerate()
+            .map(|(i, &n)| SimpleNote {
+                note: Some(n),
+                velocity: Some(100),
+                start_time: Some(i as f64 * 0.25),
+                duration: Some(0.2),
+                midi_out: Some(name.clone()),
+                ..Default::default()
+            })
+            .collect(),
+        tempo: 120,
+        beats_per_bar: 4,
+    };
+    println!(
+        "\nSending a C major scale to '{}' on channel 0 every 3 s; Ctrl-C to stop.",
+        name
+    );
+    loop {
+        let duration =
+            player.play_with(seq.clone(), PlayMode::Replace, &none, Some(&mut external))?;
+        sleep(duration + Duration::from_secs(1));
+    }
 }

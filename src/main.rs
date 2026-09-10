@@ -144,6 +144,13 @@ pub enum Commands {
     /// Play a MIDI piano dry, then through effect chains
     #[command(name = "test-effects")]
     TestEffects,
+
+    /// Send a scale to a MIDI output on this machine until Ctrl-C (default: the mcp-muse virtual port)
+    #[command(name = "test-midi-out")]
+    TestMidiOut {
+        /// Output name, as listed by list_sounds section "midi_outputs"
+        name: Option<String>,
+    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -172,6 +179,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Commands::TestEffects) => {
             demos::test_effects()?;
+        }
+        Some(Commands::TestMidiOut { name }) => {
+            demos::test_midi_out(name)?;
         }
         None => {
             // Default behavior: start the MCP server

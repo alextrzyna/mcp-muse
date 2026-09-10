@@ -7,6 +7,7 @@ use crate::expressive::{
 use crate::midi::export::{
     BitDepth, ExportReport, ExportRequest, Split, bus_chain_is_nonlinear, export, sanitize_name,
 };
+use crate::midi::external::{ExternalMidi, Outputs, VIRTUAL_PORT_NAME};
 use crate::midi::{
     ExtendedSequence, MidiPlayer, PitchMode, PlayMode, SequencePattern, SimpleNote, SimpleSequence,
     validate_tempo,
@@ -19,10 +20,13 @@ use std::time::Duration;
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// Per-process server state: the audio player (opened on first use so that
-/// `tools/list` works without an audio device), the session's patterns and
-/// the session's `define_synth` patches (keyed by `Patch::key()`).
+/// `tools/list` works without an audio device), the MIDI outputs on this
+/// machine (the virtual port is published from the start so a DAW can
+/// select it before anything plays), the session's patterns and the
+/// session's `define_synth` patches (keyed by `Patch::key()`).
 pub struct ServerState {
     player: Option<MidiPlayer>,
+    external: ExternalMidi,
     patterns: HashMap<String, SequencePattern>,
     synths: HashMap<String, Patch>,
 }
@@ -37,17 +41,22 @@ impl ServerState {
     pub fn new() -> Self {
         Self {
             player: None,
+            external: ExternalMidi::new(),
             patterns: HashMap::new(),
             synths: HashMap::new(),
         }
     }
 
-    fn player(&mut self) -> Result<&mut MidiPlayer, String> {
+    /// The player and the external outputs, opening the audio device on
+    /// first use. Both are borrowed at once because a play call resolves
+    /// `midi_out` names while it translates.
+    fn player(&mut self) -> Result<(&mut MidiPlayer, &mut ExternalMidi), String> {
         if self.player.is_none() {
-            self.player = Some(MidiPlayer::new()?);
+            self.player = Some(MidiPlayer::new(Some(self.external.sender()))?);
             tracing::info!("Opened audio output stream");
         }
-        Ok(self.player.as_mut().expect("player just initialised"))
+        let player = self.player.as_mut().expect("player just initialised");
+        Ok((player, &mut self.external))
     }
 }
 
@@ -534,6 +543,10 @@ fn note_schema() -> Value {
                     patch_schema()
                 ]
             },
+            "midi_out": {
+                "type": "string",
+                "description": "🔌 Send this note as MIDI to an instrument on this machine instead of the built-in synth: \"mcp-muse\" is this server's virtual port (select it as a MIDI input in Bitwig or another DAW), or name a destination from list_sounds section \"midi_outputs\". The note's channel picks the DAW track. instrument is sent as a program change only when given; effects and effects_preset are not available (the receiving instrument makes the sound)."
+            },
             "effects_preset": {
                 "type": "string",
                 "description": "🎭 EFFECTS PRESET: Apply curated effect combinations to MIDI and R2D2 notes (a synth note takes its effects from its patch's \"effects\" chain instead). Choose from professional presets: 'studio' (clean + subtle reverb), 'concert_hall' (spacious reverb), 'vintage' (analog warmth), 'ambient' (lush atmospheric), 'live_stage' (punchy compression), 'tight_mix' (controlled dynamics), 'dreamy' (soft ethereal), 'spacious' (wide reverb), 'analog_warmth' (tube character), 'retro_echo' (tape delay), 'psychedelic' (wild modulation), 'distorted' (aggressive), 'filtered' (prominent filtering), 'lush_chorus' (rich modulation). Effects presets provide instant professional sound character!",
@@ -776,14 +789,14 @@ Example: {\"patterns\": [{\"pattern_name\": \"drums\", \"start_bar\": 1, \"repea
         },
         {
             "name": "list_sounds",
-            "description": "Catalog of every sound this server can make: synth patches (built-in and this session's define_synth patches), the 128 General MIDI instruments, drum keys for channel 9, R2D2 emotions, effect types and effects presets. Call this before guessing an instrument or synth name.",
+            "description": "Catalog of every sound this server can make or reach: synth patches (built-in and this session's define_synth patches), the 128 General MIDI instruments, drum keys for channel 9, R2D2 emotions, effect types and effects presets, and the MIDI outputs on this machine (the server's virtual port for a DAW such as Bitwig, plus any other destination) for a note's midi_out. Call this before guessing an instrument, synth or output name.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "section": {
                         "type": "string",
                         "description": "Limit the catalog to one section",
-                        "enum": ["all", "synths", "instruments", "drums", "r2d2", "effects"],
+                        "enum": ["all", "synths", "instruments", "drums", "r2d2", "effects", "midi_outputs"],
                         "default": "all"
                     }
                 },
@@ -1045,6 +1058,7 @@ fn validate_notes(notes: &[SimpleNote]) -> Result<(), String> {
         let checks = [
             ("timing", note.validate_timing()),
             ("synth", note.validate_synth()),
+            ("midi_out", note.validate_midi_out()),
             ("R2D2", note.validate_r2d2()),
             ("effects", note.validate_effects()),
         ];
@@ -1064,18 +1078,28 @@ fn validate_notes(notes: &[SimpleNote]) -> Result<(), String> {
 
 /// Human-readable summary of what a sequence contains.
 fn describe_sources(notes: &[SimpleNote]) -> String {
-    let mut parts = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
     if notes.iter().any(|n| n.note_type == "r2d2") {
-        parts.push("R2D2 expressions");
+        parts.push("R2D2 expressions".into());
     }
     if notes.iter().any(|n| n.is_synthesis()) {
-        parts.push("synth patches");
+        parts.push("synth patches".into());
     }
     if notes
         .iter()
-        .any(|n| n.note_type != "r2d2" && !n.is_synthesis())
+        .any(|n| n.note_type != "r2d2" && !n.is_synthesis() && !n.is_external())
     {
-        parts.push("MIDI instruments");
+        parts.push("MIDI instruments".into());
+    }
+    let mut outputs: Vec<&str> = notes
+        .iter()
+        .filter_map(|n| n.midi_out.as_deref())
+        .map(str::trim)
+        .collect();
+    outputs.sort_unstable();
+    outputs.dedup();
+    if !outputs.is_empty() {
+        parts.push(format!("external MIDI ({})", outputs.join(", ")));
     }
     if parts.is_empty() {
         "audio".to_string()
@@ -1115,14 +1139,14 @@ fn start_playback(
     summary: String,
 ) -> JsonRpcResponse {
     let synths = state.synths.clone();
-    let player = match state.player() {
+    let (player, external) = match state.player() {
         Ok(p) => p,
         Err(e) => {
             tracing::error!("Audio output unavailable: {}", e);
             return JsonRpcResponse::tool_error(id, format!("Audio output unavailable: {}", e));
         }
     };
-    match player.play(sequence, mode, &synths) {
+    match player.play_with(sequence, mode, &synths, Some(external)) {
         Ok(duration) => {
             JsonRpcResponse::tool_text(id, playback_started_text(summary, duration, mode))
         }
@@ -1619,6 +1643,10 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
         out.push_str("\nMIDI notes also accept reverb and chorus depths 0-127 (SoundFont built-in effects).\n");
     }
 
+    if want("midi_outputs") {
+        out.push_str(&midi_outputs_section(&state.external.outputs()));
+    }
+
     if out.is_empty() {
         return JsonRpcResponse::error(
             id,
@@ -1627,6 +1655,35 @@ fn handle_list_sounds(state: &ServerState, arguments: Value, id: Option<Value>) 
         );
     }
     JsonRpcResponse::tool_text(id, out.trim_end().to_string())
+}
+
+/// The `midi_outputs` catalog section: the virtual port, every destination
+/// on the machine, and the one-time DAW setup.
+fn midi_outputs_section(outputs: &Outputs) -> String {
+    let mut out = String::from(
+        "# MIDI outputs — use \"midi_out\": \"<name>\" on a note to play an instrument on this machine (a DAW such as Bitwig, a software or hardware synth)\n",
+    );
+    match &outputs.virtual_port {
+        Ok(()) => out.push_str(&format!(
+            "- {} — this server's virtual port, available while the server runs; select it as a MIDI input in your DAW\n",
+            VIRTUAL_PORT_NAME
+        )),
+        Err(reason) => out.push_str(&format!(
+            "- (no virtual port: {}; send to one of the destinations below)\n",
+            reason
+        )),
+    }
+    if outputs.destinations.is_empty() {
+        out.push_str("- no other MIDI destinations found on this machine right now\n");
+    }
+    for name in &outputs.destinations {
+        out.push_str(&format!("- {}\n", name));
+    }
+    out.push_str(&format!(
+        "\nBitwig: Settings > Controllers > Add Controller > Generic > \"MIDI Keyboard\", MIDI input {port}; notes then play on the selected/armed instrument track. To address several tracks, set each track's input chooser to {port} and one channel (channel 0 here is channel 1 in Bitwig), and arm them all. Other DAWs: enable {port} as a MIDI input and route it to a track.\nNotes sent out keep their channel, send a program change only when instrument is given, and cannot carry effects or effects_preset; export_audio cannot record them.\n",
+        port = VIRTUAL_PORT_NAME
+    ));
+    out
 }
 
 fn handle_stop_playback(state: &mut ServerState, id: Option<Value>) -> JsonRpcResponse {
@@ -1890,6 +1947,81 @@ mod tests {
     }
 
     #[test]
+    fn the_midi_outputs_section_lists_the_virtual_port_and_destinations_or_says_why_not() {
+        let with = midi_outputs_section(&Outputs {
+            virtual_port: Ok(()),
+            destinations: vec!["IAC Driver Bus 1".into()],
+        });
+        assert!(with.contains("- mcp-muse —"), "{with}");
+        assert!(with.contains("- IAC Driver Bus 1\n"));
+        assert!(with.contains("Bitwig"));
+        let without = midi_outputs_section(&Outputs {
+            virtual_port: Err("loopMIDI".into()),
+            destinations: vec![],
+        });
+        assert!(without.contains("no virtual port: loopMIDI"), "{without}");
+        assert!(without.contains("no other MIDI destinations"));
+
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "list_sounds",
+            json!({"section": "midi_outputs"}),
+        );
+        assert!(text(&r).starts_with("# MIDI outputs"));
+        let all = call(&mut state, "list_sounds", json!({}));
+        assert!(text(&all).contains("# MIDI outputs"));
+    }
+
+    #[test]
+    fn a_midi_out_note_with_effects_is_a_parameter_error_and_the_summary_names_the_port() {
+        let mut state = ServerState::new();
+        let r = call(
+            &mut state,
+            "play_notes",
+            json!({"notes": [{"note": 60, "midi_out": "mcp-muse", "effects_preset": "studio"}]}),
+        );
+        let err = r.error.unwrap();
+        assert_eq!(err.code, INVALID_PARAMS);
+        assert!(
+            err.message.contains("midi_out") && err.message.contains("note 1"),
+            "{}",
+            err.message
+        );
+
+        let notes: Vec<SimpleNote> = serde_json::from_value(json!([
+            {"note": 60, "midi_out": "mcp-muse"},
+            {"note": 62, "midi_out": " mcp-muse"},
+            {"note": 64, "midi_out": "IAC Driver Bus 1"},
+            {"note": 36, "channel": 9}
+        ]))
+        .unwrap();
+        assert_eq!(
+            describe_sources(&notes),
+            "MIDI instruments + external MIDI (IAC Driver Bus 1, mcp-muse)"
+        );
+    }
+
+    #[test]
+    fn export_audio_refuses_a_midi_out_note_instead_of_dropping_it() {
+        let mut state = ServerState::new();
+        let dir = export_dir("midi-out");
+        let r = call(
+            &mut state,
+            "export_audio",
+            json!({"notes": [{"note": 60, "midi_out": "mcp-muse", "duration": 0.1}],
+                   "path": dir.to_string_lossy()}),
+        );
+        let body = text(&r);
+        assert_eq!(r.result.as_ref().unwrap()["isError"], json!(true), "{body}");
+        assert!(
+            body.contains("Note 1") && body.contains("midi_out"),
+            "{body}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn list_sounds_synths_section_names_builtins_and_session_patches() {
         let mut state = ServerState::new();
         call(
@@ -1933,6 +2065,12 @@ mod tests {
         assert!(names.contains(&"define_synth"));
         let schema = note_schema();
         assert!(schema["properties"]["synth"].is_object());
+        assert!(
+            schema["properties"]["midi_out"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("mcp-muse")
+        );
         assert!(schema["properties"].get("synth_type").is_none());
         assert!(schema["properties"].get("preset_name").is_none());
         assert!(names.contains(&"export_audio"));
