@@ -1,5 +1,6 @@
 pub mod engine;
 pub mod export;
+pub mod external;
 pub mod gm_names;
 pub mod parser;
 pub mod player;
@@ -616,6 +617,12 @@ pub struct SimpleNote {
     /// library, or an inline patch object.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synth: Option<crate::expressive::SynthRef>,
+
+    /// Send this note as MIDI to an output on this machine (the server's
+    /// virtual port `mcp-muse`, an IAC bus, a hardware interface) instead
+    /// of the built-in synth. The audio is made there, so effects do not apply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_out: Option<String>,
 }
 
 fn default_note_type() -> String {
@@ -650,6 +657,7 @@ impl Default for SimpleNote {
             effects: None,
             effects_preset: None,
             synth: None,
+            midi_out: None,
         }
     }
 }
@@ -1239,6 +1247,39 @@ impl SimpleNote {
         self.effects.is_some() || self.effects_preset.is_some()
     }
 
+    /// Check if this note goes to a MIDI output on the machine.
+    pub fn is_external(&self) -> bool {
+        self.midi_out.is_some()
+    }
+
+    /// `midi_out` names a port; the note must otherwise be a plain MIDI note:
+    /// the audio is made on the other end, so a synth patch, an R2D2 voice
+    /// or an effects chain would silently do nothing.
+    pub fn validate_midi_out(&self) -> Result<(), String> {
+        let Some(name) = &self.midi_out else {
+            return Ok(());
+        };
+        if name.trim().is_empty() {
+            return Err(
+                "midi_out must name a MIDI output; call list_sounds with section \"midi_outputs\""
+                    .into(),
+            );
+        }
+        if self.note_type == "r2d2" {
+            return Err(
+                "an R2D2 note cannot have midi_out: it is synthesized here, not sent as MIDI"
+                    .into(),
+            );
+        }
+        if self.synth.is_some() {
+            return Err("a note cannot have both synth and midi_out: a synth patch renders here, midi_out sends the note elsewhere".into());
+        }
+        if self.has_effects() {
+            return Err("effects on a midi_out note cannot apply: the audio is made by the receiving instrument; remove effects/effects_preset from the note".into());
+        }
+        Ok(())
+    }
+
     /// Validate R2D2 parameters if this is an R2D2 note
     pub fn validate_r2d2(&self) -> Result<(), String> {
         if !self.is_r2d2() {
@@ -1678,6 +1719,60 @@ mod tests {
             "musical_time": {"bar": 1, "beat": 1, "tick": 0}, "musical_duration": "quarter",
             "effects_preset": "studio"});
         assert!(serde_json::from_value::<SimpleNote>(midi).is_ok());
+    }
+
+    #[test]
+    fn a_midi_out_note_must_be_a_plain_midi_note() {
+        let ok = SimpleNote {
+            note: Some(60),
+            midi_out: Some("mcp-muse".into()),
+            reverb: Some(40),
+            ..Default::default()
+        };
+        assert!(ok.validate_midi_out().is_ok());
+        assert!(ok.is_external());
+        assert!(!SimpleNote::default().is_external());
+
+        let cases: Vec<(&str, SimpleNote)> = vec![
+            (
+                "midi_out must name",
+                SimpleNote {
+                    midi_out: Some("  ".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "R2D2",
+                SimpleNote {
+                    note_type: "r2d2".into(),
+                    midi_out: Some("mcp-muse".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "synth and midi_out",
+                SimpleNote {
+                    synth: Some(crate::expressive::SynthRef::Name("sub_bass".into())),
+                    midi_out: Some("mcp-muse".into()),
+                    ..Default::default()
+                },
+            ),
+            (
+                "effects on a midi_out note",
+                SimpleNote {
+                    midi_out: Some("mcp-muse".into()),
+                    effects_preset: Some("studio".into()),
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (expected, note) in cases {
+            let err = note.validate_midi_out().unwrap_err();
+            assert!(err.contains(expected), "{expected}: {err}");
+        }
+        let parsed: SimpleNote =
+            serde_json::from_value(json!({"note": 60, "midi_out": "IAC Driver Bus 1"})).unwrap();
+        assert_eq!(parsed.midi_out.as_deref(), Some("IAC Driver Bus 1"));
     }
 
     #[test]

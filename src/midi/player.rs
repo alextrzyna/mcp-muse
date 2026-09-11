@@ -7,6 +7,7 @@ use crate::midi::engine::{
     EngineCommand, EngineHandle, EngineSource, LEAD_FRAMES, MidiEngine, PlayMode, find_soundfont,
     load_synth, seconds_to_frames,
 };
+use crate::midi::external::{ExternalMidi, ExternalSender};
 use crate::midi::translate::{Translation, Translator};
 use rodio::MixerDeviceSink;
 use std::collections::HashMap;
@@ -24,7 +25,9 @@ pub struct MidiPlayer {
 impl MidiPlayer {
     /// Open the output device, load the SoundFont once, and attach the engine
     /// to the mixer. Without a SoundFont, synthesis and R2D2 still work.
-    pub fn new() -> Result<Self, String> {
+    /// `external` lets the engine forward `midi_out` notes to ports on the
+    /// machine; without it they are dropped.
+    pub fn new(external: Option<ExternalSender>) -> Result<Self, String> {
         let stream = rodio::DeviceSinkBuilder::open_default_sink()
             .map_err(|e| format!("Failed to create audio output stream: {}", e))?;
 
@@ -35,7 +38,10 @@ impl MidiPlayer {
                 (None, Err(reason))
             }
         };
-        let (engine, handle) = MidiEngine::new(synth);
+        let (mut engine, handle) = MidiEngine::new(synth);
+        if let Some(sender) = external {
+            engine.set_external(sender);
+        }
         stream.mixer().add(EngineSource::new(engine));
 
         Ok(MidiPlayer {
@@ -46,19 +52,38 @@ impl MidiPlayer {
         })
     }
 
-    /// Schedule a sequence. Returns the time until it finishes, including
-    /// effect tails. `Replace` cuts whatever is playing first.
+    /// Schedule a sequence with no external outputs (demos and tests).
     pub fn play(
         &mut self,
         sequence: SimpleSequence,
         mode: PlayMode,
         session_patches: &HashMap<String, Patch>,
     ) -> Result<Duration, String> {
+        self.play_with(sequence, mode, session_patches, None)
+    }
+
+    /// Schedule a sequence. Returns the time until it finishes, including
+    /// effect tails. `Replace` cuts whatever is playing first. `external`
+    /// resolves the notes' `midi_out` names; without it they are an error.
+    pub fn play_with(
+        &mut self,
+        sequence: SimpleSequence,
+        mode: PlayMode,
+        session_patches: &HashMap<String, Patch>,
+        external: Option<&mut ExternalMidi>,
+    ) -> Result<Duration, String> {
         let now = self.engine.clock();
         self.playback_ends.retain(|&end| end > now);
-        let Translation { command, duration } =
-            self.translator.translate(sequence, mode, session_patches)?;
-        if command.events.is_empty() && command.buffers.is_empty() {
+        let Translation { command, duration } = match external {
+            Some(external) => self.translator.translate_with(
+                sequence,
+                mode,
+                session_patches,
+                Some(&mut |name: &str| external.resolve(name)),
+            )?,
+            None => self.translator.translate(sequence, mode, session_patches)?,
+        };
+        if command.events.is_empty() && command.external.is_empty() && command.buffers.is_empty() {
             tracing::warn!("Nothing to play");
             if mode == PlayMode::Layer {
                 return Ok(Duration::ZERO);

@@ -804,14 +804,14 @@ fn test_play_sequence_pattern_not_found() {
 }
 
 /// Spawn the server and complete the initialize handshake.
-struct TestServer {
+pub(crate) struct TestServer {
     child: std::process::Child,
     stdin: std::process::ChildStdin,
     reader: BufReader<std::process::ChildStdout>,
 }
 
 impl TestServer {
-    fn start() -> Self {
+    pub(crate) fn start() -> Self {
         let mut child = Command::new("cargo")
             .args(["run", "--"])
             .stdin(Stdio::piped())
@@ -848,7 +848,7 @@ impl TestServer {
         serde_json::from_str(&line).unwrap_or_else(|e| panic!("bad JSON {line:?}: {e}"))
     }
 
-    fn call(&mut self, message: Value) -> Value {
+    pub(crate) fn call(&mut self, message: Value) -> Value {
         self.send(&message);
         self.read()
     }

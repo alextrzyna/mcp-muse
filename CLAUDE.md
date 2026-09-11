@@ -24,6 +24,7 @@ Prefer that over listen-by-ear checks when changing synthesis or effects.
 - `cargo run -- test-synths` - Every built-in synth patch, by category
 - `cargo run -- test-drums` - A bar of the 808/909 percussion patches
 - `cargo run -- test-effects` - A MIDI piano chord dry, then with reverb, then delay
+- `cargo run -- test-midi-out [name]` - A scale on a MIDI output (default: the `mcp-muse` virtual port) until Ctrl-C, for checking a DAW routing
 
 ### Logging and Debugging
 - **Log Location** (cross-platform, daily rotated, pruned after 7 days):
@@ -40,7 +41,7 @@ first playback) and the session's patterns and synth patches. Eight tools:
 - `play_notes` - quick sounds and melodies; every note type in one array; takes `mode: replace|layer`
 - `define_sequence_pattern` / `play_sequence` / `list_patterns` - reusable bar-based patterns with transposition, repeats and time signature; `play_sequence` also takes `mode`
 - `define_synth` - store a validated synth patch for the session; notes reference it by name via `synth`
-- `list_sounds` - catalog of synth patches, GM instruments, drum keys, R2D2 emotions and effects
+- `list_sounds` - catalog of synth patches, GM instruments, drum keys, R2D2 emotions, effects and `midi_outputs` (the machine's MIDI destinations plus the server's virtual port)
 - `stop_playback` - silence everything currently playing
 - `export_audio` - render a composition offline and write WAV files: `split: mixdown|stems|tracks`, a required absolute `path`, `name`, `bit_depth: 16|24|32` and `overwrite`; never opens the audio device
 
@@ -67,6 +68,20 @@ per side). `MidiPlayer::play(sequence, mode, &session_patches)` translates and s
 4. The engine drains commands per 1024-frame chunk and applies events at their exact frame (`LEAD_FRAMES` = 2048 after the command). It sums the buses, soft-clips, and emits stereo.
 5. `mode: replace` (default) fades 6 ms, sends SystemReset, clears the queue and installs the call's bus chain; `layer` mixes on top. `stop_playback` is the same reset with nothing scheduled.
 6. When a command is scheduled, the engine remaps each of its melodic MIDI channels onto a physical channel no active playback owns (`allocate_channels`, issue #98): the logical channel itself when free, else the lowest free one, else it shares the channel that frees soonest and logs at info. A channel taken over from a finished playback first gets CC 121 plus volume, pan and reverb/chorus sends reset. Channel 9 is never remapped; replace and stop clear all ownership.
+7. Notes with `midi_out` (`PlayCommand.external`) sit in the same heap with `Target::External(port)`; they are never remapped, and at their frame the engine encodes the bytes and hands them to the external sender. Every reset also sends all-notes-off to the ports.
+
+### External MIDI (`src/midi/external.rs`)
+`ExternalMidi` lives in `ServerState` (created at start so the virtual
+port `mcp-muse` exists before a DAW looks for it; unix only via
+`midir::os::unix::VirtualOutput`). It owns the opened port names
+(`PortId` = index) and a `midir` sender thread that holds the
+connections; `resolve` opens a destination on first use (exact name,
+then unique substring, case-insensitive). The player borrows it during
+`play_with` so the translator can resolve names; export passes `None`
+and any `midi_out` note is an error. `midi_events` takes a
+`default_program`: `Some(0)` for the internal synth, `None` for external
+ports so a hardware synth keeps its preset. Design:
+`docs/superpowers/specs/2026-09-09-external-midi-design.md`.
 
 Known limitation: OxiSynth renders all 16 MIDI channels into one bus, so
 per-channel effects are not yet possible (pan, volume, reverb/chorus CCs do
@@ -104,8 +119,10 @@ back and measure them (`src/midi/export.rs` tests).
 
 ### Data model (`src/midi/mod.rs`)
 `SimpleNote` is one flat struct covering MIDI, R2D2, `synth` (a patch
-reference) and effects fields (use `..Default::default()`); it is
-`deny_unknown_fields`, so a misspelled key is a `-32602`. `MAX_NOTE_SECONDS`
+reference), `midi_out` (an external port name; `validate_midi_out` rejects
+it together with synth, R2D2 or effects) and effects fields (use
+`..Default::default()`); it is `deny_unknown_fields`, so a misspelled key
+is a `-32602`. `MAX_NOTE_SECONDS`
 (300) bounds `duration` and `start_time` so no note can size an unbounded
 render buffer. `SimpleSequence` carries
 `tempo` and `beats_per_bar`. `MusicalDuration` is a number (bars) or a

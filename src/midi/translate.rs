@@ -9,6 +9,7 @@ use crate::expressive::{
 use crate::midi::engine::{
     EventKind, PlayCommand, PlayMode, SAMPLE_RATE, SYNTH_BUS_GAIN, seconds_to_frames,
 };
+use crate::midi::external::PortId;
 use crate::midi::parser::MidiNote;
 use crate::midi::{EffectConfig, SimpleSequence, effects_tail_seconds};
 use std::collections::HashMap;
@@ -27,11 +28,16 @@ const CONTROLLERS: [(u8, fn(&MidiNote) -> Option<u8>); 7] = [
 ];
 
 /// Time-ordered MIDI events for one call. Per channel, the first note sends a
-/// program change (its instrument, or 0 so an unspecified instrument is still
-/// piano when layering); controllers are sent only when a note specifies a
-/// value that differs from what this call last sent. Channel 9 needs no bank
-/// select: OxiSynth treats it as the drum channel and resolves bank 128.
-pub(crate) fn midi_events(notes: &[MidiNote]) -> Vec<(u64, EventKind)> {
+/// program change (its instrument, else `default_program`: 0 for the internal
+/// synth so an unspecified instrument is still piano when layering, `None`
+/// for an external port so a hardware synth keeps its preset); controllers
+/// are sent only when a note specifies a value that differs from what this
+/// call last sent. Channel 9 needs no bank select: OxiSynth treats it as the
+/// drum channel and resolves bank 128.
+pub(crate) fn midi_events(
+    notes: &[MidiNote],
+    default_program: Option<u8>,
+) -> Vec<(u64, EventKind)> {
     let mut sorted: Vec<&MidiNote> = notes.iter().collect();
     sorted.sort_by_key(|n| n.start_time);
 
@@ -44,7 +50,7 @@ pub(crate) fn midi_events(notes: &[MidiNote]) -> Vec<(u64, EventKind)> {
         let channel = note.channel;
         let wanted = match note.instrument {
             Some(p) => Some(p),
-            None if !program.contains_key(&channel) => Some(0),
+            None if !program.contains_key(&channel) => default_program,
             None => None,
         };
         if let Some(p) = wanted
@@ -132,7 +138,10 @@ pub struct PatchRender {
 /// write them separately. Playback flattens it with `into_command`.
 #[derive(Debug)]
 pub struct TranslatedParts {
+    /// Notes for the internal synth.
     pub midi: Vec<MidiNote>,
+    /// Notes for MIDI outputs on this machine, grouped by opened port.
+    pub external: Vec<(PortId, Vec<MidiNote>)>,
     /// MIDI bus chain for this call, if any MIDI note specified one.
     pub midi_effects: Option<Vec<EffectConfig>>,
     pub patches: Vec<PatchRender>,
@@ -149,8 +158,18 @@ impl TranslatedParts {
     pub fn into_command(self, mode: PlayMode) -> PlayCommand {
         let mut buffers = self.r2d2;
         buffers.extend(self.patches.into_iter().map(|p| (p.start, p.samples)));
+        let external = self
+            .external
+            .iter()
+            .flat_map(|(port, notes)| {
+                midi_events(notes, None)
+                    .into_iter()
+                    .map(move |(at, kind)| (at, *port, kind))
+            })
+            .collect();
         PlayCommand {
-            events: midi_events(&self.midi),
+            events: midi_events(&self.midi, Some(0)),
+            external,
             buffers,
             midi_effects: self.midi_effects,
             mode,
@@ -158,6 +177,11 @@ impl TranslatedParts {
         }
     }
 }
+
+/// Resolves a note's `midi_out` name to an opened port. `None` means no
+/// external output exists in this context (an offline export), so any
+/// `midi_out` note is an error.
+pub type PortResolver<'a> = Option<&'a mut dyn FnMut(&str) -> Result<PortId, String>>;
 
 pub struct Translator {
     effects_library: EffectsPresetLibrary,
@@ -204,13 +228,25 @@ impl Translator {
         }
     }
 
+    /// Translate for playback without external outputs (demos and tests).
     pub fn translate(
         &self,
         sequence: SimpleSequence,
         mode: PlayMode,
         session_patches: &HashMap<String, Patch>,
     ) -> Result<Translation, String> {
-        let parts = self.translate_parts(sequence, session_patches, Effects::Wet)?;
+        self.translate_with(sequence, mode, session_patches, None)
+    }
+
+    /// Translate for playback; `outputs` resolves `midi_out` names.
+    pub fn translate_with(
+        &self,
+        sequence: SimpleSequence,
+        mode: PlayMode,
+        session_patches: &HashMap<String, Patch>,
+        outputs: PortResolver,
+    ) -> Result<Translation, String> {
+        let parts = self.translate_parts(sequence, session_patches, Effects::Wet, outputs)?;
         let duration = parts.duration;
         Ok(Translation {
             command: parts.into_command(mode),
@@ -220,16 +256,19 @@ impl Translator {
 
     /// Translate without flattening. `effects` selects wet (playback) or
     /// dry (bypassed chains) rendering of the patch and R2D2 buffers and
-    /// decides whether the MIDI bus chain is kept.
+    /// decides whether the MIDI bus chain is kept. `outputs` resolves
+    /// `midi_out` names; `None` rejects them.
     pub fn translate_parts(
         &self,
         sequence: SimpleSequence,
         session_patches: &HashMap<String, Patch>,
         effects: Effects,
+        mut outputs: PortResolver,
     ) -> Result<TranslatedParts, String> {
         if sequence.notes.is_empty() {
             return Ok(TranslatedParts {
                 midi: Vec::new(),
+                external: Vec::new(),
                 midi_effects: None,
                 patches: Vec::new(),
                 r2d2: Vec::new(),
@@ -269,11 +308,12 @@ impl Translator {
             Effects::Dry => None,
             Effects::Wet => processed_notes
                 .iter()
-                .filter(|n| n.note_type != "r2d2" && !n.is_synthesis())
+                .filter(|n| n.note_type != "r2d2" && !n.is_synthesis() && !n.is_external())
                 .find_map(|n| n.effects.clone().filter(|e| !e.is_empty())),
         };
 
         let mut midi_notes: Vec<MidiNote> = Vec::new();
+        let mut external: Vec<(PortId, Vec<MidiNote>)> = Vec::new();
         let mut r2d2_buffers: Vec<(u64, Vec<[f32; 2]>)> = Vec::new();
         let mut patches: Vec<PatchRender> = Vec::new();
         let mut note_end = Duration::ZERO;
@@ -290,6 +330,8 @@ impl Translator {
         for (i, note) in processed_notes.into_iter().enumerate() {
             // A negative start time would panic in `Duration`; treat it as 0.
             let start = Duration::from_secs_f64(note.start_time.unwrap_or(0.0).max(0.0));
+            note.validate_midi_out()
+                .map_err(|e| format!("Note {}: {}", i + 1, e))?;
             if let Some(reference) = note.synth.as_ref() {
                 note.validate_synth()
                     .map_err(|e| format!("Note {}: {}", i + 1, e))?;
@@ -380,9 +422,22 @@ impl Translator {
                     samples.into_iter().map(|s| [s, s]).collect(),
                 ));
             } else if let Some(key) = note.note {
+                let port = match (&note.midi_out, outputs.as_deref_mut()) {
+                    (None, _) => None,
+                    (Some(name), Some(resolve)) => {
+                        Some(resolve(name).map_err(|e| format!("Note {}: {}", i + 1, e))?)
+                    }
+                    (Some(name), None) => {
+                        return Err(format!(
+                            "Note {}: midi_out '{}' cannot be used here: an external output plays on another device and is not rendered by this server. Remove midi_out from the note.",
+                            i + 1,
+                            name
+                        ));
+                    }
+                };
                 let duration = Duration::from_secs_f64(note.duration.unwrap_or(1.0).max(0.0));
                 note_end = note_end.max(start + duration);
-                midi_notes.push(MidiNote {
+                let midi_note = MidiNote {
                     note: key,
                     velocity: note.velocity.unwrap_or(80),
                     channel: note.channel,
@@ -396,7 +451,14 @@ impl Translator {
                     balance: note.balance,
                     expression: note.expression,
                     sustain: note.sustain,
-                });
+                };
+                match port {
+                    None => midi_notes.push(midi_note),
+                    Some(port) => match external.iter_mut().find(|(p, _)| *p == port) {
+                        Some((_, notes)) => notes.push(midi_note),
+                        None => external.push((port, vec![midi_note])),
+                    },
+                }
             }
         }
 
@@ -438,7 +500,11 @@ impl Translator {
             return Err(format!("MIDI notes need a SoundFont: {}", reason));
         }
 
-        let duration = if midi_notes.is_empty() && r2d2_buffers.is_empty() && patches.is_empty() {
+        let duration = if midi_notes.is_empty()
+            && external.is_empty()
+            && r2d2_buffers.is_empty()
+            && patches.is_empty()
+        {
             Duration::ZERO
         } else {
             // The bus chain rings out too: a beat-synced delay outlasts the
@@ -450,14 +516,16 @@ impl Translator {
             note_end + calculate_tail_time(&midi_notes).max(bus_tail)
         };
         tracing::info!(
-            "Translated {} MIDI notes and {} buffers, {:.2}s including tail",
+            "Translated {} MIDI notes, {} external notes and {} buffers, {:.2}s including tail",
             midi_notes.len(),
+            external.iter().map(|(_, n)| n.len()).sum::<usize>(),
             r2d2_buffers.len() + patches.len(),
             duration.as_secs_f64()
         );
 
         Ok(TranslatedParts {
             midi: midi_notes,
+            external,
             midi_effects,
             patches,
             r2d2: r2d2_buffers,
@@ -598,10 +666,13 @@ mod tests {
 
     #[test]
     fn setup_events_precede_note_on_and_are_deduplicated_per_channel() {
-        let events = midi_events(&[
-            note(0.25, 0.5, None, Some(40)),
-            note(0.0, 0.5, Some(73), Some(40)),
-        ]);
+        let events = midi_events(
+            &[
+                note(0.25, 0.5, None, Some(40)),
+                note(0.0, 0.5, Some(73), Some(40)),
+            ],
+            Some(0),
+        );
         assert_eq!(
             events,
             vec![
@@ -656,7 +727,10 @@ mod tests {
 
     #[test]
     fn an_unspecified_instrument_means_program_0_on_first_use_only() {
-        let events = midi_events(&[note(0.0, 0.1, None, None), note(0.5, 0.1, None, None)]);
+        let events = midi_events(
+            &[note(0.0, 0.1, None, None), note(0.5, 0.1, None, None)],
+            Some(0),
+        );
         let programs: Vec<_> = events
             .iter()
             .filter(|(_, e)| matches!(e, EventKind::ProgramChange { .. }))
@@ -672,7 +746,10 @@ mod tests {
             )]
         );
 
-        let events = midi_events(&[note(0.0, 0.1, Some(48), None), note(0.5, 0.1, None, None)]);
+        let events = midi_events(
+            &[note(0.0, 0.1, Some(48), None), note(0.5, 0.1, None, None)],
+            Some(0),
+        );
         let programs: Vec<_> = events
             .iter()
             .filter(|(_, e)| matches!(e, EventKind::ProgramChange { .. }))
@@ -793,10 +870,10 @@ mod tests {
             ]
         };
         let wet = t
-            .translate_parts(seq(notes()), &no_session(), Effects::Wet)
+            .translate_parts(seq(notes()), &no_session(), Effects::Wet, None)
             .unwrap();
         let dry = t
-            .translate_parts(seq(notes()), &no_session(), Effects::Dry)
+            .translate_parts(seq(notes()), &no_session(), Effects::Dry, None)
             .unwrap();
 
         assert!(wet.midi_effects.is_some(), "wet keeps the bus chain");
@@ -838,7 +915,7 @@ mod tests {
             .translate(seq(notes()), PlayMode::Layer, &no_session())
             .unwrap();
         let parts = t
-            .translate_parts(seq(notes()), &no_session(), Effects::Wet)
+            .translate_parts(seq(notes()), &no_session(), Effects::Wet, None)
             .unwrap();
         assert_eq!(parts.duration, direct.duration);
         assert_eq!(parts.tempo, 120);
@@ -938,7 +1015,7 @@ mod tests {
 
     #[test]
     fn a_zero_length_note_still_gets_its_note_off_after_note_on() {
-        let events = midi_events(&[note(0.0, 0.0, Some(0), None)]);
+        let events = midi_events(&[note(0.0, 0.0, Some(0), None)], Some(0));
         assert_eq!(
             events[1],
             (
@@ -1416,5 +1493,184 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("subtractive.filter.cutoff"), "{err}");
         assert!(err.starts_with("Note 1:"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod external_tests {
+    //! Notes with `midi_out` become external events for their port and
+    //! never touch the internal synth's requirements.
+    use super::*;
+    use crate::midi::SimpleNote;
+    use serde_json::json;
+
+    fn seq(notes: Vec<SimpleNote>) -> SimpleSequence {
+        SimpleSequence {
+            notes,
+            tempo: 120,
+            beats_per_bar: 4,
+        }
+    }
+
+    fn out(name: &str, note: u8, channel: u8, instrument: Option<u8>) -> SimpleNote {
+        SimpleNote {
+            note: Some(note),
+            velocity: Some(100),
+            channel,
+            instrument,
+            duration: Some(0.5),
+            midi_out: Some(name.into()),
+            ..Default::default()
+        }
+    }
+
+    /// A resolver over a fixed port list.
+    fn resolver(ports: &'static [&'static str]) -> impl FnMut(&str) -> Result<PortId, String> {
+        move |name: &str| {
+            ports
+                .iter()
+                .position(|p| p.eq_ignore_ascii_case(name))
+                .map(|i| PortId(i as u16))
+                .ok_or_else(|| format!("Unknown MIDI output '{name}'. Available: {ports:?}"))
+        }
+    }
+
+    #[test]
+    fn external_notes_group_by_port_and_need_no_soundfont() {
+        let t = Translator::new(Err("no soundfont".into()));
+        let mut resolve = resolver(&["mcp-muse", "IAC Driver Bus 1"]);
+        let tr = t
+            .translate_with(
+                seq(vec![
+                    out("mcp-muse", 60, 0, None),
+                    out("IAC Driver Bus 1", 62, 3, Some(5)),
+                    out("MCP-MUSE", 64, 1, None),
+                ]),
+                PlayMode::Replace,
+                &HashMap::new(),
+                Some(&mut resolve),
+            )
+            .unwrap();
+        assert!(
+            tr.command.events.is_empty(),
+            "nothing for the internal synth"
+        );
+        let ports: Vec<u16> = tr.command.external.iter().map(|(_, p, _)| p.0).collect();
+        assert!(ports.contains(&0) && ports.contains(&1));
+        assert!(tr.duration >= Duration::from_secs_f64(0.5));
+    }
+
+    #[test]
+    fn external_notes_send_a_program_change_only_when_an_instrument_is_given() {
+        let t = Translator::new(Ok(()));
+        let mut resolve = resolver(&["mcp-muse"]);
+        let tr = t
+            .translate_with(
+                seq(vec![
+                    out("mcp-muse", 60, 0, None),
+                    out("mcp-muse", 62, 1, Some(33)),
+                ]),
+                PlayMode::Replace,
+                &HashMap::new(),
+                Some(&mut resolve),
+            )
+            .unwrap();
+        let programs: Vec<(u8, u8)> = tr
+            .command
+            .external
+            .iter()
+            .filter_map(|(_, _, k)| match k {
+                EventKind::ProgramChange { channel, program } => Some((*channel, *program)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(programs, vec![(1, 33)]);
+        let ons = tr
+            .command
+            .external
+            .iter()
+            .filter(|(_, _, k)| matches!(k, EventKind::NoteOn { .. }))
+            .count();
+        assert_eq!(ons, 2);
+    }
+
+    #[test]
+    fn internal_and_external_notes_share_a_call_but_not_a_bus_chain() {
+        let t = Translator::new(Ok(()));
+        let mut resolve = resolver(&["mcp-muse"]);
+        let internal = SimpleNote {
+            note: Some(48),
+            duration: Some(0.5),
+            ..Default::default()
+        };
+        let tr = t
+            .translate_with(
+                seq(vec![internal, out("mcp-muse", 60, 0, None)]),
+                PlayMode::Replace,
+                &HashMap::new(),
+                Some(&mut resolve),
+            )
+            .unwrap();
+        assert!(
+            tr.command
+                .events
+                .iter()
+                .any(|(_, k)| matches!(k, EventKind::NoteOn { key: 48, .. }))
+        );
+        assert_eq!(tr.command.external.len(), 2, "note on and off for the port");
+        assert!(tr.command.midi_effects.is_none());
+    }
+
+    #[test]
+    fn an_unknown_output_is_an_error_naming_the_note() {
+        let t = Translator::new(Ok(()));
+        let mut resolve = resolver(&["mcp-muse"]);
+        let err = t
+            .translate_with(
+                seq(vec![out("bitwig", 60, 0, None)]),
+                PlayMode::Replace,
+                &HashMap::new(),
+                Some(&mut resolve),
+            )
+            .unwrap_err();
+        assert!(
+            err.starts_with("Note 1: Unknown MIDI output 'bitwig'"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn without_outputs_a_midi_out_note_is_refused_so_exports_never_lose_it_silently() {
+        let t = Translator::new(Ok(()));
+        let err = t
+            .translate_parts(
+                seq(vec![out("mcp-muse", 60, 0, None)]),
+                &HashMap::new(),
+                Effects::Wet,
+                None,
+            )
+            .unwrap_err();
+        assert!(err.contains("Note 1") && err.contains("midi_out"), "{err}");
+    }
+
+    #[test]
+    fn a_midi_out_note_with_effects_is_rejected_with_the_note_number() {
+        let t = Translator::new(Ok(()));
+        let mut resolve = resolver(&["mcp-muse"]);
+        let with_effects = SimpleNote {
+            effects: Some(vec![
+                serde_json::from_value(json!({"type": "reverb"})).unwrap(),
+            ]),
+            ..out("mcp-muse", 60, 0, None)
+        };
+        let err = t
+            .translate_with(
+                seq(vec![with_effects]),
+                PlayMode::Replace,
+                &HashMap::new(),
+                Some(&mut resolve),
+            )
+            .unwrap_err();
+        assert!(err.contains("Note 1") && err.contains("effects"), "{err}");
     }
 }
